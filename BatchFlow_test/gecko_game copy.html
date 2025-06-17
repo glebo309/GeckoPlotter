@@ -1,0 +1,340 @@
+<!DOCTYPE html PUBLIC "-//W3C//DTD HTML 4.01//EN" "http://www.w3.org/TR/html4/strict.dtd">
+<html>
+<head>
+  <meta http-equiv="Content-Type" content="text/html; charset=utf-8">
+  <meta http-equiv="Content-Style-Type" content="text/css">
+  <title></title>
+  <meta name="Generator" content="Cocoa HTML Writer">
+  <meta name="CocoaVersion" content="2575.6">
+  <style type="text/css">
+    body {background-color: #1a1a1a}
+    p.p1 {margin: 0.0px 0.0px 0.0px 0.0px; font: 12.0px Times; -webkit-text-stroke: #000000; background-color: #0e0e0e}
+    p.p2 {margin: 0.0px 0.0px 0.0px 0.0px; font: 12.0px Times; -webkit-text-stroke: #000000; background-color: #0e0e0e; min-height: 14.0px}
+    span.s1 {font-kerning: none}
+  </style>
+</head>
+<body>
+<p class="p1"><span class="s1">import streamlit as st</span></p>
+<p class="p1"><span class="s1">import pandas as pd</span></p>
+<p class="p1"><span class="s1">import numpy as np</span></p>
+<p class="p1"><span class="s1">import plotly.graph_objects as go</span></p>
+<p class="p1"><span class="s1">import plotly.express as px</span></p>
+<p class="p1"><span class="s1">from plotly.subplots import make_subplots</span></p>
+<p class="p1"><span class="s1">from scipy import stats</span></p>
+<p class="p1"><span class="s1">import os</span></p>
+<p class="p1"><span class="s1">import glob</span></p>
+<p class="p2"><span class="s1"></span><br></p>
+<p class="p1"><span class="s1"># Set page config</span></p>
+<p class="p1"><span class="s1">st.set_page_config(</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">    </span>page_title="TsRTA Flow Cell Analysis",</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">    </span>page_icon="🧪",</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">    </span>layout="wide",</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">    </span>initial_sidebar_state="expanded"</span></p>
+<p class="p1"><span class="s1">)</span></p>
+<p class="p2"><span class="s1"></span><br></p>
+<p class="p1"><span class="s1"># Title and description</span></p>
+<p class="p1"><span class="s1">st.title("🧪 TsRTA Flow Cell Activity Analysis")</span></p>
+<p class="p1"><span class="s1">st.markdown("""</span></p>
+<p class="p1"><span class="s1">**DIY Flow Cell Setup for Immobilized Enzyme Activity Measurement**</span></p>
+<p class="p1"><span class="s1">- Continuous monitoring using Vapourtec pump + frit syringe</span></p>
+<p class="p1"><span class="s1">- Eliminates sampling stress for fast reactions</span></p>
+<p class="p1"><span class="s1">- Real-time activity measurement at 245 nm</span></p>
+<p class="p1"><span class="s1">""")</span></p>
+<p class="p2"><span class="s1"></span><br></p>
+<p class="p1"><span class="s1"># Experimental parameters</span></p>
+<p class="p1"><span class="s1">st.sidebar.header("⚗️ Experimental Parameters")</span></p>
+<p class="p1"><span class="s1">ext_coeff = st.sidebar.number_input("Extinction Coefficient (mM⁻¹cm⁻¹)", value=12.6, step=0.1)</span></p>
+<p class="p1"><span class="s1">path_length = st.sidebar.number_input("Path Length (cm)", value=0.5, step=0.1)</span></p>
+<p class="p1"><span class="s1">volume_ml = st.sidebar.number_input("Total Volume (mL)", value=5.0, step=0.1)</span></p>
+<p class="p1"><span class="s1">enzyme_conc = st.sidebar.number_input("Enzyme Concentration (mg/mL)", value=0.03, step=0.001, format="%.3f")</span></p>
+<p class="p2"><span class="s1"></span><br></p>
+<p class="p1"><span class="s1"># Calculate derived parameters</span></p>
+<p class="p1"><span class="s1">total_enzyme_mg = enzyme_conc * volume_ml</span></p>
+<p class="p1"><span class="s1">volume_l = volume_ml / 1000</span></p>
+<p class="p2"><span class="s1"></span><br></p>
+<p class="p1"><span class="s1">st.sidebar.markdown(f"""</span></p>
+<p class="p1"><span class="s1">**Calculated Parameters:**</span></p>
+<p class="p1"><span class="s1">- Total enzyme: {total_enzyme_mg:.3f} mg</span></p>
+<p class="p1"><span class="s1">- Volume: {volume_l:.3f} L</span></p>
+<p class="p1"><span class="s1">""")</span></p>
+<p class="p2"><span class="s1"></span><br></p>
+<p class="p1"><span class="s1"># File loading function</span></p>
+<p class="p1"><span class="s1">@st.cache_data</span></p>
+<p class="p1"><span class="s1">def load_csv_files():</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">    </span>"""Load all CSV files in the current directory"""</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">    </span>csv_files = glob.glob("tsrta_*.csv")</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">    </span>csv_files.sort()</span></p>
+<p class="p2"><span class="s1"><span class="Apple-converted-space">    </span></span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">    </span>datasets = {}</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">    </span>for file in csv_files:</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">        </span>try:</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">            </span># Read the full file content</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">            </span>with open(file, 'r') as f:</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">                </span>content = f.read()</span></p>
+<p class="p2"><span class="s1"><span class="Apple-converted-space">            </span></span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">            </span># Find data section</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">            </span>lines = content.split('\n')</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">            </span>data_start = None</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">            </span>data_end = None</span></p>
+<p class="p2"><span class="s1"><span class="Apple-converted-space">            </span></span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">            </span>for i, line in enumerate(lines):</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">                </span>if 'Time (min),Abs' in line:</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">                    </span>data_start = i + 1</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">                </span>elif data_start and line.strip() and not ',' in line and 'Sample' in line:</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">                    </span>data_end = i</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">                    </span>break</span></p>
+<p class="p2"><span class="s1"><span class="Apple-converted-space">            </span></span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">            </span>if data_start:</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">                </span>data_lines = lines[data_start:data_end] if data_end else lines[data_start:]</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">                </span>data_lines = [line for line in data_lines if line.strip() and ',' in line]</span></p>
+<p class="p2"><span class="s1"><span class="Apple-converted-space">                </span></span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">                </span># Parse the data</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">                </span>rows = []</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">                </span>for line in data_lines:</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">                    </span>parts = line.strip().split(',')</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">                    </span>if len(parts) &gt;= 2:</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">                        </span>try:</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">                            </span>time_min = float(parts[0])</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">                            </span>abs_orig = float(parts[1]) if parts[1] else np.nan</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">                            </span>abs_corr = float(parts[2]) if len(parts) &gt; 2 and parts[2] else abs_orig</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">                            </span>rows.append([time_min, abs_orig, abs_corr])</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">                        </span>except ValueError:</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">                            </span>continue</span></p>
+<p class="p2"><span class="s1"><span class="Apple-converted-space">                </span></span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">                </span>if rows:</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">                    </span>df = pd.DataFrame(rows, columns=['Time_min', 'Abs_Original', 'Abs_Corrected'])</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">                    </span>df['Time_s'] = df['Time_min'] * 60</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">                    </span>df = df.dropna()</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">                    </span>datasets[file] = df</span></p>
+<p class="p2"><span class="s1"><span class="Apple-converted-space">                    </span></span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">        </span>except Exception as e:</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">            </span>st.warning(f"Could not load {file}: {e}")</span></p>
+<p class="p2"><span class="s1"><span class="Apple-converted-space">    </span></span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">    </span>return datasets</span></p>
+<p class="p2"><span class="s1"></span><br></p>
+<p class="p1"><span class="s1"># Load data</span></p>
+<p class="p1"><span class="s1">datasets = load_csv_files()</span></p>
+<p class="p2"><span class="s1"></span><br></p>
+<p class="p1"><span class="s1">if not datasets:</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">    </span>st.error("No CSV files found! Please ensure tsrta_*.csv files are in the same directory.")</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">    </span>st.stop()</span></p>
+<p class="p2"><span class="s1"></span><br></p>
+<p class="p1"><span class="s1">st.success(f"Loaded {len(datasets)} datasets: {', '.join(datasets.keys())}")</span></p>
+<p class="p2"><span class="s1"></span><br></p>
+<p class="p1"><span class="s1"># Dataset selection</span></p>
+<p class="p1"><span class="s1">st.header("📊 Data Visualization")</span></p>
+<p class="p1"><span class="s1">selected_files = st.multiselect(</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">    </span>"Select datasets to analyze:",</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">    </span>list(datasets.keys()),</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">    </span>default=list(datasets.keys())[:3]<span class="Apple-converted-space">  </span># Select first 3 by default</span></p>
+<p class="p1"><span class="s1">)</span></p>
+<p class="p2"><span class="s1"></span><br></p>
+<p class="p1"><span class="s1">use_corrected = st.checkbox("Use corrected data (Column 3) where available", value=True)</span></p>
+<p class="p2"><span class="s1"></span><br></p>
+<p class="p1"><span class="s1">if not selected_files:</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">    </span>st.warning("Please select at least one dataset.")</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">    </span>st.stop()</span></p>
+<p class="p2"><span class="s1"></span><br></p>
+<p class="p1"><span class="s1"># Create visualization</span></p>
+<p class="p1"><span class="s1">fig = go.Figure()</span></p>
+<p class="p2"><span class="s1"></span><br></p>
+<p class="p1"><span class="s1">colors = px.colors.qualitative.Plotly</span></p>
+<p class="p1"><span class="s1">dataset_info = {}</span></p>
+<p class="p2"><span class="s1"></span><br></p>
+<p class="p1"><span class="s1">for i, file in enumerate(selected_files):</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">    </span>df = datasets[file]</span></p>
+<p class="p2"><span class="s1"><span class="Apple-converted-space">    </span></span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">    </span># Choose which absorbance column to use</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">    </span>abs_col = 'Abs_Corrected' if use_corrected else 'Abs_Original'</span></p>
+<p class="p2"><span class="s1"><span class="Apple-converted-space">    </span></span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">    </span># Store dataset info for analysis</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">    </span>dataset_info[file] = {</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">        </span>'time_s': df['Time_s'].values,</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">        </span>'abs': df[abs_col].values,</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">        </span>'time_range': f"{df['Time_s'].min():.1f}-{df['Time_s'].max():.1f}s",</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">        </span>'abs_range': f"{df[abs_col].min():.3f}-{df[abs_col].max():.3f}",</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">        </span>'points': len(df)</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">    </span>}</span></p>
+<p class="p2"><span class="s1"><span class="Apple-converted-space">    </span></span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">    </span># Add trace</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">    </span>fig.add_trace(go.Scatter(</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">        </span>x=df['Time_s'],</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">        </span>y=df[abs_col],</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">        </span>mode='lines+markers',</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">        </span>name=file.replace('.csv', '').replace('tsrta_', ''),</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">        </span>line=dict(color=colors[i % len(colors)]),</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">        </span>marker=dict(size=4),</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">        </span>hovertemplate=f"&lt;b&gt;{file}&lt;/b&gt;&lt;br&gt;Time: %{{x:.1f}}s&lt;br&gt;Abs: %{{y:.4f}}&lt;extra&gt;&lt;/extra&gt;"</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">    </span>))</span></p>
+<p class="p2"><span class="s1"><span class="Apple-converted-space">    </span></span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">    </span># Show original vs corrected for files with corrections</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">    </span>if use_corrected and not df['Abs_Original'].equals(df['Abs_Corrected']):</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">        </span>fig.add_trace(go.Scatter(</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">            </span>x=df['Time_s'],</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">            </span>y=df['Abs_Original'],</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">            </span>mode='lines',</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">            </span>name=f"{file.replace('.csv', '').replace('tsrta_', '')} (original)",</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">            </span>line=dict(color=colors[i % len(colors)], dash='dash', width=1),</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">            </span>opacity=0.5,</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">            </span>showlegend=False,</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">            </span>hovertemplate=f"&lt;b&gt;{file} (original)&lt;/b&gt;&lt;br&gt;Time: %{{x:.1f}}s&lt;br&gt;Abs: %{{y:.4f}}&lt;extra&gt;&lt;/extra&gt;"</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">        </span>))</span></p>
+<p class="p2"><span class="s1"></span><br></p>
+<p class="p1"><span class="s1">fig.update_layout(</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">    </span>title="TsRTA Flow Cell Continuous Monitoring",</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">    </span>xaxis_title="Time (seconds)",</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">    </span>yaxis_title="Absorbance (245 nm)",</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">    </span>hovermode='x unified',</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">    </span>height=600,</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">    </span>showlegend=True</span></p>
+<p class="p1"><span class="s1">)</span></p>
+<p class="p2"><span class="s1"></span><br></p>
+<p class="p1"><span class="s1">st.plotly_chart(fig, use_container_width=True)</span></p>
+<p class="p2"><span class="s1"></span><br></p>
+<p class="p1"><span class="s1"># Activity Analysis</span></p>
+<p class="p1"><span class="s1">st.header("🔬 Activity Analysis")</span></p>
+<p class="p2"><span class="s1"></span><br></p>
+<p class="p1"><span class="s1"># Time window selection</span></p>
+<p class="p1"><span class="s1">col1, col2 = st.columns(2)</span></p>
+<p class="p1"><span class="s1">with col1:</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">    </span>start_time = st.number_input("Analysis start time (s)", value=25, step=5)</span></p>
+<p class="p1"><span class="s1">with col2:</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">    </span>end_time = st.number_input("Analysis end time (s)", value=80, step=5)</span></p>
+<p class="p2"><span class="s1"></span><br></p>
+<p class="p1"><span class="s1">def calculate_activity(time_s, abs_values, start_t, end_t):</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">    </span>"""Calculate enzyme activity from kinetic data"""</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">    </span># Filter to analysis window</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">    </span>mask = (time_s &gt;= start_t) &amp; (time_s &lt;= end_t)</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">    </span>if np.sum(mask) &lt; 5:</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">        </span>return None</span></p>
+<p class="p2"><span class="s1"><span class="Apple-converted-space">    </span></span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">    </span>time_min = time_s[mask] / 60</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">    </span>abs_filtered = abs_values[mask]</span></p>
+<p class="p2"><span class="s1"><span class="Apple-converted-space">    </span></span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">    </span># Linear regression</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">    </span>slope, intercept, r_value, p_value, std_err = stats.linregress(time_min, abs_filtered)</span></p>
+<p class="p2"><span class="s1"><span class="Apple-converted-space">    </span></span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">    </span># Convert to activity</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">    </span>slope_abs_per_min = slope</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">    </span>slope_mM_per_min = slope_abs_per_min / (ext_coeff * path_length)</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">    </span>slope_uM_per_min = slope_mM_per_min * 1000</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">    </span>slope_umol_per_min = slope_uM_per_min * volume_l</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">    </span>activity_U_per_mg = slope_umol_per_min / total_enzyme_mg</span></p>
+<p class="p2"><span class="s1"><span class="Apple-converted-space">    </span></span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">    </span>return {</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">        </span>'slope_abs_min': slope_abs_per_min,</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">        </span>'slope_mM_min': slope_mM_per_min,</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">        </span>'slope_uM_min': slope_uM_per_min,</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">        </span>'slope_umol_min': slope_umol_per_min,</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">        </span>'activity_U_mg': activity_U_per_mg,</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">        </span>'r_squared': r_value**2,</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">        </span>'p_value': p_value,</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">        </span>'std_err': std_err,</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">        </span>'n_points': np.sum(mask)</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">    </span>}</span></p>
+<p class="p2"><span class="s1"></span><br></p>
+<p class="p1"><span class="s1"># Calculate activities for all selected datasets</span></p>
+<p class="p1"><span class="s1">results = {}</span></p>
+<p class="p1"><span class="s1">for file in selected_files:</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">    </span>info = dataset_info[file]</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">    </span>result = calculate_activity(info['time_s'], info['abs'], start_time, end_time)</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">    </span>if result:</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">        </span>results[file] = result</span></p>
+<p class="p2"><span class="s1"></span><br></p>
+<p class="p1"><span class="s1"># Display results table</span></p>
+<p class="p1"><span class="s1">if results:</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">    </span>st.subheader(f"📈 Activity Results ({start_time}-{end_time}s window)")</span></p>
+<p class="p2"><span class="s1"><span class="Apple-converted-space">    </span></span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">    </span># Create results DataFrame</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">    </span>results_data = []</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">    </span>for file, result in results.items():</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">        </span>results_data.append({</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">            </span>'Dataset': file.replace('.csv', '').replace('tsrta_', ''),</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">            </span>'Slope (abs/min)': f"{result['slope_abs_min']:.5f}",</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">            </span>'R²': f"{result['r_squared']:.4f}",</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">            </span>'Activity (U/mg)': f"{result['activity_U_mg']:.3f}",</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">            </span>'Points': result['n_points'],</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">            </span>'Quality': '✅ Excellent' if result['r_squared'] &gt; 0.95 else '⚠️ Good' if result['r_squared'] &gt; 0.8 else '❌ Poor'</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">        </span>})</span></p>
+<p class="p2"><span class="s1"><span class="Apple-converted-space">    </span></span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">    </span>results_df = pd.DataFrame(results_data)</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">    </span>st.dataframe(results_df, use_container_width=True)</span></p>
+<p class="p2"><span class="s1"><span class="Apple-converted-space">    </span></span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">    </span># Calculation details</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">    </span>st.subheader("🧮 Calculation Details")</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">    </span>for file, result in results.items():</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">        </span>with st.expander(f"Details for {file.replace('.csv', '').replace('tsrta_', '')}"):</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">            </span>st.write(f"""</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">            </span>**Step-by-step calculation:**</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">            </span>1. Slope: {result['slope_abs_min']:.5f} abs/min</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">            </span>2. Convert to mM/min: {result['slope_abs_min']:.5f} ÷ ({ext_coeff} × {path_length}) = {result['slope_mM_min']:.5f} mM/min</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">            </span>3. Convert to µM/min: {result['slope_mM_min']:.5f} × 1000 = {result['slope_uM_min']:.3f} µM/min</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">            </span>4. Convert to µmol/min: {result['slope_uM_min']:.3f} × {volume_l:.3f} L = {result['slope_umol_min']:.5f} µmol/min</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">            </span>5. Calculate U/mg: {result['slope_umol_min']:.5f} ÷ {total_enzyme_mg:.3f} mg = **{result['activity_U_mg']:.3f} U/mg**</span></p>
+<p class="p2"><span class="s1"><span class="Apple-converted-space">            </span></span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">            </span>**Statistics:**</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">            </span>- R² = {result['r_squared']:.4f}</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">            </span>- p-value = {result['p_value']:.2e}</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">            </span>- Standard error = {result['std_err']:.5f}</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">            </span>- Data points = {result['n_points']}</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">            </span>""")</span></p>
+<p class="p2"><span class="s1"><span class="Apple-converted-space">    </span></span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">    </span># Summary statistics</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">    </span>valid_activities = [r['activity_U_mg'] for r in results.values() if r['r_squared'] &gt; 0.8]</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">    </span>if len(valid_activities) &gt; 1:</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">        </span>mean_activity = np.mean(valid_activities)</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">        </span>std_activity = np.std(valid_activities, ddof=1)</span></p>
+<p class="p2"><span class="s1"><span class="Apple-converted-space">        </span></span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">        </span>st.subheader("📊 Summary Statistics")</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">        </span>st.success(f"""</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">        </span>**Flow Cell Method Results:**</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">        </span>- Valid measurements (R² &gt; 0.8): {len(valid_activities)}</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">        </span>- Average activity: **{mean_activity:.2f} ± {std_activity:.2f} U/mg**</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">        </span>""")</span></p>
+<p class="p2"><span class="s1"><span class="Apple-converted-space">        </span></span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">        </span># Comparison with batch method</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">        </span>st.subheader("⚖️ Method Comparison")</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">        </span>batch_activity = 2.89</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">        </span>batch_std = 0.15</span></p>
+<p class="p2"><span class="s1"><span class="Apple-converted-space">        </span></span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">        </span>comparison_data = pd.DataFrame({</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">            </span>'Method': ['Batch (1 mL)', 'Flow Cell (5 mL)'],</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">            </span>'Activity (U/mg)': [f"{batch_activity:.2f} ± {batch_std:.2f}", f"{mean_activity:.2f} ± {std_activity:.2f}"],</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">            </span>'Volume': ['1 mL', f'{volume_ml} mL'],</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">            </span>'Sampling': ['Manual pipetting', 'Continuous flow'],</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">            </span>'Advantages': ['Standard method', 'No sampling stress, constant volume']</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">        </span>})</span></p>
+<p class="p2"><span class="s1"><span class="Apple-converted-space">        </span></span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">        </span>st.dataframe(comparison_data, use_container_width=True)</span></p>
+<p class="p2"><span class="s1"><span class="Apple-converted-space">        </span></span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">        </span># Agreement analysis</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">        </span>percent_diff = abs(mean_activity - batch_activity) / batch_activity * 100</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">        </span>if percent_diff &lt; 30:</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">            </span>st.success(f"✅ **Excellent agreement** between methods ({percent_diff:.1f}% difference)")</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">        </span>else:</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">            </span>st.warning(f"⚠️ **Moderate agreement** between methods ({percent_diff:.1f}% difference)")</span></p>
+<p class="p2"><span class="s1"></span><br></p>
+<p class="p1"><span class="s1">else:</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">    </span>st.warning("No valid results in the selected time window. Try adjusting the analysis window.")</span></p>
+<p class="p2"><span class="s1"></span><br></p>
+<p class="p1"><span class="s1"># Raw data table</span></p>
+<p class="p1"><span class="s1">with st.expander("📋 View Raw Data"):</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">    </span>for file in selected_files:</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">        </span>st.subheader(f"Data from {file}")</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">        </span>df_display = datasets[file].copy()</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">        </span>df_display['Time_s'] = df_display['Time_s'].round(1)</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">        </span>df_display['Abs_Original'] = df_display['Abs_Original'].round(4)</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">        </span>df_display['Abs_Corrected'] = df_display['Abs_Corrected'].round(4)</span></p>
+<p class="p1"><span class="s1"><span class="Apple-converted-space">        </span>st.dataframe(df_display, use_container_width=True)</span></p>
+<p class="p2"><span class="s1"></span><br></p>
+<p class="p1"><span class="s1"># Footer</span></p>
+<p class="p1"><span class="s1">st.markdown("---")</span></p>
+<p class="p1"><span class="s1">st.markdown("""</span></p>
+<p class="p1"><span class="s1">**About this analysis:**</span></p>
+<p class="p1"><span class="s1">- DIY flow cell setup using Vapourtec pump with frit syringe</span></p>
+<p class="p1"><span class="s1">- Continuous monitoring eliminates sampling stress for immobilized enzymes</span></p>
+<p class="p1"><span class="s1">- Activity calculated using Beer's Law: A = ε × c × l</span></p>
+<p class="p1"><span class="s1">- 1 Unit (U) = 1 µmol product formed per minute</span></p>
+<p class="p1"><span class="s1">""")</span></p>
+</body>
+</html>
