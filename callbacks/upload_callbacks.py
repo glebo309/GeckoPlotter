@@ -645,7 +645,7 @@ def register_upload_callbacks(app, data_manager):
                     html.P("Try adjusting the retention time tolerance above."),
                     html.H6("All Peaks by Sample:"),
                     html.Div([
-                        html.P(f"🔸 {sample}: {[f'{p["rt"]:.3f} min' for p in all_peaks if p['sample'] == sample]}")
+                        html.P("🔸 {}: {}".format(sample, [f"{p['rt']:.3f} min" for p in all_peaks if p['sample'] == sample]))
                         for sample in sorted(set(p['sample'] for p in all_peaks))
                     ])
                 ])
