@@ -3,7 +3,7 @@
 from dash import html, dcc
 from utils.toast_system import create_toast_container
 from file_tree_manager import create_file_tree_manager
-from callbacks.peak_detection_callbacks import create_peak_detection_controls
+from callbacks.baseline_integration_callbacks import create_baseline_integration_controls
 
 def create_layout():
     return html.Div([
@@ -64,7 +64,7 @@ def create_layout():
 
                         # Enhanced Peak Analysis Tab
                         html.Div([
-                            create_peak_detection_controls()
+                            create_baseline_integration_controls()
                         ], className="tab-panel", id="peak-tab"),
 
                         # Plot Settings Tab
