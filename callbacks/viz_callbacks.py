@@ -691,8 +691,6 @@ def register_viz_callbacks(app, data_manager):
 
 
 
-
-
 def extract_clean_sample_name(filename):
     """Extract clean sample name from filename."""
     import re
