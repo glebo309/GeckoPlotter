@@ -3,8 +3,6 @@ from dash import html, dcc, Input, Output, State, callback_context
 import dash
 import dash.dependencies
 import plotly.graph_objects as go
-import dash
-import dash.dependencies
 from utils.toast_system import add_toast_to_store
 
 
