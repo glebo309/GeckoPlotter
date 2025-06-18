@@ -691,45 +691,6 @@ def register_viz_callbacks(app, data_manager):
 
 
 
-
-    @app.callback(
-        [Output('ms-plot', 'figure', allow_duplicate=True),
-        Output('uv-chromatogram-plot', 'figure', allow_duplicate=True)],
-        [State('file-selector', 'value'),
-        State('visibility-state', 'data')],
-        prevent_initial_call=True
-    )
-
-    def refresh_plots_after_peak_detection(selected_value, visibility_state):
-        """Refresh plots immediately after peak detection completes"""
-        
-        # Only refresh if button shows success
-        # Check if we just detected peaks
-        # Small delay to ensure peaks are stored
-        import time
-        time.sleep(0.1)
-
-
-
-        print(f"[REFRESH DEBUG] Refreshing plots after peak detection")
-
-
-        print(f"[REFRESH DEBUG] peak_manager keys: {list(peak_manager.detected_peaks.keys())}")
-        
-        # Re-create the full plots with peak visualization
-        empty_fig = go.Figure()
-        ms_fig = empty_fig
-        
-        files = data_manager.get_loaded_files()
-        
-        # Create multi-chromatogram plot with peaks
-        uv_chrom_fig = create_multi_chromatogram_plot_safe(
-            files, data_manager, visibility_state, 
-            {}, 2, {}, {}  # Default settings
-        )
-        
-        return ms_fig, uv_chrom_fig
-
 def extract_clean_sample_name(filename):
     """Extract clean sample name from filename."""
     import re
