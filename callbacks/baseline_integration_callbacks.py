@@ -100,23 +100,27 @@ def exact_crossings(p1, p2, df):
 
 
 def create_baseline_integration_controls():
+    """Return integration tools without an embedded plot."""
     return html.Div([
         html.H4("Multi-Peak Chromatogram Integration (p/q baselines)"),
         html.Div([
             html.Button("🖊️ Draw", id="draw", n_clicks=0, style={"margin": "5px"}),
             html.Button("✏️ Edit", id="edit", n_clicks=0, style={"margin": "5px"}),
             html.Button("🔍 Nav", id="nav", n_clicks=0, style={"margin": "5px"}),
-            html.Span(id="mode-ind", style={"marginLeft": "20px", "fontWeight": "bold", "color": "blue"}),
-            html.Div([
+            html.Span(
+                id="mode-ind",
+                style={"marginLeft": "20px", "fontWeight": "bold", "color": "blue"},
+            ),
+            html.Div(
                 dcc.Checklist(
                     id="easy-integration",
                     options=[{"label": " Easy Integration (baseline to y=0)", "value": "easy"}],
                     value=[],
-                    style={"marginLeft": "20px", "display": "inline-block"}
-                )
-            ], style={"display": "inline-block"})
+                    style={"marginLeft": "20px", "display": "inline-block"},
+                ),
+                style={"display": "inline-block"},
+            ),
         ]),
-        dcc.Graph(id="integration-plot", config={"displayModeBar": True, "displaylogo": False}, style={"height": 500}),
         dash_table.DataTable(
             id="integration-table",
             columns=[
@@ -156,7 +160,7 @@ def register_baseline_integration_callbacks(app, data_manager):
         Output("line", "data"),
         Output("clear-shapes", "data")
     ],
-        Input("integration-plot", "relayoutData"),
+        Input("uv-chromatogram-plot", "relayoutData"),
         [State("line", "data"), State("mode", "data"), State("clear-shapes", "data"), State("easy-integration", "value"), State("selected-layer", "data")])
     def store_line(relayout, line, mode, clear_counter, easy_mode, selected_layer):
         df = _get_chrom_data(data_manager, selected_layer)
@@ -221,7 +225,7 @@ def register_baseline_integration_callbacks(app, data_manager):
         Output("selected-idx", "data"),
         Output("p-visible", "data")
     ],
-        Input("integration-plot", "clickData"),
+        Input("uv-chromatogram-plot", "clickData"),
         [State("mode", "data"), State("stored-peaks", "data")],
         prevent_initial_call=True)
     def select_peak(click, mode, peaks):
@@ -233,7 +237,7 @@ def register_baseline_integration_callbacks(app, data_manager):
 
     @app.callback(
         Output("stored-peaks", "data", allow_duplicate=True),
-        [Input("integration-plot", "relayoutData"), Input("line", "data")],
+        [Input("uv-chromatogram-plot", "relayoutData"), Input("line", "data")],
         [State("mode", "data"), State("selected-idx", "data"), State("stored-peaks", "data"), State("easy-integration", "value"), State("selected-layer", "data")],
         prevent_initial_call=True)
     def update_peak(relayout, line, mode, idx, peaks, easy_mode, selected_layer):
@@ -250,38 +254,6 @@ def register_baseline_integration_callbacks(app, data_manager):
         peaks[idx] = dict(p_line=line, q1=q1, q2=q2, **res)
         return peaks
 
-    @app.callback(
-        Output("integration-plot", "figure"),
-        [Input("stored-peaks", "data"), Input("selected-idx", "data"), Input("p-visible", "data"), Input("mode", "data"), Input("clear-shapes", "data"), Input("selected-layer", "data")])
-    def refresh(peaks, sel_idx, p_show, mode, clear_shapes, selected_layer):
-        df = _get_chrom_data(data_manager, selected_layer)
-        if df is None:
-            return go.Figure()
-        drag = {"draw": "drawline", "edit": "select", "navigate": "pan"}[mode]
-        fig = go.Figure(layout=go.Layout(template="simple_white", dragmode=drag, xaxis_title="Time (min)", yaxis_title="Intensity (mAU)", shapes=[]))
-        fig.add_scatter(x=df["Time (min)"], y=df["Intensity (mAU)"], mode="lines", name="Chromatogram")
-        if not peaks:
-            return fig
-        peaks = peaks or []
-        if sel_idx is not None and p_show:
-            p = peaks[sel_idx]
-            p0, p1 = p["p_line"]
-            fig.add_shape(type="line", x0=p0[0], y0=p0[1], x1=p1[0], y1=p1[1], line=dict(color="#005F8C", width=3), editable=True, layer="above")
-        for i, p in enumerate(peaks):
-            res = p
-            fig.add_scatter(x=res["poly_x"], y=res["poly_y"], fill="toself", fillcolor="rgba(0,150,200,0.30)", line=dict(width=0), hoverinfo="skip", showlegend=False)
-            q1, q2 = res["q1"], res["q2"]
-            if i == sel_idx and p_show:
-                fig.add_scatter(x=[q1[0], q2[0]], y=[q1[1], q2[1]], mode="markers", marker=dict(size=5, symbol="circle", color="#005F8C"), showlegend=False)
-                p0, p1 = res["p_line"]
-                fig.add_scatter(x=[p0[0], p1[0]], y=[p0[1], p1[1]], mode="markers", marker=dict(size=10, symbol="circle-open", color="#005F8C"), showlegend=False)
-                if q1 != p0 or q2 != p1:
-                    fig.add_shape(type="line", x0=q1[0], y0=q1[1], x1=q2[0], y1=q2[1], line=dict(color="#005F8C", width=2, dash="dot"), editable=False, layer="above")
-            else:
-                left, right = exact_crossings(q1, q2, df)
-                if left and right:
-                    fig.add_scatter(x=[left[0], right[0]], y=[left[1], right[1]], mode="markers", marker=dict(size=5, symbol="circle", color="#002B4A"), showlegend=False)
-        return fig
 
     @app.callback(
         Output("integration-table", "data"),
@@ -294,3 +266,85 @@ def register_baseline_integration_callbacks(app, data_manager):
         for i, p in enumerate(peaks, start=1):
             rows.append({"idx": i, "rt": f"{p['apex_x']:.2f}", "h": f"{p['height']:.2f}", "a": f"{p['area']:.1f}"})
         return rows
+
+    @app.callback(
+        Output("uv-chromatogram-plot", "figure", allow_duplicate=True),
+        [Input("stored-peaks", "data"),
+         Input("selected-idx", "data"),
+         Input("p-visible", "data"),
+         Input("mode", "data"),
+         Input("clear-shapes", "data"),
+         Input("selected-layer", "data")],
+        State("uv-chromatogram-plot", "figure"),
+        prevent_initial_call=True
+    )
+    def overlay_peaks(peaks, sel_idx, p_show, mode, _clear, selected_layer, figure):
+        df = _get_chrom_data(data_manager, selected_layer)
+        if df is None or figure is None:
+            raise dash.exceptions.PreventUpdate
+
+        fig = go.Figure(figure)
+        fig.data = [trace for trace in fig.data if getattr(trace, "legendgroup", "") != "manual_integration"]
+        fig.layout.shapes = []
+
+        drag = {"draw": "drawline", "edit": "select", "navigate": "pan"}[mode]
+        fig.update_layout(dragmode=drag)
+
+        if not peaks:
+            return fig
+
+        for i, p in enumerate(peaks):
+            res = p
+            fig.add_scatter(
+                x=res["poly_x"],
+                y=res["poly_y"],
+                fill="toself",
+                fillcolor="rgba(0,150,200,0.30)",
+                line=dict(width=0),
+                hoverinfo="skip",
+                showlegend=False,
+                legendgroup="manual_integration",
+            )
+            q1, q2 = res["q1"], res["q2"]
+            if i == sel_idx and p_show:
+                fig.add_scatter(
+                    x=[q1[0], q2[0]],
+                    y=[q1[1], q2[1]],
+                    mode="markers",
+                    marker=dict(size=5, symbol="circle", color="#005F8C"),
+                    showlegend=False,
+                    legendgroup="manual_integration",
+                )
+                p0, p1 = res["p_line"]
+                fig.add_scatter(
+                    x=[p0[0], p1[0]],
+                    y=[p0[1], p1[1]],
+                    mode="markers",
+                    marker=dict(size=10, symbol="circle-open", color="#005F8C"),
+                    showlegend=False,
+                    legendgroup="manual_integration",
+                )
+                if q1 != p0 or q2 != p1:
+                    fig.add_shape(
+                        type="line",
+                        x0=q1[0],
+                        y0=q1[1],
+                        x1=q2[0],
+                        y1=q2[1],
+                        line=dict(color="#005F8C", width=2, dash="dot"),
+                        editable=False,
+                        layer="above",
+                    )
+            else:
+                left, right = exact_crossings(q1, q2, df)
+                if left and right:
+                    fig.add_scatter(
+                        x=[left[0], right[0]],
+                        y=[left[1], right[1]],
+                        mode="markers",
+                        marker=dict(size=5, symbol="circle", color="#002B4A"),
+                        showlegend=False,
+                        legendgroup="manual_integration",
+                    )
+
+        return fig
