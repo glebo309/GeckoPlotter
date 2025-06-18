@@ -754,15 +754,12 @@ def register_upload_callbacks(app, data_manager):
         [Output("hplc-analysis-section", "style"),
         Output("integration-table-container", "children"),
         Output("peak-analysis-table-container", "children")],
-        [Input("selected-layer", "data"),
-        Input("peak-detection-feedback", "children"),  # Add this trigger
-        Input("auto-detect-feedback", "children"),     # Add this trigger  
-        Input("clear-peaks-feedback", "children")],    # Add this trigger
+        [Input("selected-layer", "data")],
         [State("active-hplc-tab-store", "data"),
         State("selected-peak-group-store", "data")],
         prevent_initial_call=True
     )
-    def update_hplc_analysis_section(selected_layer, detect_feedback, auto_feedback, clear_feedback, active_tab_type, stored_group_selection):
+    def update_hplc_analysis_section(selected_layer, active_tab_type, stored_group_selection):
         """Update HPLC analysis section when file is selected or peaks are detected."""
         print(f"🧪 [HPLC] Processing: {selected_layer}")
         
