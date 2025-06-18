@@ -12,7 +12,6 @@ from utils.peak_integration import peak_manager
 from utils.fonts_labels import create_fonts_labels_layout, register_fonts_labels_callbacks
 
 from utils.fonts_labels import create_fonts_labels_layout, register_fonts_labels_callbacks
-from callbacks.peak_detection_callbacks import register_peak_detection_callbacks
 
 
 

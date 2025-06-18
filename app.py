@@ -6,7 +6,7 @@ from callbacks.upload_callbacks import register_upload_callbacks, register_clear
 from callbacks.viz_callbacks import register_viz_callbacks
 from callbacks.sidebar_callbacks import register_sidebar_callbacks
 from callbacks.plot_settings_callbacks import register_plot_settings_callbacks
-from callbacks.peak_detection_callbacks import register_peak_detection_callbacks
+from callbacks.baseline_integration_callbacks import register_baseline_integration_callbacks
 from file_tree_manager import register_tree_callbacks
 from utils.toast_system import register_toast_callbacks
 from callbacks.interaction_callbacks import register_interaction_callbacks
@@ -32,8 +32,8 @@ register_interaction_callbacks(app, data_manager)
 register_peak_grouping_callback(app, data_manager)
 register_plot_settings_callbacks(app, data_manager)
 
-# Register the new peak detection callbacks
-register_peak_detection_callbacks(app, data_manager)
+# Register baseline integration callbacks
+register_baseline_integration_callbacks(app, data_manager)
 
 # Add enhanced CSS styling
 app.index_string = '''
