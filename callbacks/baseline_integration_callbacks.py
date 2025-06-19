@@ -276,7 +276,7 @@ def register_baseline_integration_callbacks(app, data_manager):
     @app.callback(
         Output("integration-table-container", "children", allow_duplicate=True),
         Input("stored-peaks", "data"),
-        prevent_initial_call=True
+
     )
     def update_table(peaks):
         if not peaks:
@@ -307,6 +307,8 @@ def register_baseline_integration_callbacks(app, data_manager):
          Output("line", "data", allow_duplicate=True),
          Output("selected-idx", "data", allow_duplicate=True),
          Output("p-visible", "data", allow_duplicate=True)],
+
+     
         Input("selected-layer", "data"),
         prevent_initial_call=True
     )
