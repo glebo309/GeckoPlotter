@@ -1017,6 +1017,11 @@ def add_manual_overlays(fig, df, peaks, sel_idx, p_show, mode):
     """Overlay manual integration shapes on the chromatogram figure."""
 
     drag = {"draw": "drawline", "edit": "select", "navigate": "pan"}.get(mode, "zoom")
+
+    # Gracefully handle cases where fig is None
+    if fig is None:
+        fig = go.Figure()
+
     fig.update_layout(dragmode=drag)
 
     if not peaks or df is None:
