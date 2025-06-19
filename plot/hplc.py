@@ -23,15 +23,33 @@ def create_chromatogram_plot(file_data):
             showarrow=False, font_size=16
         )
     
-    # Check for expected columns
+    # Check for expected columns (more robust matching)
     time_col = 'Time (min)'
-    intensity_col = None
 
-    # Try different possible intensity column names
-    for y_candidate in ['Value (mAU)', 'Intensity (mAU)', 'Absorbance (mAU)', 'Signal (mAU)']:
-        if time_col in data.columns and y_candidate in data.columns:
-            intensity_col = y_candidate
+    intensity_col = None
+    candidate_names = [
+        'Value (mAU)',
+        'Intensity (mAU)',
+        'Absorbance (mAU)',
+        'Signal (mAU)',
+        'Intensity',
+        'Signal Intensity',
+    ]
+
+    # Case-insensitive matching for known column names
+    lower_map = {c.lower(): c for c in data.columns}
+
+    for cand in candidate_names:
+        lc = cand.lower()
+        if time_col in data.columns and lc in lower_map:
+            intensity_col = lower_map[lc]
             break
+
+    # Fallback: first numeric column that isn't the time column
+    if not intensity_col:
+        numeric_cols = [c for c in data.columns if c != time_col and np.issubdtype(data[c].dtype, np.number)]
+        if numeric_cols:
+            intensity_col = numeric_cols[0]
 
     if not intensity_col:
         available_cols = list(data.columns)
