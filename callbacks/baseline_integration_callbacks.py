@@ -275,30 +275,45 @@ def register_baseline_integration_callbacks(app, data_manager):
 
     @app.callback(
         Output("integration-table-container", "children", allow_duplicate=True),
-        Input("stored-peaks", "data"),
-
+        [Input("stored-peaks", "data"), State("selected-layer", "data")],
+        prevent_initial_call=True
     )
-    def update_table(peaks):
-        if not peaks:
+    def update_table(peaks, selected_layer):
+        if not selected_layer:
             return ""
-        rows = []
-        for i, p in enumerate(peaks, start=1):
-            rows.append({
-                "idx": i,
-                "rt": f"{p['apex_x']:.2f}",
-                "h": f"{p['height']:.2f}",
-                "a": f"{p['area']:.1f}",
-            })
+
+        filename = selected_layer.split("|")[0]
+
+        if not peaks:
+            manual_df = pd.DataFrame()
+        else:
+            rows = []
+            for i, p in enumerate(peaks, start=1):
+                rows.append({
+                    "No.": i,
+                    "Peak Name": f"Manual {i}",
+                    "Retention Time": p["apex_x"],
+                    "Height": p["height"],
+                    "Area": p["area"],
+                })
+            manual_df = pd.DataFrame(rows)
+
+        data_manager.set_manual_peaks(filename, manual_df)
+
+        file_data = data_manager.get_file_data(filename)
+        integration_table = file_data.get("integration_table")
+
+        from utils.peak_integration import peak_manager
+        combined_df = peak_manager.get_combined_integration_table(filename, integration_table, manual_df)
+
+        if combined_df.empty:
+            return ""
+
         table = dash_table.DataTable(
-            id="integration-table",
-            columns=[
-                {"name": "Peak #", "id": "idx"},
-                {"name": "Retention Time", "id": "rt"},
-                {"name": "Height", "id": "h"},
-                {"name": "Area", "id": "a"},
-            ],
-            data=rows,
+            data=combined_df.to_dict("records"),
+            columns=[{"name": c, "id": c} for c in combined_df.columns],
             style_cell={"textAlign": "center"},
+            sort_action="native",
         )
         return table
 

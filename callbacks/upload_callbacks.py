@@ -754,12 +754,13 @@ def register_upload_callbacks(app, data_manager):
         [Output("hplc-analysis-section", "style"),
         Output("integration-table-container", "children"),
         Output("peak-analysis-table-container", "children")],
-        [Input("selected-layer", "data")],
+        [Input("selected-layer", "data"),
+         Input("stored-peaks", "data")],
         [State("active-hplc-tab-store", "data"),
-        State("selected-peak-group-store", "data")],
+         State("selected-peak-group-store", "data")],
         prevent_initial_call=True
     )
-    def update_hplc_analysis_section(selected_layer, active_tab_type, stored_group_selection):
+    def update_hplc_analysis_section(selected_layer, _manual_peaks, active_tab_type, stored_group_selection):
         """Update HPLC analysis section when file is selected or peaks are detected."""
         print(f"🧪 [HPLC] Processing: {selected_layer}")
         
@@ -779,9 +780,10 @@ def register_upload_callbacks(app, data_manager):
         # Extract table data
         integration_table = file_data.get('integration_table')
         peak_table = file_data.get('peak_table')
-        
-        # Get combined table with detected peaks
-        combined_df = peak_manager.get_combined_integration_table(filename, integration_table)
+        manual_table = file_data.get('manual_integration')
+
+        # Get combined table with detected peaks and manual integrations
+        combined_df = peak_manager.get_combined_integration_table(filename, integration_table, manual_table)
         
         # Create combined table content
         combined_content = []
