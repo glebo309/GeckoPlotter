@@ -116,7 +116,6 @@ def create_baseline_integration_controls():
                 )
             ], style={"display": "inline-block"})
         ]),
-        dcc.Graph(id="integration-plot", config={"displayModeBar": True, "displaylogo": False}, style={"height": 500}),
         # Table will be injected into integration-table-container
         dcc.Store(id="mode", data="draw"),
         dcc.Store(id="line"),
@@ -146,7 +145,7 @@ def register_baseline_integration_callbacks(app, data_manager):
         Output("line", "data"),
         Output("clear-shapes", "data")
     ],
-        Input("integration-plot", "relayoutData"),
+        Input("uv-chromatogram-plot", "relayoutData"),
         [State("line", "data"), State("mode", "data"), State("clear-shapes", "data"), State("easy-integration", "value"), State("selected-layer", "data")])
     def store_line(relayout, line, mode, clear_counter, easy_mode, selected_layer):
         df = _get_chrom_data(data_manager, selected_layer)
@@ -211,7 +210,7 @@ def register_baseline_integration_callbacks(app, data_manager):
         Output("selected-idx", "data"),
         Output("p-visible", "data")
     ],
-        Input("integration-plot", "clickData"),
+        Input("uv-chromatogram-plot", "clickData"),
         [State("mode", "data"), State("stored-peaks", "data")],
         prevent_initial_call=True)
     def select_peak(click, mode, peaks):
@@ -223,7 +222,7 @@ def register_baseline_integration_callbacks(app, data_manager):
 
     @app.callback(
         Output("stored-peaks", "data", allow_duplicate=True),
-        [Input("integration-plot", "relayoutData"), Input("line", "data")],
+        [Input("uv-chromatogram-plot", "relayoutData"), Input("line", "data")],
         [State("mode", "data"), State("selected-idx", "data"), State("stored-peaks", "data"), State("easy-integration", "value"), State("selected-layer", "data")],
         prevent_initial_call=True)
     def update_peak(relayout, line, mode, idx, peaks, easy_mode, selected_layer):
@@ -240,65 +239,48 @@ def register_baseline_integration_callbacks(app, data_manager):
         peaks[idx] = dict(p_line=line, q1=q1, q2=q2, **res)
         return peaks
 
-    @app.callback(
-        Output("integration-plot", "figure"),
-        [Input("stored-peaks", "data"), Input("selected-idx", "data"), Input("p-visible", "data"), Input("mode", "data"), Input("clear-shapes", "data"), Input("selected-layer", "data")])
-    def refresh(peaks, sel_idx, p_show, mode, clear_shapes, selected_layer):
-        df = _get_chrom_data(data_manager, selected_layer)
-        if df is None:
-            return go.Figure()
-        drag = {"draw": "drawline", "edit": "select", "navigate": "pan"}[mode]
-        fig = go.Figure(layout=go.Layout(template="simple_white", dragmode=drag, xaxis_title="Time (min)", yaxis_title="Intensity (mAU)", shapes=[]))
-        fig.add_scatter(x=df["Time (min)"], y=df["Intensity (mAU)"], mode="lines", name="Chromatogram")
-        if not peaks:
-            return fig
-        peaks = peaks or []
-        if sel_idx is not None and p_show:
-            p = peaks[sel_idx]
-            p0, p1 = p["p_line"]
-            fig.add_shape(type="line", x0=p0[0], y0=p0[1], x1=p1[0], y1=p1[1], line=dict(color="#005F8C", width=3), editable=True, layer="above")
-        for i, p in enumerate(peaks):
-            res = p
-            fig.add_scatter(x=res["poly_x"], y=res["poly_y"], fill="toself", fillcolor="rgba(0,150,200,0.30)", line=dict(width=0), hoverinfo="skip", showlegend=False)
-            q1, q2 = res["q1"], res["q2"]
-            if i == sel_idx and p_show:
-                fig.add_scatter(x=[q1[0], q2[0]], y=[q1[1], q2[1]], mode="markers", marker=dict(size=5, symbol="circle", color="#005F8C"), showlegend=False)
-                p0, p1 = res["p_line"]
-                fig.add_scatter(x=[p0[0], p1[0]], y=[p0[1], p1[1]], mode="markers", marker=dict(size=10, symbol="circle-open", color="#005F8C"), showlegend=False)
-                if q1 != p0 or q2 != p1:
-                    fig.add_shape(type="line", x0=q1[0], y0=q1[1], x1=q2[0], y1=q2[1], line=dict(color="#005F8C", width=2, dash="dot"), editable=False, layer="above")
-            else:
-                left, right = exact_crossings(q1, q2, df)
-                if left and right:
-                    fig.add_scatter(x=[left[0], right[0]], y=[left[1], right[1]], mode="markers", marker=dict(size=5, symbol="circle", color="#002B4A"), showlegend=False)
-        return fig
 
     @app.callback(
         Output("integration-table-container", "children", allow_duplicate=True),
-        Input("stored-peaks", "data"),
-
+        [Input("stored-peaks", "data"), State("selected-layer", "data")],
+        prevent_initial_call=True
     )
-    def update_table(peaks):
-        if not peaks:
+    def update_table(peaks, selected_layer):
+        if not selected_layer:
             return ""
-        rows = []
-        for i, p in enumerate(peaks, start=1):
-            rows.append({
-                "idx": i,
-                "rt": f"{p['apex_x']:.2f}",
-                "h": f"{p['height']:.2f}",
-                "a": f"{p['area']:.1f}",
-            })
+
+        filename = selected_layer.split("|")[0]
+
+        if not peaks:
+            manual_df = pd.DataFrame()
+        else:
+            rows = []
+            for i, p in enumerate(peaks, start=1):
+                rows.append({
+                    "No.": i,
+                    "Peak Name": f"Manual {i}",
+                    "Retention Time": p["apex_x"],
+                    "Height": p["height"],
+                    "Area": p["area"],
+                })
+            manual_df = pd.DataFrame(rows)
+
+        data_manager.set_manual_peaks(filename, manual_df)
+
+        file_data = data_manager.get_file_data(filename)
+        integration_table = file_data.get("integration_table")
+
+        from utils.peak_integration import peak_manager
+        combined_df = peak_manager.get_combined_integration_table(filename, integration_table, manual_df)
+
+        if combined_df.empty:
+            return ""
+
         table = dash_table.DataTable(
-            id="integration-table",
-            columns=[
-                {"name": "Peak #", "id": "idx"},
-                {"name": "Retention Time", "id": "rt"},
-                {"name": "Height", "id": "h"},
-                {"name": "Area", "id": "a"},
-            ],
-            data=rows,
+            data=combined_df.to_dict("records"),
+            columns=[{"name": c, "id": c} for c in combined_df.columns],
             style_cell={"textAlign": "center"},
+            sort_action="native",
         )
         return table
 
