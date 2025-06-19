@@ -117,17 +117,7 @@ def create_baseline_integration_controls():
             ], style={"display": "inline-block"})
         ]),
         dcc.Graph(id="integration-plot", config={"displayModeBar": True, "displaylogo": False}, style={"height": 500}),
-        dash_table.DataTable(
-            id="integration-table",
-            columns=[
-                {"name": "Peak #", "id": "idx"},
-                {"name": "Retention Time", "id": "rt"},
-                {"name": "Height", "id": "h"},
-                {"name": "Area", "id": "a"},
-            ],
-            style_cell={"textAlign": "center"},
-            data=[],
-        ),
+        # Table will be injected into integration-table-container
         dcc.Store(id="mode", data="draw"),
         dcc.Store(id="line"),
         dcc.Store(id="stored-peaks", data=[]),
@@ -284,13 +274,41 @@ def register_baseline_integration_callbacks(app, data_manager):
         return fig
 
     @app.callback(
-        Output("integration-table", "data"),
-        Input("stored-peaks", "data")
+        Output("integration-table-container", "children", allow_duplicate=True),
+        Input("stored-peaks", "data"),
+        prevent_initial_call=True
     )
     def update_table(peaks):
         if not peaks:
-            return []
+            return ""
         rows = []
         for i, p in enumerate(peaks, start=1):
-            rows.append({"idx": i, "rt": f"{p['apex_x']:.2f}", "h": f"{p['height']:.2f}", "a": f"{p['area']:.1f}"})
-        return rows
+            rows.append({
+                "idx": i,
+                "rt": f"{p['apex_x']:.2f}",
+                "h": f"{p['height']:.2f}",
+                "a": f"{p['area']:.1f}",
+            })
+        table = dash_table.DataTable(
+            id="integration-table",
+            columns=[
+                {"name": "Peak #", "id": "idx"},
+                {"name": "Retention Time", "id": "rt"},
+                {"name": "Height", "id": "h"},
+                {"name": "Area", "id": "a"},
+            ],
+            data=rows,
+            style_cell={"textAlign": "center"},
+        )
+        return table
+
+    @app.callback(
+        [Output("stored-peaks", "data", allow_duplicate=True),
+         Output("line", "data", allow_duplicate=True),
+         Output("selected-idx", "data", allow_duplicate=True),
+         Output("p-visible", "data", allow_duplicate=True)],
+        Input("selected-layer", "data"),
+        prevent_initial_call=True
+    )
+    def clear_on_layer_change(layer):
+        return [], None, None, False
