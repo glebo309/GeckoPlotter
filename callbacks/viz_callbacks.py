@@ -11,6 +11,7 @@ from plot.uvis import create_uvvis_plot, create_single_well_plot
 from .upload_callbacks import create_data_overview
 from callbacks.plot_settings_callbacks import apply_plot_settings, create_separate_plots
 from utils.peak_integration import peak_manager
+from callbacks.baseline_integration_callbacks import _get_chrom_data, exact_crossings
 
 
 def register_viz_callbacks(app, data_manager):
@@ -351,12 +352,18 @@ def register_viz_callbacks(app, data_manager):
         Input('y-min-input', 'value'),
         Input('y-max-input', 'value'),
         Input('x-axis-label', 'value'),
-        Input('y-axis-label', 'value')]
+        Input('y-axis-label', 'value'),
+        Input('stored-peaks', 'data'),
+        Input('selected-idx', 'data'),
+        Input('p-visible', 'data'),
+        Input('mode', 'data'),
+        Input('clear-shapes', 'data')]
     )
     def update_specialized_plots(selected_value, visibility_state, selected_layer,
                                 # Plot settings parameters
                                 line_thickness, layout_options, grid_options,
-                                x_min, x_max, y_min, y_max, x_label, y_label):
+                                x_min, x_max, y_min, y_max, x_label, y_label,
+                                manual_peaks, sel_idx, p_show, mode, _clear):
 
 
         """Update plots based on dropdown, visibility, AND tree selection with plot settings."""
@@ -404,10 +411,11 @@ def register_viz_callbacks(app, data_manager):
         files = data_manager.get_loaded_files()
         if not files:
             hidden = {"display": "none"}
-            return ms_fig, uv_chrom_fig, uvvis_fig, spectra_fig, hidden, hidden, hidden, hidden
+            return ms_fig, add_manual_overlays(uv_chrom_fig, df_active, manual_peaks, sel_idx, p_show, mode), uvvis_fig, spectra_fig, hidden, hidden, hidden, hidden
         
         # PRIORITY 1: Use tree selection if available
         active_selection = selected_layer if selected_layer else selected_value
+        df_active = _get_chrom_data(data_manager, active_selection)
         
 
         print(f"[DEBUG] Active selection: {active_selection}")
@@ -638,7 +646,7 @@ def register_viz_callbacks(app, data_manager):
                 if uv_visible_count == 0 and any(bundle_data.get(comp) for comp in uv_components):
                     uv_should_show = False
 
-                return ms_fig, uv_chrom_fig, empty_fig, empty_fig, \
+                return ms_fig, add_manual_overlays(uv_chrom_fig, df_active, manual_peaks, sel_idx, p_show, mode), empty_fig, empty_fig, \
                     {"display": "block" if ms_should_show else "none"}, \
                     {"display": "block" if uv_should_show else "none"}, \
                     {"display": "none"}, {"display": "none"}
@@ -666,9 +674,9 @@ def register_viz_callbacks(app, data_manager):
                     # HPLC: Show only UV chromatogram, HIDE MS
                     if not is_visible(active_selection):
                         uv_chrom_fig = empty_fig
-                    return empty_fig, uv_chrom_fig, empty_fig, empty_fig, {"display": "none"}, {"display": "block"}, {"display": "none"}, {"display": "none"}
+                    return empty_fig, add_manual_overlays(uv_chrom_fig, df_active, manual_peaks, sel_idx, p_show, mode), empty_fig, empty_fig, {"display": "none"}, {"display": "block"}, {"display": "none"}, {"display": "none"}
                 elif file_data['type'] == 'lcms_bundle':
-                    return ms_fig, uv_chrom_fig, empty_fig, empty_fig, {"display": "block"}, {"display": "block"}, {"display": "none"}, {"display": "none"}
+                    return ms_fig, add_manual_overlays(uv_chrom_fig, df_active, manual_peaks, sel_idx, p_show, mode), empty_fig, empty_fig, {"display": "block"}, {"display": "block"}, {"display": "none"}, {"display": "none"}
 
         # Default when nothing selected: show latest available data
         if ms_fig != empty_fig and uv_chrom_fig != empty_fig:
@@ -679,7 +687,7 @@ def register_viz_callbacks(app, data_manager):
                 file_data = data_manager.get_file_data(fname)
                 if file_data and file_data['type'] == 'lcms_bundle':
                     # Show both from latest LC-MS bundle
-                    return ms_fig, uv_chrom_fig, empty_fig, empty_fig, {"display": "block"}, {"display": "block"}, {"display": "none"}, {"display": "none"}
+                    return ms_fig, add_manual_overlays(uv_chrom_fig, df_active, manual_peaks, sel_idx, p_show, mode), empty_fig, empty_fig, {"display": "block"}, {"display": "block"}, {"display": "none"}, {"display": "none"}
 
         # Show individual plots if no bundle context
         ms_style = {"display": "block"} if ms_fig != empty_fig else {"display": "none"}
@@ -687,7 +695,7 @@ def register_viz_callbacks(app, data_manager):
         uvvis_style = {"display": "block"} if uvvis_fig != empty_fig else {"display": "none"}
         spectra_style = {"display": "none"}
 
-        return ms_fig, uv_chrom_fig, uvvis_fig, spectra_fig, ms_style, uv_chrom_style, uvvis_style, spectra_style
+        return ms_fig, add_manual_overlays(uv_chrom_fig, df_active, manual_peaks, sel_idx, p_show, mode), uvvis_fig, spectra_fig, ms_style, uv_chrom_style, uvvis_style, spectra_style
 
 
 
@@ -1003,6 +1011,50 @@ def add_peak_areas_to_figure(fig, filename, data_manager):
         print(f"[PEAK DEBUG] ❌ Major error: {e}")
         import traceback
         print(f"[PEAK DEBUG] Traceback: {traceback.format_exc()}")
+
+def add_manual_overlays(fig, df, peaks, sel_idx, p_show, mode):
+    """Overlay manual integration shapes on the chromatogram figure."""
+    drag = {"draw": "drawline", "edit": "select", "navigate": "pan"}.get(mode, "zoom")
+    fig.update_layout(dragmode=drag)
+
+    if not peaks or df is None:
+        return fig
+
+    peaks = peaks or []
+
+    if sel_idx is not None and p_show:
+        p = peaks[sel_idx]
+        p0, p1 = p["p_line"]
+        fig.add_shape(type="line", x0=p0[0], y0=p0[1], x1=p1[0], y1=p1[1],
+                      line=dict(color="#005F8C", width=3), editable=True, layer="above")
+
+    for i, p in enumerate(peaks):
+        res = p
+        fig.add_scatter(x=res["poly_x"], y=res["poly_y"], fill="toself",
+                        fillcolor="rgba(0,150,200,0.30)", line=dict(width=0),
+                        hoverinfo="skip", showlegend=False)
+        q1, q2 = res["q1"], res["q2"]
+        if i == sel_idx and p_show:
+            fig.add_scatter(x=[q1[0], q2[0]], y=[q1[1], q2[1]], mode="markers",
+                            marker=dict(size=5, symbol="circle", color="#005F8C"),
+                            showlegend=False)
+            p0, p1 = res["p_line"]
+            fig.add_scatter(x=[p0[0], p1[0]], y=[p0[1], p1[1]], mode="markers",
+                            marker=dict(size=10, symbol="circle-open", color="#005F8C"),
+                            showlegend=False)
+            if q1 != p0 or q2 != p1:
+                fig.add_shape(type="line", x0=q1[0], y0=q1[1], x1=q2[0], y1=q2[1],
+                              line=dict(color="#005F8C", width=2, dash="dot"),
+                              editable=False, layer="above")
+        else:
+            left, right = exact_crossings(q1, q2, df)
+            if left and right:
+                fig.add_scatter(x=[left[0], right[0]], y=[left[1], right[1]],
+                                mode="markers",
+                                marker=dict(size=5, symbol="circle", color="#002B4A"),
+                                showlegend=False)
+
+    return fig
 
     return fig
 
