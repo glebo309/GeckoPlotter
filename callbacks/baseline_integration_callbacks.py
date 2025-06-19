@@ -275,7 +275,8 @@ def register_baseline_integration_callbacks(app, data_manager):
 
     @app.callback(
         Output("integration-table-container", "children", allow_duplicate=True),
-
+        Input("stored-peaks", "data"),
+        prevent_initial_call=True
         Input("stored-peaks", "data")
     )
     def update_table(peaks):
