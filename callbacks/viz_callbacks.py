@@ -413,6 +413,7 @@ def register_viz_callbacks(app, data_manager):
             hidden = {"display": "none"}
             return ms_fig, uv_chrom_fig, uvvis_fig, spectra_fig, hidden, hidden, hidden, hidden
 
+
         # PRIORITY 1: Use tree selection if available
         active_selection = selected_layer if selected_layer else selected_value
         df_active = _get_chrom_data(data_manager, active_selection)
@@ -1014,8 +1015,6 @@ def add_peak_areas_to_figure(fig, filename, data_manager):
 
 def add_manual_overlays(fig, df, peaks, sel_idx, p_show, mode):
     """Overlay manual integration shapes on the chromatogram figure."""
-    if fig is None:
-        fig = go.Figure()
 
     drag = {"draw": "drawline", "edit": "select", "navigate": "pan"}.get(mode, "zoom")
     fig.update_layout(dragmode=drag)
