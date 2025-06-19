@@ -1015,6 +1015,7 @@ def add_peak_areas_to_figure(fig, filename, data_manager):
 
 def add_manual_overlays(fig, df, peaks, sel_idx, p_show, mode):
     """Overlay manual integration shapes on the chromatogram figure."""
+
     drag = {"draw": "drawline", "edit": "select", "navigate": "pan"}.get(mode, "zoom")
     fig.update_layout(dragmode=drag)
 
@@ -1054,8 +1055,6 @@ def add_manual_overlays(fig, df, peaks, sel_idx, p_show, mode):
                                 mode="markers",
                                 marker=dict(size=5, symbol="circle", color="#002B4A"),
                                 showlegend=False)
-
-    return fig
 
     return fig
 
