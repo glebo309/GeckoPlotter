@@ -989,8 +989,9 @@ def add_peak_areas_to_figure(fig, filename, data_manager):
                         x=fill_x,
                         y=fill_y,
                         fill='toself',
-                        fillcolor='rgba(255,165,0,0.3)',
-                        line=dict(width=0),
+    if fig is None:
+        fig = go.Figure()
+
                         name=f"Peak {peak.get('No.', i+1)}",
                         showlegend=False,
                         legendgroup='detected_peaks',
@@ -1727,7 +1728,7 @@ def apply_consistent_axis_styling(fig, show_horizontal_grid=False, show_vertical
 
 
 def create_uvvis_plot_with_visibility(file_data, visibility_state, max_wells=5):
-    """Create UV-Vis plot but only include visible wells."""
+    return create_uvvis_plot(modified_file_data, max_wells=max_wells)
     if not visibility_state:
         return create_uvvis_plot(file_data, max_wells=max_wells)
     
