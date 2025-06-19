@@ -498,13 +498,11 @@ class PeakIntegrationManager:
             for peak in self.detected_peaks[filename]:
                 peak['Relative Area'] = (peak['Area'] / total_area) * 100.0
     
-    def get_combined_integration_table(self, filename: str, imported_table: pd.DataFrame = None) -> pd.DataFrame:
-        """
-        Combine imported peaks with detected peaks into unified table
-        """
+    def get_combined_integration_table(self, filename: str, imported_table: pd.DataFrame = None, manual_table: pd.DataFrame = None) -> pd.DataFrame:
+        """Combine imported, manually integrated, and detected peaks"""
         try:
             combined_peaks = []
-            
+
             # Add imported peaks first
             if imported_table is not None and not imported_table.empty:
                 for idx, row in imported_table.iterrows():
@@ -518,6 +516,14 @@ class PeakIntegrationManager:
                             peak_dict['No.'] = idx + 1
                     combined_peaks.append(peak_dict)
             
+            # Add manual peaks next
+            if manual_table is not None and not manual_table.empty:
+                for idx, row in manual_table.iterrows():
+                    peak_dict = row.to_dict()
+                    peak_dict.setdefault('No.', idx + 1)
+                    peak_dict['source'] = 'manual'
+                    combined_peaks.append(peak_dict)
+
             # Add detected peaks
             if filename in self.detected_peaks:
                 for peak in self.detected_peaks[filename]:
