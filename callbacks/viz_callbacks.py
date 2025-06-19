@@ -411,8 +411,9 @@ def register_viz_callbacks(app, data_manager):
         files = data_manager.get_loaded_files()
         if not files:
             hidden = {"display": "none"}
-            return ms_fig, add_manual_overlays(uv_chrom_fig, df_active, manual_peaks, sel_idx, p_show, mode), uvvis_fig, spectra_fig, hidden, hidden, hidden, hidden
-        
+            return ms_fig, uv_chrom_fig, uvvis_fig, spectra_fig, hidden, hidden, hidden, hidden
+
+
         # PRIORITY 1: Use tree selection if available
         active_selection = selected_layer if selected_layer else selected_value
         df_active = _get_chrom_data(data_manager, active_selection)
