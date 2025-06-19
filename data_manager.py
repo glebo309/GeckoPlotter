@@ -2,6 +2,7 @@
 import os
 import tempfile
 import uuid
+import pandas as pd
 from readers.chromatogram_reader import ChromatogramReader
 from readers.spectra_reader import SpectraReader
 from readers.uvvis_csv_reader import UVVISCSVReader
@@ -286,7 +287,8 @@ class DataManager:
                     'reader': reader,
                     'type': file_type,
                     'data': data,
-                    'metadata': metadata
+                    'metadata': metadata,
+                    'manual_integration': pd.DataFrame()
                 }
                 return True, f"Successfully loaded {file_type} data from {filename}"
 
@@ -550,6 +552,18 @@ class DataManager:
             entry['peak_table'] = reader.get_peak_table()
             entry['sst_result'] = reader.get_sst_result()
         return entry
+
+    def set_manual_peaks(self, filename: str, peaks_df: pd.DataFrame):
+        """Store manually integrated peaks for a file."""
+        if filename in self.loaded_data:
+            self.loaded_data[filename]['manual_integration'] = peaks_df
+
+    def get_manual_peaks(self, filename: str) -> pd.DataFrame | None:
+        """Retrieve manually integrated peaks for a file."""
+        entry = self.loaded_data.get(filename)
+        if not entry:
+            return None
+        return entry.get('manual_integration')
 
     def load_partial_bundle(self, base_name, aux_files, buffer):
         """Load auxiliary files when main chromatogram is missing."""
