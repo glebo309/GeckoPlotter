@@ -1022,7 +1022,11 @@ def add_manual_overlays(fig, df, peaks, sel_idx, p_show, mode):
     if fig is None:
         fig = go.Figure()
 
-    fig.update_layout(dragmode=drag)
+    # Reset any previous shapes to avoid persistent artefacts and
+    # keep the user drawn shapes during figure updates
+    fig.update_layout(dragmode=drag,
+                      uirevision="manual-integration",
+                      shapes=[])
 
     if not peaks or df is None:
         return fig
