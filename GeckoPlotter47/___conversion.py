@@ -25,7 +25,7 @@ for i, line in enumerate(test_lines):
     print(f"Line {i+1}:")
     print(f"  Original:  {line}")
     print(f"  Converted: {converted}")
-    print()
+    # print()  # Removed to prevent blank line flooding
 
 # Test with full text block
 full_text = "\n".join(test_lines)
