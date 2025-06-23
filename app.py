@@ -1,3 +1,9 @@
+import os
+import builtins
+
+if os.environ.get("GP_DEBUG", "") != "1":
+    builtins.print = lambda *args, **kwargs: None
+
 import dash
 from dash import dcc, html
 from data_manager import DataManager
@@ -348,4 +354,5 @@ app.index_string = '''
 
 # Run app
 if __name__ == "__main__":
-    app.run(debug=True, port=8051)
+    app.run(debug=False, port=8051)
+
