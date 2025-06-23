@@ -690,7 +690,17 @@ class DataManager:
 
 
 
+    def set_manual_peaks(self, filename, manual_df):
+        """Store manual integration peaks for a file."""
+        if filename in self.loaded_data:
+            self.loaded_data[filename]['manual_integration'] = manual_df
+            print(f"[DATA] Stored {len(manual_df)} manual peaks for {filename}")
 
+    def get_manual_peaks(self, filename):
+        """Get manual integration peaks for a file."""
+        if filename in self.loaded_data:
+            return self.loaded_data[filename].get('manual_integration', pd.DataFrame())
+        return pd.DataFrame()
 
 
 

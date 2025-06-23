@@ -4,9 +4,22 @@ from dash import html, dcc
 from utils.toast_system import create_toast_container
 from file_tree_manager import create_file_tree_manager
 from callbacks.baseline_integration_callbacks import create_baseline_integration_controls
+from callbacks.peak_detection_callbacks import create_peak_detection_controls  # ADD THIS IMPORT
 
 def create_layout():
     return html.Div([
+        # Hidden stores for baseline integration state
+        dcc.Store(id="baseline-mode", data="draw"),
+        dcc.Store(id="p-line-store"),
+        dcc.Store(id="stored-peaks", data=[]),
+        dcc.Store(id="selected-peak-idx"),
+        dcc.Store(id="p-line-visible", data=True),
+        dcc.Store(id="clear-shapes-trigger", data=0),
+        dcc.Store(id='baseline-overlays-store'),
+        dcc.Store(id='plot-zoom-state', data=None),
+        # Hidden dummy divs for tab switching
+        html.Div(id='_sidebar_tab_dummy', style={'display': 'none'}),
+        html.Div(id='_analysis_tab_dummy', style={'display': 'none'}),
         # Toast System
         create_toast_container(),
 
@@ -44,10 +57,10 @@ def create_layout():
                 html.Div([
                     # Tab Header
                     html.Div([
-                        html.Button("Sample", className="tab-button active", **{"data-tab": "sample"}),
-                        html.Button("Peak", className="tab-button", **{"data-tab": "peak"}),
-                        html.Button("Plot", className="tab-button", **{"data-tab": "plot"}),
-                        html.Button("Export", className="tab-button", **{"data-tab": "export"}),
+                        html.Button("Sample", id="sample-tab-btn", className="tab-button active", **{"data-tab": "sample"}),
+                        html.Button("Peak", id="peak-tab-btn", className="tab-button", **{"data-tab": "peak"}),
+                        html.Button("Plot", id="plot-tab-btn", className="tab-button", **{"data-tab": "plot"}),
+                        html.Button("Export", id="export-tab-btn", className="tab-button", **{"data-tab": "export"}),
                     ], className="tab-header"),
 
                     # Tab Content Container
@@ -64,7 +77,13 @@ def create_layout():
 
                         # Enhanced Peak Analysis Tab
                         html.Div([
-                            create_baseline_integration_controls()
+                            # Baseline Integration Controls
+                            create_baseline_integration_controls(),
+                            
+                            html.Hr(style={'margin': '20px 0'}),
+                            
+                            # Peak Detection Controls
+                            create_peak_detection_controls()
                         ], className="tab-panel", id="peak-tab"),
 
                         # Plot Settings Tab
@@ -257,6 +276,7 @@ def create_layout():
             ], className="sidebar", id="dynamic-sidebar", style={"display": "none"}),
 
             # Storage components for settings
+            dcc.Store(id="baseline-mode-store", data="zoom"),
             dcc.Store(id="peak-settings-store"),
             dcc.Store(id="plot-style-store"),
             dcc.Store(id="color-scheme-store"),
@@ -280,7 +300,6 @@ def create_layout():
                 dcc.Dropdown(id="file-selector", style={"display": "none"}),
             ], style={"display": "none"}),
 
-
             # Main Content Area
             html.Div([
                 # Dashboard Container (wrapper for main content when files are loaded)
@@ -290,14 +309,13 @@ def create_layout():
                         # Content Header
                         html.Div([
                             html.Div([
-                                html.Button("🔍", id="zoom-btn", className="icon-btn floating-btn", title="Zoom"),
-                                html.Button("✋", id="pan-btn", className="icon-btn floating-btn", title="Pan"), 
-                                html.Button("🔄", id="reset-btn", className="icon-btn floating-btn", title="Reset"),
-                                html.Button("⛶", id="fullscreen-btn", className="icon-btn floating-btn", title="Fullscreen"),
-                                html.Button("📋", id="toggle-details-btn", className="icon-btn floating-btn", title="Toggle Details"),
+                                html.Button("🖊️ Draw", id="draw-peak", className="icon-btn floating-btn", title="Draw Peak"),
+                                html.Button("✏️ Edit", id="edit-peak", className="icon-btn floating-btn", title="Edit Peak"),
+                                html.Button("🔍 Zoom", id="nav-peak", className="icon-btn floating-btn", title="Zoom/Pan Mode"),
+                                html.Button("🗑️ Clear", id="clear-peak", className="icon-btn floating-btn", title="Clear Peak"),
                             ], className="floating-tools", style={
                                 'position': 'absolute', 'top': '10px', 'right': '10px', 'z-index': '1000',
-                                'background': 'rgba(255,255,255,0.9)', 'border-radius': '8px', 'padding': '4px',
+                                'background': 'rgba(255,255,255,0.95)', 'border-radius': '8px', 'padding': '4px',
                                 'box-shadow': '0 2px 8px rgba(0,0,0,0.15)', 'display': 'flex', 'gap': '4px'
                             }),
                         ], className="content-header"),
@@ -326,16 +344,30 @@ def create_layout():
                                 )
                             ], id='plot-container', className="resizable-plot-container"),
 
-
-
                             # === DRAGGABLE RESIZE HANDLE ===
                             html.Div(id='resize-handle', className="resize-handle"),
 
                             # HPLC Analysis Results Section
                             html.Div([
                                 html.Div([
-                                    html.Div(id="integration-table-container", className="table-container"),
-                                    html.Div(id="peak-analysis-table-container", className="table-container"),
+                                    # Tab Header for Analysis Tables
+                                    html.Div([
+                                        html.Button("Integration", id="integration-tab-btn", className="tab-button active", **{"data-tab": "integration"}),
+                                        html.Button("Across Samples", id="across-samples-tab-btn", className="tab-button", **{"data-tab": "across-samples"}),
+                                        html.Button("Calibration", id="calibration-tab-btn", className="tab-button", **{"data-tab": "calibration"}),
+                                    ], className="tab-header analysis-tabs"),
+                                    
+                                    # Tab Content for Analysis Tables
+                                    html.Div([
+                                        # Integration Table Tab - Current sample peaks
+                                        html.Div(id="integration-table-container", className="tab-panel active table-container", **{"data-tab-content": "integration"}),
+                                        
+                                        # Across Samples Tab - Selected peak across all samples
+                                        html.Div(id="across-samples-container", className="tab-panel table-container", **{"data-tab-content": "across-samples"}),
+                                        
+                                        # Calibration Tab - For calibration curves
+                                        html.Div(id="calibration-container", className="tab-panel table-container", **{"data-tab-content": "calibration"}),
+                                    ], className="tab-content analysis-tab-content")
                                 ], className="hplc-analysis-content")
                             ],
                                 className="resizable-table-container",
@@ -348,7 +380,6 @@ def create_layout():
                         # Details Overlay (for toggleable details panel)
                         html.Div([
                             html.Div([
-                                html.Div("📋 Analysis Details", className="card-title"),
                                 html.Button("✕", id="close-details-btn", className="close-btn")
                             ], className="card-header"),
                             html.Div(id='details-overlay-content', className="card-content")

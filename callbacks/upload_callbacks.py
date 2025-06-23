@@ -310,83 +310,36 @@ def register_upload_callbacks(app, data_manager):
                 html.Div("No files loaded", className="no-files-text"), 
                 {"display": "block"}, [], current_toasts or [])
 
-    # ── Toggle details panel callback ─────────────────────
     @app.callback(
         [Output("details-overlay", "style"),
-        Output("dashboard-container", "className"),
-        Output("toggle-details-btn", "children"),
-        Output("toggle-details-btn", "title")],
-        [Input("toggle-details-btn", "n_clicks"),
-        Input("close-details-btn", "n_clicks")],
+         Output("dashboard-container", "className")],
+        [Input("close-details-btn", "n_clicks")],
         [State("details-overlay", "style"),
-        State("dashboard-container", "className")]
+         State("dashboard-container", "className")]
     )
-    def toggle_details_panel(toggle_clicks, close_clicks, current_style, current_class):
+    def toggle_details_panel(close_clicks, current_style, current_class):
         ctx = callback_context
         if not ctx.triggered:
-            return {"display": "none"}, "dashboard-split details-hidden", "📋", "Show Analysis Details"
-        
-        # Determine which button was clicked
+            return {"display": "none"}, "dashboard-split details-hidden"
         button_id = ctx.triggered[0]["prop_id"].split(".")[0]
-        
         if button_id == "close-details-btn":
-            # Close panel
-            return (
-                {"display": "none"}, 
-                "dashboard-split details-hidden", 
-                "📋", 
-                "Show Analysis Details"
-            )
-        elif button_id == "toggle-details-btn":
-            # Toggle panel
-            is_hidden = current_style.get("display") == "none"
-            if is_hidden:
-                return (
-                    {"display": "block"}, 
-                    "dashboard-split", 
-                    "📋", 
-                    "Hide Analysis Details"
-                )
-            else:
-                return (
-                    {"display": "none"}, 
-                    "dashboard-split details-hidden", 
-                    "📋", 
-                    "Show Analysis Details"
-                )
-        
-        return {"display": "none"}, "dashboard-split details-hidden", "📋", "Show Analysis Details"
-
-    # Update the callback that shows/hides the toggle button
-    @app.callback(
-        [Output("toggle-details-btn", "style"),
-         Output("dashboard-container", "className", allow_duplicate=True)],
-        [Input("file-selector", "value")],
-        prevent_initial_call=True
-    )
-    def show_toggle_button(selected_file):
-        if selected_file:
-            return {"display": "inline-block"}, "dashboard-split details-hidden"
+            return {"display": "none"}, "dashboard-split details-hidden"
         return {"display": "none"}, "dashboard-split details-hidden"
 
     @app.callback(
         [Output("pill-uvvis_csv", "style", allow_duplicate=True),
-        Output("pill-chromatogram", "style", allow_duplicate=True), 
-        Output("pill-lcms_bundle", "style", allow_duplicate=True),
-        Output("pill-spectra", "style", allow_duplicate=True)],
+         Output("pill-chromatogram", "style", allow_duplicate=True), 
+         Output("pill-lcms_bundle", "style", allow_duplicate=True),
+         Output("pill-spectra", "style", allow_duplicate=True)],
         Input("file-selector", "value"),
         prevent_initial_call=True
     )
-
     def update_nav_pills(selected_file):
         default_visible = {"display": "block"}
-        
         if not selected_file:
             return default_visible, default_visible, default_visible, default_visible
-        
         filename = selected_file.split('|')[0]
         file_data = data_manager.get_file_data(filename)
-        
         # Always show all pills
         return default_visible, default_visible, default_visible, default_visible
 
@@ -746,191 +699,214 @@ def register_upload_callbacks(app, data_manager):
         ])
         
         return html.Div(content)
-
-
-
-    # Replace the complete_hplc_analysis_debug callback with this fixed version:
-    @app.callback(
-        [Output("hplc-analysis-section", "style"),
-        Output("integration-table-container", "children"),
-        Output("peak-analysis-table-container", "children")],
-        [Input("selected-layer", "data"),
-         Input("stored-peaks", "data")],
-        [State("active-hplc-tab-store", "data"),
-         State("selected-peak-group-store", "data")],
+        
+    # Store the selected peak group for persistence
+    app.clientside_callback(
+        """
+        function(value) {
+            // Simple pass-through function with safety check
+            if (value !== undefined) {
+                return value;
+            }
+            return null;
+        }
+        """,
+        Output('selected-peak-group-store', 'data', allow_duplicate=True),
+        [Input('peak-group-selector', 'value')],
         prevent_initial_call=True
     )
-    def update_hplc_analysis_section(selected_layer, _manual_peaks, active_tab_type, stored_group_selection):
+    
+    # Add sidebar tab switching functionality
+    app.clientside_callback(
+        """
+        function(n_clicks_sample, n_clicks_peak, n_clicks_plot, n_clicks_export) {
+            const clientside = window.dash_clientside.clientside;
+            if (clientside && typeof clientside.switch_tab === 'function') {
+                return clientside.switch_tab(n_clicks_sample, n_clicks_peak, n_clicks_plot, n_clicks_export);
+            }
+            return '';
+        }
+        """,
+        Output('_sidebar_tab_dummy', 'children'),  # Dummy output that's not used
+        [
+            Input('sample-tab-btn', 'n_clicks'),
+            Input('peak-tab-btn', 'n_clicks'),
+            Input('plot-tab-btn', 'n_clicks'),
+            Input('export-tab-btn', 'n_clicks')
+        ],
+        prevent_initial_call=True
+    )
+    
+    # Add HPLC analysis tab switching functionality
+    app.clientside_callback(
+        """
+        function(n_clicks_integration, n_clicks_across, n_clicks_calibration) {
+            const clientside = window.dash_clientside.clientside;
+            if (clientside && typeof clientside.switch_analysis_tab === 'function') {
+                return clientside.switch_analysis_tab(n_clicks_integration, n_clicks_across, n_clicks_calibration);
+            }
+            return '';
+        }
+        """,
+        Output('_analysis_tab_dummy', 'children'),  # Dummy output that's not used
+        [
+            Input('integration-tab-btn', 'n_clicks'),
+            Input('across-samples-tab-btn', 'n_clicks'),
+            Input('calibration-tab-btn', 'n_clicks')
+        ],
+        prevent_initial_call=True
+    )
+    
+    @app.callback(
+        [Output("hplc-analysis-section", "style"),
+        Output("integration-table-container", "children", allow_duplicate=True),
+        Output("across-samples-container", "children"),
+        Output("calibration-container", "children")],
+        [Input("selected-layer", "data"),
+        Input("stored-peaks", "data")],  # This listens to manual peaks
+        [State("active-hplc-tab-store", "data"),
+        State("selected-peak-group-store", "data")],
+        prevent_initial_call=True
+    )
+    def update_hplc_analysis_section(selected_layer, manual_peaks, active_tab_type, stored_group_selection):
         """Update HPLC analysis section when file is selected or peaks are detected."""
         print(f"🧪 [HPLC] Processing: {selected_layer}")
+        print(f"🧪 [HPLC] Manual peaks: {len(manual_peaks) if manual_peaks else 0}")
         
         if not selected_layer:
-            return {"display": "none"}, "", ""
+            return {"display": "none"}, "", "", ""
         
         filename = selected_layer.split('|')[0]
         file_data = data_manager.get_file_data(filename)
         
         # Check if this is HPLC data
         if not file_data or file_data.get('type') not in ['chromatogram', 'chromeleon_bundle']:
-            return {"display": "none"}, "", ""
+            return {"display": "none"}, "", "", ""
         
-        # Import peak_manager here to avoid circular imports
-        from utils.peak_integration import peak_manager
-        
-        # Extract table data
+        # Get imported peaks table
         integration_table = file_data.get('integration_table')
-        peak_table = file_data.get('peak_table')
-        manual_table = file_data.get('manual_integration')
-
-        # Get combined table with detected peaks and manual integrations
-        combined_df = peak_manager.get_combined_integration_table(filename, integration_table, manual_table)
         
-        # Create combined table content
-        combined_content = []
+        # Start with imported peaks
+        all_rows = []
+        if integration_table is not None and not integration_table.empty:
+            for _, row in integration_table.iterrows():
+                row_dict = row.to_dict()
+                row_dict['source'] = 'imported'
+                all_rows.append(row_dict)
         
-        if not combined_df.empty:
-            # Format numeric columns
-            numeric_columns = ['Retention Time', 'Area', 'Height', 'Relative Area', 'Width (50%)']
-            display_df = combined_df.copy()
-            
-            for col in numeric_columns:
-                if col in display_df.columns:
-                    display_df[col] = pd.to_numeric(display_df[col], errors='coerce')
-                    if col == 'Retention Time':
-                        display_df[col] = display_df[col].round(3)
-                    elif col in ['Area', 'Height']:
-                        display_df[col] = display_df[col].round(2)
-                    elif col == 'Relative Area':
-                        display_df[col] = display_df[col].round(1)
-                    elif col == 'Width (50%)':
-                        display_df[col] = display_df[col].round(3)
-            
-            # Create the enhanced table
-            combined_content.append(
-                html.Div([
-                    html.H6(f"📊 Combined Peak Analysis - {len(display_df)} peaks", 
-                        style={'marginBottom': '10px', 'color': '#2c3e50'}),
-                    
-                    dash_table.DataTable(
-                        data=display_df.to_dict('records'),
-                        columns=[{"name": i, "id": i} for i in display_df.columns],
-                        style_table={'overflowX': 'auto'},
-                        style_cell={
-                            'fontSize': '11px',
-                            'padding': '6px',
-                            'textAlign': 'center',
-                            'fontFamily': 'monospace'
-                        },
-                        style_header={
-                            'backgroundColor': '#e3f2fd',
-                            'fontWeight': 'bold',
-                            'color': '#1565c0'
-                        },
-                        style_data_conditional=[
-                            {'if': {'row_index': 'odd'}, 'backgroundColor': '#f8f9fa'},
-                            {
-                                'if': {'filter_query': '{source} = imported'},
-                                'backgroundColor': '#e8f5e8',
-                                'color': 'black'
-                            },
-                            {
-                                'if': {'filter_query': '{source} = detected'},
-                                'backgroundColor': '#fff3cd',
-                                'color': 'black'
-                            }
-                        ],
-                        sort_action="native",
-                        filter_action="native"
-                    ),
-                    
-                    html.Div([
-                        html.Small("💡 Green rows: Imported from Chromeleon | Yellow rows: Detected in app", 
-                                style={'color': '#666', 'marginTop': '10px'})
-                    ])
-                ], className="combined-analysis-section")
-            )
+        # Add manual peaks
+        if manual_peaks:
+            for i, p in enumerate(manual_peaks, start=1):
+                manual_row = {
+                    "No.": len(all_rows) + i,  # Continue numbering
+                    "Peak Name": f"Manual {i}",
+                    "Retention Time": f"{p['apex_x']:.3f}",
+                    "Area": f"{p['area']:.3f}",
+                    "Height": f"{p['height']:.0f}",
+                    "Width": f"{p['width']:.3f}" if 'width' in p else "n.a.",
+                    "Plates": "n.a.",
+                    "Asymmetry": "n.a.",
+                    "Resolution": "n.a.",
+                    "source": "manual"
+                }
+                all_rows.append(manual_row)
         
-        elif integration_table is not None and not integration_table.empty:
-            # Fallback to just imported table if no detected peaks
-            combined_data = integration_table.copy()
+        # Create DataFrame for combined peaks
+        if all_rows:
+            combined_df = pd.DataFrame(all_rows)
             
-            if peak_table is not None and not peak_table.empty:
-                for col in peak_table.columns:
-                    if col not in ['No.', 'Retention Time', 'Type']:
-                        combined_data[col] = peak_table[col]
+            # Recalculate relative areas based on total area
+            total_area = 0
+            for row in all_rows:
+                try:
+                    area_str = str(row.get('Area', '0')).replace(',', '.')
+                    area = float(area_str) if area_str and area_str.lower() != 'n.a.' else 0
+                    total_area += area
+                except:
+                    pass
             
-            combined_content.append(
-                html.Div([
-                    html.H6("📊 Peak Analysis Results", style={'marginBottom': '10px', 'color': '#2c3e50'}),
-                    dash_table.DataTable(
-                        data=combined_data.to_dict('records'),
-                        columns=[{"name": i, "id": i} for i in combined_data.columns if i != 'Type'],
-                        style_table={'overflowX': 'auto'},
-                        style_cell={
-                            'fontSize': '11px',
-                            'padding': '6px',
-                            'textAlign': 'center',
-                            'whiteSpace': 'normal',
-                            'height': 'auto',
+            # Add relative area column
+            for row in all_rows:
+                try:
+                    area_str = str(row.get('Area', '0')).replace(',', '.')
+                    area = float(area_str) if area_str and area_str.lower() != 'n.a.' else 0
+                    row['Relative Area'] = f"{(area / total_area * 100):.2f}" if total_area > 0 else "0.00"
+                except:
+                    row['Relative Area'] = "0.00"
+            
+            # Create DataTable for integration results
+            integration_content = html.Div([
+                html.H6(f"Integration Table - {len(all_rows)} peaks", 
+                      style={'marginBottom': '10px', 'color': '#2c3e50'}),
+                
+                dash_table.DataTable(
+                    id='integration-table',
+                    data=all_rows,
+                    columns=[
+                        {"name": "No.", "id": "No."},
+                        {"name": "Peak Name", "id": "Peak Name"},
+                        {"name": "RT (min)", "id": "Retention Time"},
+                        {"name": "Area (mAU·min)", "id": "Area"},
+                        {"name": "Area %", "id": "Relative Area"},
+                        {"name": "Height (mAU)", "id": "Height"},
+                        {"name": "Width (min)", "id": "Width"},
+                        {"name": "Resolution", "id": "Resolution"},
+                        {"name": "Asymmetry", "id": "Asymmetry"},
+                        {"name": "Plates", "id": "Plates"}
+                    ],
+                    style_table={
+                        'overflowX': 'auto', 
+                        'overflowY': 'auto',
+                        'maxHeight': '400px'
+                    },
+                    style_cell={'fontSize': '12px', 'padding': '8px', 'textAlign': 'center'},
+                    style_header={'backgroundColor': '#e3f2fd', 'fontWeight': 'bold', 'color': '#1565c0'},
+                    style_data_conditional=[
+                        {'if': {'row_index': 'odd'}, 'backgroundColor': '#f8f9fa'},
+                        {
+                            'if': {'filter_query': '{source} = imported'},
+                            'backgroundColor': '#e8f5e8',
+                            'color': 'black'
                         },
-                        style_header={
-                            'backgroundColor': '#e3f2fd',
-                            'fontWeight': 'bold',
-                            'color': '#1565c0'
-                        },
-                        style_data_conditional=[
-                            {'if': {'row_index': 'odd'}, 'backgroundColor': '#f8f9fa'},
-                        ]
-                    )
-                ], className="combined-analysis-section")
-            )
-
-        # Add navigation tabs if multiple analyses available
-        if active_tab_type:
-            tabs_content = html.Div([
-                html.Div([
-                    html.Button("Current Sample", 
-                            className="peak-tab-btn active" if active_tab_type == "current" else "peak-tab-btn",
-                            id={'type': 'peak-tab', 'index': f'{filename}_current'},
-                            style={'marginRight': '10px'}),
-                    html.Button("Across Samples", 
-                            className="peak-tab-btn active" if active_tab_type == "across" else "peak-tab-btn",
-                            id={'type': 'peak-tab', 'index': f'{filename}_across'}),
-                    html.Button("Calibration", 
-                            className="peak-tab-btn active" if active_tab_type == "calibration" else "peak-tab-btn",
-                            id={'type': 'peak-tab', 'index': f'{filename}_calibration'}),
-                ], className="peak-tab-nav"),
+                        {
+                            'if': {'filter_query': '{source} = manual'},
+                            'backgroundColor': '#fff3cd',
+                            'color': 'black'
+                        }
+                    ],
+                    sort_action="native",
+                ),
                 
                 html.Div([
-                    # Current sample content
-                    html.Div([
-                        *combined_content
-                    ], style={'display': 'block' if active_tab_type == "current" else 'none'},
-                    id={'type': 'peak-content', 'index': f'{filename}_current'}),
-                    
-                    # Across samples content
-                    html.Div([
-                        create_across_samples_content(data_manager, filename, stored_group_selection)
-                    ], style={'display': 'block' if active_tab_type == "across" else 'none'},
-                    id={'type': 'peak-content', 'index': f'{filename}_across'}),
-                    
-                    # Calibration content
-                    html.Div([
-                        html.H6("📏 Calibration Curve Analysis"),
-                        html.P("Calibration analysis will be available in a future update.")
-                    ], style={'display': 'block' if active_tab_type == "calibration" else 'none'},
-                    id={'type': 'peak-content', 'index': f'{filename}_calibration'}),
+                    html.Small("🟩 Green rows: Imported peaks | 🟨 Yellow rows: Manual peaks", 
+                            style={'color': '#666', 'marginTop': '10px'})
                 ])
-            ], style={'height': '100%', 'overflowY': 'auto'})
+            ])
             
-            return {
-                "display": "block",
-            }, tabs_content, ""
+            # Create across samples content
+            across_samples_content = create_across_samples_content(data_manager, filename, stored_group_selection)
+            
+            # Create calibration placeholder
+            calibration_content = html.Div([
+                html.H6("📊 Calibration & Quantification"),
+                html.P("This feature is coming soon."),
+                html.Div([
+                    html.Ul([
+                        html.Li("Standard curve creation"),
+                        html.Li("Linear and non-linear regression"),
+                        html.Li("Automatic quantification"),
+                        html.Li("Export of results")
+                    ])
+                ], style={'marginTop': '15px'})
+            ])
+            
+            return {"display": "block"}, integration_content, across_samples_content, calibration_content
         
-        # Simple view without tabs
-        return {
-            "display": "block",
-        }, html.Div(combined_content), ""
+        # No peaks available
+        empty_message = html.Div("No peaks detected in this file.")
+        return {"display": "block"}, empty_message, empty_message, empty_message
+
+
 
 
     @app.callback(
@@ -941,63 +917,83 @@ def register_upload_callbacks(app, data_manager):
         prevent_initial_call=True
     )
     def update_across_samples_table(selected_group_idx, rt_tolerance, selected_layer):
-        """Update the across samples table when group selection or tolerance changes."""
-        
-        if not selected_layer or selected_group_idx is None:
+        """Update the across samples comparison table when group selection or RT tolerance changes."""
+        if selected_layer is None:
             return []
+            
+        filename = selected_layer.split('|')[0]
         
-        filename = selected_layer.split('|')[0] if '|' in selected_layer else selected_layer
+        # Extract all peaks from all samples
+        all_peaks = []
         
         # Get all HPLC files
-        hplc_files = []
-        for fname in data_manager.get_loaded_files():
-            file_data = data_manager.get_file_data(fname)
+        for loaded_filename in data_manager.get_loaded_files():
+            file_data = data_manager.get_file_data(loaded_filename)
             if file_data and file_data.get('type') in ['chromatogram', 'chromeleon_bundle']:
-                hplc_files.append({'filename': fname, 'data': file_data})
-        
-        # Extract all peaks
-        all_peaks = []
-        for file_info in hplc_files:
-            fname = file_info['filename']
-            file_data = file_info['data']
-            integration_table = file_data.get('integration_table')
-            peak_table = file_data.get('peak_table')
-            
-            if integration_table is not None and len(integration_table) > 1:
-                sample_name = fname.replace('_UV_VIS_1.txt', '').replace('temp_', '')
-                peaks_only = integration_table[
-                    ~integration_table.iloc[:, 0].astype(str).str.contains('Total', case=False, na=False)
-                ]
+                integration_table = file_data.get('integration_table')
+                peak_table = file_data.get('peak_table')
                 
-                peak_analysis = {}
-                if peak_table is not None:
-                    for _, peak_row in peak_table.iterrows():
-                        peak_no = peak_row.get('No.')
-                        peak_analysis[peak_no] = peak_row
-                
-                for idx, peak_row in peaks_only.iterrows():
-                    peak_no = peak_row.get('No.')
-                    corresponding_peak = peak_analysis.get(peak_no, {})
+                if integration_table is not None and len(integration_table) > 0:
+                    sample_name = loaded_filename.replace('_UV_VIS_1.txt', '').replace('temp_', '')
                     
-                    peak_data = {
-                        'sample': sample_name,
-                        'peak_no': peak_no,
-                        'rt': float(str(peak_row.get('Retention Time', 0)).replace(',', '.')),
-                        'area': float(str(peak_row.get('Area', 0)).replace(',', '.')),
-                        'height': float(str(peak_row.get('Height', 0)).replace(',', '.')),
-                        'rel_area': float(str(peak_row.get('Relative Area', 0)).replace(',', '.')),
-                        'width': float(str(corresponding_peak.get('Width (50%)', 0)).replace(',', '.')),
-                        'resolution': str(corresponding_peak.get('Resolution (EP)', 'n.a.')),
-                        'asymmetry': float(str(corresponding_peak.get('Asymmetry (EP)', 0)).replace(',', '.')) if corresponding_peak.get('Asymmetry (EP)', 'n.a.') != 'n.a.' else 0,
-                        'plates': int(float(str(corresponding_peak.get('Plates (EP)', 0)).replace(',', '.'))) if str(corresponding_peak.get('Plates (EP)', 0)).replace(',', '.').replace('.', '').isdigit() else 0
-                    }
-                    all_peaks.append(peak_data)
+                    # Filter out total rows and n.a. rows
+                    peaks_only = integration_table[
+                        (~integration_table.iloc[:, 0].astype(str).str.contains('Total', case=False, na=False)) &
+                        (~integration_table.iloc[:, 0].astype(str).str.contains('n.a.', case=False, na=False)) &
+                        (integration_table.iloc[:, 0].notna())
+                    ]
+                    
+                    # Get corresponding peak analysis data
+                    peak_analysis = {}
+                    if peak_table is not None:
+                        for _, peak_row in peak_table.iterrows():
+                            peak_no = peak_row.get('No.')
+                            if str(peak_no).lower() != 'n.a.' and pd.notna(peak_no):
+                                peak_analysis[peak_no] = peak_row
+                    
+                    for idx, peak_row in peaks_only.iterrows():
+                        peak_no = peak_row.get('No.')
+                        if str(peak_no).lower() == 'n.a.' or pd.isna(peak_no):
+                            continue
+                            
+                        corresponding_peak = peak_analysis.get(peak_no, {})
+                        
+                        # More robust RT extraction
+                        rt_value = peak_row.get('Retention Time', 0)
+                        if pd.isna(rt_value) or str(rt_value).lower() == 'n.a.':
+                            continue
+                            
+                        try:
+                            rt = float(str(rt_value).replace(',', '.'))
+                            if rt <= 0:
+                                continue
+                        except:
+                            continue
+                        
+                        peak_data = {
+                            'sample': sample_name,
+                            'filename': loaded_filename,
+                            'is_current': loaded_filename == filename,
+                            'peak_no': peak_no,
+                            'rt': rt,
+                            'area': float(str(peak_row.get('Area', 0)).replace(',', '.')),
+                            'height': float(str(peak_row.get('Height', 0)).replace(',', '.')),
+                            'rel_area': float(str(peak_row.get('Relative Area', 0)).replace(',', '.')),
+                            'width': float(str(corresponding_peak.get('Width (50%)', 0)).replace(',', '.')),
+                            'resolution': str(corresponding_peak.get('Resolution (EP)', 'n.a.')),
+                            'asymmetry': float(str(corresponding_peak.get('Asymmetry (EP)', 0)).replace(',', '.')) if corresponding_peak.get('Asymmetry (EP)', 'n.a.') != 'n.a.' else 0,
+                            'plates': int(float(str(corresponding_peak.get('Plates (EP)', 0)).replace(',', '.'))) if str(corresponding_peak.get('Plates (EP)', 0)).replace(',', '.').replace('.', '').isdigit() else 0
+                        }
+                        all_peaks.append(peak_data)
         
-        # Group peaks by RT with current tolerance
-        def group_peaks_by_rt(peaks, tolerance):
+        # Group peaks by retention time with the current tolerance
+        def group_peaks_by_rt(peaks, tolerance=0.1):
+            """Group peaks by retention time within tolerance."""
             peaks_sorted = sorted(peaks, key=lambda x: x['rt'])
             groups = []
+            
             for peak in peaks_sorted:
+                # Find if this peak belongs to an existing group
                 assigned = False
                 for group in groups:
                     group_rt_avg = sum(p['rt'] for p in group) / len(group)
@@ -1005,30 +1001,37 @@ def register_upload_callbacks(app, data_manager):
                         group.append(peak)
                         assigned = True
                         break
+                
                 if not assigned:
                     groups.append([peak])
+            
             return groups
         
-        peak_groups = group_peaks_by_rt(all_peaks, rt_tolerance or 0.1)
+        # Create peak groups with current tolerance
+        peak_groups = group_peaks_by_rt(all_peaks, rt_tolerance)
+        
+        # Filter groups with multiple samples
         multi_sample_groups = [g for g in peak_groups if len(set(p['sample'] for p in g)) > 1]
         
         if not multi_sample_groups or selected_group_idx >= len(multi_sample_groups):
-            return []
+            return []  # No valid groups or invalid index
         
-        # Get selected group and create table data
+        # Get the selected group
         selected_group = multi_sample_groups[selected_group_idx]
         comparison_data = []
         
+        # Helper function to safely format float values
+        def safe_format_float(value, decimals=2, default="n.a."):
+            try:
+                if value and str(value).lower() != 'n.a.' and str(value).strip() != '':
+                    num_val = float(str(value).replace(',', '.'))
+                    return f"{num_val:.{decimals}f}" if num_val > 0 else default
+                return default
+            except:
+                return default
+        
+        # Create comparison data for the selected group
         for peak in selected_group:
-            def safe_format_float(value, decimals=2, default="n.a."):
-                try:
-                    if value and str(value).lower() != 'n.a.' and str(value).strip() != '':
-                        num_val = float(str(value).replace(',', '.'))
-                        return f"{num_val:.{decimals}f}" if num_val > 0 else default
-                    return default
-                except:
-                    return default
-            
             row_data = {
                 'Sample': peak['sample'],
                 'Peak': int(peak['peak_no']) if str(peak['peak_no']).isdigit() else peak['peak_no'],
@@ -1042,51 +1045,44 @@ def register_upload_callbacks(app, data_manager):
                 'Plates': f"{peak['plates']}" if peak['plates'] > 0 else "n.a."
             }
             comparison_data.append(row_data)
+            
+        # Store the selected group index for persistence
+        # This is done in a clientside callback
         
         return comparison_data
-
-
-
-
     @app.callback(
         Output("active-hplc-tab-store", "data"),
-        [Input({'type': 'peak-tab', 'index': ALL}, 'n_clicks')],
-        [State({'type': 'peak-tab', 'index': ALL}, 'id'),
-        State("active-hplc-tab-store", "data")],
+        [Input("integration-tab-btn", "n_clicks"),
+         Input("across-samples-tab-btn", "n_clicks"),
+         Input("calibration-tab-btn", "n_clicks")],
+        [State("active-hplc-tab-store", "data")],
         prevent_initial_call=True
     )
-    def store_active_tab(n_clicks, tab_ids, current_active):
-        """Store which tab is currently active."""
+    def store_active_tab(integration_clicks, across_clicks, calibration_clicks, current_active):
+        """Store which HPLC analysis tab is currently active."""
         ctx = callback_context
         
-        # Return current active if no triggers or no clicks
-        if not ctx.triggered or not any(n_clicks or []):
-            return current_active or "current"
+        # Return current active if no triggers
+        if not ctx.triggered:
+            return current_active or "integration"
         
         try:
             # Find which tab was clicked
-            triggered_prop = ctx.triggered[0]['prop_id']
+            triggered_id = ctx.triggered[0]['prop_id'].split('.')[0]
             
-            # Extract the index from the triggered property
-            import json
-            if '.n_clicks' in triggered_prop:
-                prop_dict_str = triggered_prop.replace('.n_clicks', '')
-                prop_dict = json.loads(prop_dict_str)
-                clicked_index = prop_dict['index']
-                
-                # Extract tab type (current, across, calibration)
-                if '_current' in clicked_index:
-                    return "current"
-                elif '_across' in clicked_index:
-                    return "across"  
-                elif '_calibration' in clicked_index:
-                    return "calibration"
+            # Map button IDs to tab names
+            if triggered_id == "integration-tab-btn":
+                return "integration"
+            elif triggered_id == "across-samples-tab-btn":
+                return "across-samples"
+            elif triggered_id == "calibration-tab-btn":
+                return "calibration"
                     
         except Exception as e:
             print(f"[DEBUG] Error in store_active_tab: {e}")
             
         # Fallback to current active or default
-        return current_active or "current"
+        return current_active or "integration"
 
 
 

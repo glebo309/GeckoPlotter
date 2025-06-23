@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>GeckoPlotter User Guide</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            padding: 20px;
+            background-color: #2E2E2E; /* Dark Background */
+            color: #FFFFFF; /* White Text */
+            line-height: 1.6;
+        }
+        h1, h2, h3 {
+            color: #2CC985; /* CustomTkinter Green */
+            margin-top: 40px;
+        }
+        a {
+            color: #1E90FF; /* Dodger Blue Links */
+            text-decoration: none;
+        }
+        a:hover {
+            text-decoration: underline;
+        }
+        ol, ul {
+            margin-left: 20px;
+        }
+        pre {
+            background-color: #444444; /* Darker Grey for Code Blocks */
+            padding: 10px;
+            border-radius: 5px;
+            overflow-x: auto;
+        }
+        code {
+            background-color: #444444; /* Darker Grey for Inline Code */
+            padding: 2px 4px;
+            border-radius: 3px;
+        }
+        .toc a {
+            color: #1E90FF;
+        }
+        .toc a:hover {
+            text-decoration: underline;
+        }
+        .section {
+            margin-bottom: 30px;
+        }
+        .subsection {
+            margin-bottom: 20px;
+        }
+        .highlight {
+            background-color: #2CC985; /* CustomTkinter Green Highlight */
+            padding: 2px 4px;
+            border-radius: 3px;
+            color: #000000; /* Black Text for Contrast */
+        }
+        .note {
+            background-color: #444444;
+            padding: 10px;
+            border-left: 5px solid #2CC985;
+            margin: 20px 0;
+            border-radius: 3px;
+        }
+        /* Headline and Logo */
+        .header {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            margin-bottom: 20px;
+            text-align: center;
+        }
+
+        .logo {
+            width: 200px;
+            height: auto;
+            margin-right: 15px;
+        }
+    </style>
+</head>
+<body>
+    <!-- Logo Section -->
+    <div class="header">
+        <img src="GeckoPlotter_logo.png" alt="GeckoPlotter Logo" class="logo">
+        <h1>GeckoPlotter: User Guide</h1>
+    </div>
+
+    <h2>Table of Contents</h2>
+    <ol class="toc">
+        <li><a href="#introduction">Introduction</a></li>
+        <li><a href="#getting-started">Getting Started</a></li>
+        <li><a href="#main-interface-overview">Main Interface Overview</a></li>
+        <li><a href="#loading-data-files">Loading Data Files</a></li>
+        <li><a href="#plotting-data">Plotting Data</a></li>
+        <li><a href="#configuration-management">Configuration Management</a></li>
+        <li><a href="#batch-processing">Batch Processing</a></li>
+        <li><a href="#peak-integration">Peak Integration</a></li>
+        <li><a href="#annotations">Annotations</a></li>
+        <li><a href="#customizing-plots">Customizing Plots</a></li>
+        <li><a href="#exporting-plots">Exporting Plots</a></li>
+        <li><a href="#menu-options">Menu Options</a></li>
+        <li><a href="#theme-and-appearance">Theme and Appearance</a></li>
+        <li><a href="#help-and-support">Help and Support</a></li>
+        <li><a href="#about">About</a></li>
+    </ol>
+
+    <div class="section" id="introduction">
+        <h2>Introduction</h2>
+        <p>Welcome to <strong>GeckoPlotter</strong>, a software designed to visualize and analyze High Performance Liquid Chromatography (HPLC) data efficiently. This tool provides an intuitive interface to manage your chromatographic data, customize plots, and (soon) perform detailed analyses.</p>
+        <p>Makes it easy to visualize your data quickly, make annotations, customize the color maps, and export them to various formats, <strong>GeckoPlotter</strong> improves your workflow, and allows you to make quality figures in no time.</p>
+    </div>
+
+    <div class="section" id="getting-started">
+        <h2>Getting Started</h2>
+        <div class="subsection">
+            <h3>Launching the Application</h3>
+            <p>To start using <strong>GeckoPlotter</strong>, simply run the compiled application executable. The main window will appear, providing access to all primary functionalities.</p>
+            <p>Upon launching, you'll be greeted with the main interface, where you can begin selecting and loading your HPLC data files.</p>
+        </div>
+    </div>
+
+    <div class="section" id="main-interface-overview">
+        <h2>Main Interface Overview</h2>
+        <p>The main interface of <strong>GeckoPlotter</strong> is designed for ease of use and quick access to essential features. Here's a breakdown of the primary components:</p>
+        <ul>
+            <li><strong>Menu Bar:</strong> Located at the top, it provides access to File, View, and Help menus for various operations like opening files, saving sessions, and accessing the User Guide.</li>
+            <li><strong>Select Files Button:</strong> Allows you to browse and select multiple HPLC data files for analysis.</li>
+            <li><strong>Plot Data Button:</strong> Opens the Plot Settings window where you can customize your plots before visualizing the data.</li>
+            <li><strong>Load Session Button:</strong> Enables you to load a previously saved session, restoring all settings and loaded datasets.</li>
+            <li><strong>Theme Toggle Button:</strong> Switches between Light and Dark themes to suit your preference.</li>
+        </ul>
+    </div>
+
+    <div class="section" id="loading-data-files">
+        <h2>Loading Data Files</h2>
+        <p>Loading your HPLC data files is straightforward:</p>
+        <ol>
+            <li>Click on the <span class="highlight">"Select Files"</span> button in the main interface.</li>
+            <li>In the file dialog that appears, navigate to the directory containing your HPLC data files. Select one or multiple <code>.txt</code> files.</li>
+            <li>Once selected, the application will display the number of files chosen. These files are now ready for plotting and analysis.</li>
+        </ol>
+        <div class="note">
+            <strong>Note:</strong> Ensure that your data files are in the supported <code>.txt</code> format and contain the necessary columns: <code>Time (min)</code> and <code>Value (mAU)</code>.
+        </div>
+    </div>
+
+    <div class="section" id="plotting-data">
+        <h2>Plotting Data</h2>
+        <p>After loading your data files, you can proceed to plot the chromatograms:</p>
+        <ol>
+            <li>Click on the <span class="highlight">"Plot Data"</span> button to open the Plot Settings window.</li>
+            <li>In the Plot Settings window, adjust your desired settings such as color maps, line thickness, X-axis range, and more.</li>
+            <li>Select the datasets you wish to display by checking the corresponding boxes.</li>
+            <li>Once all settings are configured, the plot will update automatically, reflecting your customizations.</li>
+        </ol>
+    </div>
+
+    <div class="section" id="configuration-management">
+        <h2>Configuration Management</h2>
+        <p><strong>GeckoPlotter</strong> allows you to save and load your plot configurations, enabling you to maintain consistency across different sessions.</p>
+        <div class="subsection">
+            <h3>Saving a Session</h3>
+            <ol>
+                <li>After configuring your plot settings and loading the desired datasets, navigate to <strong>File &gt; Save Session</strong> in the menu bar.</li>
+                <li>Choose a destination and filename for your session <code>.json</code> file.</li>
+                <li>Click <span class="highlight">"Save"</span>. Your current configuration, including loaded datasets, plot settings, peaks, and annotations, will be saved.</li>
+            </ol>
+        </div>
+        <div class="subsection">
+            <h3>Loading a Session</h3>
+            <ol>
+                <li>To restore a previously saved session, navigate to <strong>File &gt; Load Session</strong>.</li>
+                <li>In the file dialog, select the desired session <code>.json</code> file.</li>
+                <li>Click <span class="highlight">"Open"</span>. The application will automatically load all settings, datasets, and configurations from the session file.</li>
+            </ol>
+        </div>
+    </div>
+
+    <div class="section" id="batch-processing">
+        <h2>Batch Processing</h2>
+        <p>The Batch Processing feature allows you to handle multiple datasets simultaneously, streamlining your analysis workflow.</p>
+        <ol>
+            <li>Use the <span class="highlight">"Select Files"</span> button to load multiple HPLC data files at once.</li>
+            <li>Once loaded, all selected datasets will appear in the Dataset Selection panel within the Plot Settings window.</li>
+            <li>You can choose to display them individually or combined in a single plot by toggling the <span class="highlight">"Plot Separately"</span> option.</li>
+        </ol>
+    </div>
+
+    <div class="section" id="peak-integration">
+        <h2>Peak Integration</h2>
+        <p>Peak Integration is a critical feature for quantifying specific regions within your chromatograms.</p>
+        <ol>
+            <li>In the Plot Settings window, navigate to the <strong>Peak Settings</strong> section.</li>
+            <li>Click on the <span class="highlight">"Add Peak"</span> button to define a new peak.</li>
+            <li>Specify the <strong>Minimum Time</strong> and <strong>Maximum Time</strong> boundaries for the peak you wish to integrate.</li>
+            <li>Choose a color for the peak area using the <strong>Color Picker</strong>.</li>
+            <li>Once defined, the area under the chromatogram curve within the specified time range will be highlighted, and the integrated area will be calculated and displayed in the console.</li>
+        </ol>
+        <div class="note">
+            <strong>Note:</strong> Ensure that the defined time ranges correspond accurately to the peaks of interest in your data to obtain meaningful integration results.
+        </div>
+    </div>
+
+    <div class="section" id="annotations">
+        <h2>Annotations</h2>
+        <p>Annotations allow you to add textual information, arrows, or markers directly onto your plots, enhancing clarity and providing additional context.</p>
+        <ol>
+            <li>In the Plot Settings window, navigate to the <strong>Annotations</strong> section.</li>
+            <li>Click on the <span class="highlight">"Add Annotation"</span> button to create a new annotation.</li>
+            <li>Configure the annotation by specifying:
+                <ul>
+                    <li><strong>Type:</strong> Choose between <code>Text</code>, <code>Arrow</code>, or <code>Marker</code>.</li>
+                    <li><strong>Target:</strong> Select the specific dataset to apply the annotation or choose <code>All</code> to apply it to all plots.</li>
+                    <li><strong>X and Y Coordinates:</strong> Define the exact location on the plot where the annotation will appear.</li>
+                    <li><strong>Text:</strong> Enter the content of the annotation.</li>
+                    <li><strong>Color:</strong> Choose a color that complements your plot for visibility.</li>
+                </ul>
+            </li>
+            <li>The annotation will appear on the plot based on the defined parameters.</li>
+        </ol>
+        <div class="note">
+            <strong>Note:</strong> You can manage multiple annotations by adding or removing them as needed. Each annotation is customizable to fit your specific analysis requirements.
+        </div>
+    </div>
+
+    <div class="section" id="customizing-plots">
+        <h2>Customizing Plots</h2>
+        <p>Customization options allow you to tailor your plots to meet your specific visualization needs.</p>
+        <div class="subsection">
+            <h3>Color Maps</h3>
+            <p>Select from a variety of color maps to enhance the visual appeal of your plots:</p>
+            <ul>
+                <li><strong>Default:</strong> Uses the <span class="highlight">Viridis</span> color map, known for its perceptual uniformity.</li>
+                <li><strong>Alternative Options:</strong> Choose from a wide range of color maps such as <span class="highlight">Plasma</span>, <span class="highlight">Inferno</span>, <span class="highlight">Magma</span>, and more to best represent your data.</li>
+            </ul>
+        </div>
+        <div class="subsection">
+            <h3>Line Thickness</h3>
+            <p>Adjust the thickness of the chromatogram lines to improve visibility:</p>
+            <ol>
+                <li>Navigate to the <strong>Line Thickness</strong> field in the Plot Settings window.</li>
+                <li>Enter the desired line thickness value. Higher values result in thicker lines.</li>
+                <li>Press <code>Enter</code> or click outside the field to apply the changes.</li>
+            </ol>
+        </div>
+        <div class="subsection">
+            <h3>Axis Labels and Titles</h3>
+            <p>Customize the labels and titles of your plots for better clarity:</p>
+            <ol>
+                <li>In the <strong>Additional Plot Customization</strong> section, modify the <strong>X-Axis Label</strong> and <strong>Y-Axis Label</strong> as needed.</li>
+                <li>Adjust font sizes for axis labels, titles, and tick labels to enhance readability.</li>
+            </ol>
+        </div>
+        <div class="subsection">
+            <h3>Legends</h3>
+            <p>Enable or disable legends to either display or hide dataset labels on your plots:</p>
+            <ol>
+                <li>Toggle the <span class="highlight">"Show Legend"</span> checkbox in the Plot Settings window.</li>
+                <li>If enabled, legends will appear, indicating which color corresponds to which dataset.</li>
+                <li>Adjust the legend font size for optimal visibility.</li>
+            </ol>
+        </div>
+    </div>
+
+    <div class="section" id="exporting-plots">
+        <h2>Exporting Plots</h2>
+        <p>Export your customized plots in various formats for presentations, reports, or further analysis:</p>
+        <ol>
+            <li>After configuring your plot settings and ensuring the plot appears as desired, navigate to <strong>File &gt; Export Plot</strong> in the menu bar.</li>
+            <li>In the export dialog, select your preferred file format from the available options:</li>
+            <ul>
+                <li><strong>PNG:</strong> High-quality raster image suitable for presentations.</li>
+                <li><strong>SVG:</strong> Scalable Vector Graphics for high-resolution printing and editing.</li>
+                <li><strong>PDF:</strong> Document format ideal for sharing and embedding in reports.</li>
+                <li><strong>EPS:</strong> Encapsulated PostScript for professional printing and publications.</li>
+            </ul>
+            <li>Choose the destination folder and filename for your exported plot.</li>
+            <li>Specify the resolution (DPI) if prompted, especially for raster formats like PNG.</li>
+            <li>Click <span class="highlight">"Save"</span> to export your plot.</li>
+        </ol>
+        <div class="note">
+            <strong>Tip:</strong> For best results, choose vector formats like SVG or PDF when possible, as they maintain quality at any scale.
+        </div>
+    </div>
+
+    <div class="section" id="menu-options">
+        <h2>Menu Options</h2>
+        <p>The menu bar offers a range of options to manage files, settings, and access support resources:</p>
+        <div class="subsection">
+            <h3>File Menu</h3>
+            <ul>
+                <li><strong>Open Files:</strong> Select and load HPLC data files into the application.</li>
+                <li><strong>Save Session:</strong> Save the current state, including datasets and settings, for later use.</li>
+                <li><strong>Load Session:</strong> Load a previously saved session to restore all configurations.</li>
+                <li><strong>Save Settings:</strong> Save your plot customization settings independently of the session.</li>
+                <li><strong>Load Settings:</strong> Load previously saved plot customization settings.</li>
+                <li><strong>Export Plot:</strong> Export the current plot in your chosen format.</li>
+                <li><strong>Exit:</strong> Close the application.</li>
+            </ul>
+        </div>
+        <div class="subsection">
+            <h3>View Menu</h3>
+            <ul>
+                <li><strong>Toggle Theme:</strong> Switch between Light and Dark themes to suit your environment.</li>
+                <li><strong>Toggle Plot Settings:</strong> Show or hide the Plot Settings window for a cleaner interface.</li>
+                <!-- Add more view options as needed -->
+            </ul>
+        </div>
+        <div class="subsection">
+            <h3>Help Menu</h3>
+            <ul>
+                <li><strong>User Guide:</strong> Access this comprehensive guide to learn about all features and functionalities.</li>
+                <li><strong>Documentation:</strong> View detailed technical documentation for advanced usage.</li>
+                <li><strong>Tutorials:</strong> Follow step-by-step tutorials to master the application.</li>
+                <li><strong>About:</strong> Learn more about the application version, developer, and additional resources.</li>
+            </ul>
+        </div>
+    </div>
+
+    <div class="section" id="theme-and-appearance">
+        <h2>Theme and Appearance</h2>
+        <p>Customize the appearance of <strong>GeckoPlotter</strong> to match your preferences or working environment:</p>
+        <ol>
+            <li>Locate the <span class="highlight">"Toggle Theme"</span> button in the main interface or under the <strong>View Menu</strong>.</li>
+            <li>Click the button to switch between <strong>Dark</strong> and <strong>Light</strong> themes.</li>
+            <li>The application will immediately update its appearance, ensuring a comfortable viewing experience in different lighting conditions.</li>
+        </ol>
+        <div class="note">
+            <strong>Note:</strong> The selected theme preference is saved with your session and will persist across different usage instances.
+        </div>
+    </div>
+
+    <div class="section" id="help-and-support">
+        <h2>Help and Support</h2>
+        <p>If you encounter any issues or have questions about using <strong>GeckoPlotter</strong>, the following resources are available:</p>
+        <ul>
+            <li><strong>User Guide:</strong> Accessible via the <strong>Help Menu</strong>, providing detailed instructions and tips.</li>
+            <li><strong>Documentation:</strong> For in-depth technical details and advanced configurations. (not there yet) </li>
+            <li><strong>Tutorials:</strong> Step-by-step guides to help you become proficient with the application. (not there yet) </li>
+            <li><strong>Support:</strong> Contact the developer for personalized assistance.</li>
+        </ul>
+        <div class="note">
+            <strong>Tip:</strong> Always ensure you're using the latest version of the application to benefit from new features and improvements.
+        </div>
+    </div>
+
+    <div class="section" id="about">
+        <h2>About</h2>
+        <p><strong>GeckoPlotter</strong> Version <span class="highlight">0.1.9</span></p>
+        <p>Developed by <strong>Glenn Bojanov</strong></p>
+        <p>For more information, visit: <a href="https://glecko.xyz">https://glecko.xyz</a></p>
+    </div>
+</body>
+</html>

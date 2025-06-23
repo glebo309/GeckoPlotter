@@ -29,7 +29,6 @@ class ChromeleonBundleReader(BaseReader):
 
     def _process_file(self):
         try:
-            print(f"[DEBUG] _process_file() called")
             # Get cleaned filename
             raw_name = os.path.basename(self.file_path).replace("temp_", "")
             self.file_name = raw_name  # for display
@@ -42,35 +41,24 @@ class ChromeleonBundleReader(BaseReader):
                     self.base_name = match.group(1).strip()
                 else:
                     self.base_name = os.path.splitext(raw_name)[0].strip()
-                print(f"[🧠] Base sample name resolved as: {self.base_name}")
-            else:
-                print(f"[🧠] Using previously set base name: {self.base_name}")
-
+            
             self.file_dir = os.path.dirname(self.file_path)
 
             # Read main file
             with open(self.file_path, 'r', encoding='utf-8') as f:
                 content = f.read()
-            print(f"[DEBUG] File content length: {len(content)}")
-            print(f"[DEBUG] Contains 'Raw Data:': {'Raw Data:' in content}")
-
 
             # Extract metadata from header section
             header_part = content.split("Raw Data:")[0]
             self._parse_metadata(header_part)
 
             # Extract chromatogram data
-            # Extract chromatogram data
             raw_data_part = content.split("Raw Data:")[-1].strip()
             raw_data_part = self.convert_german_number(raw_data_part)
             df = pd.read_csv(StringIO(raw_data_part), sep="\t")
-            print(f"[DEBUG] Columns found: {list(df.columns)}")
-            print(f"[DEBUG] DataFrame shape: {df.shape}")
             if len(df) > 0:
                 self.data = df[['Time (min)', 'Value (mAU)']]
-                print(f"[DEBUG] Successfully loaded {len(self.data)} data points")
             else:
-                print(f"[DEBUG] No data rows found")
                 self.data = None
 
             # Load auxiliary files
@@ -85,15 +73,6 @@ class ChromeleonBundleReader(BaseReader):
     @staticmethod
     def convert_german_number(text):
         """Convert German decimal format (comma as decimal separator) to English format."""
-        print(f"[DEBUG] Converting German numbers in text ({len(text)} chars)")
-        
-        # Show some sample lines before conversion
-        lines = text.strip().split('\n')
-        sample_lines = [line for line in lines[:10] if ',' in line]
-        if sample_lines:
-            print(f"[DEBUG] Sample lines with commas:")
-            for i, line in enumerate(sample_lines[:3]):
-                print(f"[DEBUG]   {i+1}: {line}")
         
         original_text = text
         
@@ -111,14 +90,7 @@ class ChromeleonBundleReader(BaseReader):
         
         # Show changes made
         if text != original_text:
-            print(f"[DEBUG] German number conversion applied")
-            # Show sample of converted lines
-            converted_lines = text.strip().split('\n')
-            for i, (orig, conv) in enumerate(zip(lines, converted_lines)):
-                if orig != conv and i < 3:
-                    print(f"[DEBUG] Conversion {i+1}: '{orig}' -> '{conv}'")
-        else:
-            print(f"[DEBUG] No German number conversion needed")
+            pass
         
         return text
 
@@ -132,7 +104,7 @@ class ChromeleonBundleReader(BaseReader):
     def load_file(self, file_path, extra_files=None):
         """Load Chromeleon bundle file with auxiliary files."""
         
-        # ✅ RESET ALL instance variables at the start of each file load
+        # RESET ALL instance variables at the start of each file load
         self.base_name = None
         self.file_name = None
         self.file_path = None
@@ -143,20 +115,17 @@ class ChromeleonBundleReader(BaseReader):
         self.peak_table = None
         self.sst_result = {}
         
-        print(f"[🧠] 🔄 RESET: Cleared all instance variables for new file")
-        
-        # ✅ Set the file path
+        # Set the file path
         self.file_path = file_path
         
-        # ✅ Extract the current temp filename to match against extra_files
+        # Extract the current temp filename to match against extra_files
         temp_filename = os.path.basename(file_path)
-        print(f"[🧠] 🔍 Processing temp file: {temp_filename}")
         
-        # ✅ Find the MATCHING original filename in extra_files
+        # Find the MATCHING original filename in extra_files
         if extra_files:
             for original_name in extra_files.keys():
                 if "_UV_VIS_1.txt" in original_name:
-                    # ✅ Check if this original file corresponds to our current temp file
+                    # Check if this original file corresponds to our current temp file
                     # The temp file might be: tmpXXX_1 - 30_UV_VIS_1.txt
                     # We want to match it with: 1 - 30_UV_VIS_1.txt
                     
@@ -165,16 +134,13 @@ class ChromeleonBundleReader(BaseReader):
                     if match:
                         potential_base = match.group(1).strip()
                         
-                        # ✅ Check if the temp filename contains this base name
+                        # Check if the temp filename contains this base name
                         if potential_base in temp_filename:
                             self.base_name = potential_base
                             self.file_name = original_name  # for display
-                            print(f"[🧠] ✅ MATCHED: Base sample name set to: {self.base_name}")
-                            print(f"[🧠] ✅ MATCHED: Original file: {original_name}")
-                            print(f"[🧠] ✅ MATCHED: Temp file: {temp_filename}")
                             break
         
-        # ✅ Fallback to the old method if no match found in extra_files
+        # Fallback to the old method if no match found in extra_files
         if not hasattr(self, 'base_name') or not self.base_name:
             # Try to extract from temp filename (remove temp prefix)
             clean_name = re.sub(r'^tmp[^_]*_', '', temp_filename)
@@ -183,7 +149,6 @@ class ChromeleonBundleReader(BaseReader):
                 self.base_name = match.group(1).strip()
             else:
                 self.base_name = os.path.splitext(clean_name)[0].strip()
-            print(f"[🧠] ⚠️ FALLBACK: Base sample name set to: {self.base_name}")
         
         self.file_dir = os.path.dirname(self.file_path)
         
@@ -235,7 +200,6 @@ class ChromeleonBundleReader(BaseReader):
             try:
                 import pandas as pd
                 sheets = pd.read_excel(BytesIO(buf), sheet_name=None, engine="xlrd")
-                print(f"[DEBUG] XLS sheet names: {list(sheets.keys())}")
             except Exception as exc:
                 print(f"[⚠️] XLS parsing failed: {exc}")
                 return
@@ -246,7 +210,6 @@ class ChromeleonBundleReader(BaseReader):
                 idx = df[df.iloc[:, 0].astype(str).str.contains("Integration Results", na=False)].index
                 if not idx.empty:
                     self.integration_table = df.iloc[idx[0] + 2 :].dropna(how="all", axis=1)
-                    print(f"[DEBUG] Loaded Integration table from XLS")
 
             # Peak Analysis
             if self.peak_table is None and "Peak Analysis" in sheets:
@@ -254,7 +217,6 @@ class ChromeleonBundleReader(BaseReader):
                 idx = df[df.iloc[:, 0].astype(str).str.contains("Peak Results", na=False)].index
                 if not idx.empty:
                     self.peak_table = df.iloc[idx[0] + 2 :].dropna(how="all", axis=1)
-                    print(f"[DEBUG] Loaded Peak Analysis table from XLS")
 
 
             # SST - Parse structured Excel format with enhanced debugging
@@ -265,14 +227,11 @@ class ChromeleonBundleReader(BaseReader):
             # SST - Robust dynamic parsing (no hardcoded row limits)
             # SST - Robust dynamic parsing with CORRECT column indices
             if not self.sst_result:
-                print(f"[DEBUG] Using robust SST parsing...")
                 for sheet_name, df in sheets.items():
                     if sheet_name == "SST":
                         # Find injection details section
                         injection_idx = df[df.iloc[:, 0].astype(str).str.contains("Injection Details", na=False)].index
                         if not injection_idx.empty:
-                            print(f"[DEBUG] Found 'Injection Details' at row {injection_idx[0]}")
-                            
                             # Dynamically collect all data rows until section ends
                             start_row = injection_idx[0] + 1
                             details_rows = []
@@ -283,36 +242,27 @@ class ChromeleonBundleReader(BaseReader):
                                 
                                 # Stop at section boundaries
                                 if row_first_cell in ["chromatogram", "sst results", ""] or row.isnull().all():
-                                    print(f"[DEBUG] Stopping at row {i}, found boundary: '{row_first_cell}'")
                                     break
                                 
                                 details_rows.append((i, row))
                             
-                            print(f"[DEBUG] Processing {len(details_rows)} dynamic rows")
-                            
                             # Process all collected rows with CORRECT column indices
                             for idx, row in details_rows:
-                                print(f"[DEBUG] Processing dynamic row {idx}")
-                                
                                 # Left side: Column A (key) and Column C (value) - CORRECTED!
                                 if len(row) > 2 and pd.notna(row.iloc[0]) and pd.notna(row.iloc[2]):
                                     key = str(row.iloc[0]).strip().rstrip(':')
                                     value = str(row.iloc[2]).strip()
-                                    print(f"[DEBUG] Left side - Key: '{key}', Value: '{value}'")
                                     if key and value and value.lower() not in ["", "n.a."] and not value.endswith(':'):
                                         formatted_value = self._format_xls_value(key, value)
                                         self.sst_result[key] = formatted_value
-                                        print(f"[DEBUG] SST Left ADDED: '{key}' = '{formatted_value}'")
                                 
                                 # Right side: Column E (key) and Column F (value) - CORRECTED!
                                 if len(row) > 5 and pd.notna(row.iloc[4]) and pd.notna(row.iloc[5]):
                                     key = str(row.iloc[4]).strip().rstrip(':')
                                     value = str(row.iloc[5]).strip()
-                                    print(f"[DEBUG] Right side - Key: '{key}', Value: '{value}'")
                                     if key and value and value.lower() not in ["", "n.a."] and not value.endswith(':'):
                                         formatted_value = self._format_xls_value(key, value)
                                         self.sst_result[key] = formatted_value
-                                        print(f"[DEBUG] SST Right ADDED: '{key}' = '{formatted_value}'")
                         
                         # Find Total Result 
                         for row_idx in range(df.shape[0]):
@@ -327,11 +277,10 @@ class ChromeleonBundleReader(BaseReader):
                                                 self.sst_result["Total Result"] = "Passed"
                                             elif result_value in ["Passed", "Failed"]:
                                                 self.sst_result["Total Result"] = result_value
-                                            print(f"[DEBUG] SST Total Result: {self.sst_result['Total Result']}")
                                             break
                         break
 
-            print(f"[DEBUG] Final robust SST result: {self.sst_result}")
+            # print(f"[DEBUG] Final robust SST result: {self.sst_result}")
 
 
         # ---------- step 1: look in buffer (.txt) ---------------------------
@@ -340,40 +289,32 @@ class ChromeleonBundleReader(BaseReader):
         sst_txt         = read_txt_from_buffer("SST")
 
         if integration_txt:
-            print(f"[DEBUG] Found Integration.txt in buffer")
             self.integration_table = self._parse_table(integration_txt, "Integration Results")
         if peak_txt:
-            print(f"[DEBUG] Found Peak Analysis.txt in buffer")
             self.peak_table = self._parse_table(peak_txt, "Peak Results")
         if sst_txt:
-            print(f"[DEBUG] Found SST.txt in buffer")
             self.sst_result = self._parse_key_values_from_string(sst_txt)
 
         # ---------- step 2: look on disk (.txt) -----------------------------
         if self.integration_table is None:
             txt = read_txt_from_disk("Integration")
             if txt:
-                print(f"[DEBUG] Found Integration.txt on disk")
                 self.integration_table = self._parse_table(txt, "Integration Results")
 
         if self.peak_table is None:
             txt = read_txt_from_disk("Peak Analysis")
             if txt:
-                print(f"[DEBUG] Found Peak Analysis.txt on disk")
                 self.peak_table = self._parse_table(txt, "Peak Results")
 
         if not self.sst_result:
             txt = read_txt_from_disk("SST")
             if txt:
-                print(f"[DEBUG] Found SST.txt on disk")
                 self.sst_result = self._parse_key_values_from_string(txt)
 
         # ---------- step 3: XLS fallback ------------------------------------
         # Decide if we still need anything
-        print(f"[DEBUG] Checking for XLS files on disk in: {self.file_dir}")
         if self.file_dir:
             xls_files = list(Path(self.file_dir).glob("*.xls"))
-            print(f"[DEBUG] Found XLS files on disk: {xls_files}")
         needs_xls_fallback = (
             self.integration_table is None
             or (hasattr(self.integration_table, "empty") and self.integration_table.empty)
@@ -383,7 +324,6 @@ class ChromeleonBundleReader(BaseReader):
         )
 
         if needs_xls_fallback:
-            print(f"[DEBUG] Need XLS fallback - missing data")
             # 3a. XLS in buffer
             if extra_files:
                 for fname, blob in extra_files.items():
@@ -431,8 +371,6 @@ class ChromeleonBundleReader(BaseReader):
 
     def _parse_key_values_from_string(self, text):
         result = {}
-        print(f"[DEBUG] Parsing SST text content (total lines: {len(text.splitlines())})")
-        
         for line_num, line in enumerate(text.splitlines()):
             line = line.strip()
             if not line:
@@ -487,11 +425,9 @@ class ChromeleonBundleReader(BaseReader):
                                 value = value.replace(".Mai.", "/May/").replace(".Jan.", "/Jan/").replace(".Feb.", "/Feb/").replace(".Mar.", "/Mar/").replace(".Apr.", "/Apr/").replace(".Jun.", "/Jun/").replace(".Jul.", "/Jul/").replace(".Aug.", "/Aug/").replace(".Sep.", "/Sep/").replace(".Oct.", "/Oct/").replace(".Nov.", "/Nov/").replace(".Dec.", "/Dec/")
                             
                             result[key] = value
-                            print(f"[DEBUG] Added SST: '{key}' = '{value}'")
                     
                     i += 1
         
-        print(f"[DEBUG] Final parsed SST result: {result}")
         return result
 
     def _parse_table(self, text, section_title):
@@ -505,11 +441,9 @@ class ChromeleonBundleReader(BaseReader):
             section = text.split(section_title)[1]
             
             # IMPORTANT: Apply German number conversion to the entire section
-            print(f"[DEBUG] Applying German number conversion to {section_title}")
             section = self.convert_german_number(section)
             
             lines = section.strip().split('\n')
-            print(f"[DEBUG] Processing {len(lines)} lines for {section_title}")
             
             # Find the header line (first non-empty line with actual column names)
             header_line = None
@@ -520,14 +454,11 @@ class ChromeleonBundleReader(BaseReader):
                 if not line:  # Skip empty lines
                     continue
                     
-                print(f"[DEBUG] Checking line {i}: '{line[:50]}...'")
-                
                 # Check if this looks like a header line (contains column names)
                 # Headers typically have words like "No.", "Peak Name", "Retention Time", etc.
                 if any(keyword in line for keyword in ["No.", "Peak Name", "Retention Time", "Area", "Height"]):
                     header_line = line
                     header_idx = i
-                    print(f"[DEBUG] Found header at line {i}: {line}")
                     break
             
             if header_line is None:
@@ -543,8 +474,6 @@ class ChromeleonBundleReader(BaseReader):
                 if not line:  # Skip empty lines
                     continue
                     
-                print(f"[DEBUG] Checking data line {i}: '{line}'")
-                
                 # Skip units lines (typically contain only units like "min", "mAU", "%", etc.)
                 line_parts = [part.strip() for part in line.split('\t')]
                 is_units_line = all(
@@ -553,12 +482,10 @@ class ChromeleonBundleReader(BaseReader):
                 )
                 
                 if is_units_line:
-                    print(f"[DEBUG] Skipping units line: {line}")
                     continue
                 
                 # This is a data line
                 data_lines.append(line)
-                print(f"[DEBUG] Added data line: {line}")
             
             if not data_lines:
                 print(f"[⚠️] No data lines found for {section_title}")
@@ -567,9 +494,6 @@ class ChromeleonBundleReader(BaseReader):
             # Reconstruct the CSV content with proper header
             csv_lines = [header_line] + data_lines
             csv_content = '\n'.join(csv_lines)
-            
-            print(f"[DEBUG] Final CSV content for {section_title}:")
-            print(csv_content)
             
             # Parse with pandas
             df = pd.read_csv(StringIO(csv_content), sep="\t")
@@ -591,8 +515,6 @@ class ChromeleonBundleReader(BaseReader):
                 if col in ['Retention Time', 'Area', 'Height', 'Relative Area', 'Relative Height']:
                     df[col] = pd.to_numeric(df[col], errors='coerce')
             
-            print(f"[DEBUG] Successfully parsed {section_title} with {len(df)} rows and columns: {list(df.columns)}")
-            print(f"[DEBUG] Sample data:")
             print(df.head())
             
             return df

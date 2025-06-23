@@ -1,4 +1,4 @@
-# multi_peak_dash.py  –  Multi-peak p/q baseline integration
+# multi_dash.py  –  Multi-peak p/q baseline integration
 import dash
 from dash import dcc, html
 from dash.dependencies import Input, Output, State
@@ -131,32 +131,65 @@ def set_mode(n1,n2,n3,cur):
     return new, f"Mode: {new}", False, None
 
 # ------------------------------------------------ draw / capture p-line
-@app.callback([Output("line", "data"), Output("clear-shapes", "data")],
-             Input("plot", "relayoutData"),
-             [State("line", "data"), State("mode", "data"), State("clear-shapes", "data"),
-              State("easy-integration", "value")])
-def store_line(relayout, line, mode, clear_counter, easy_mode):
+@app.callback(
+    [Output("p-line-store", "data"), 
+     Output("clear-shapes-trigger", "data", allow_duplicate=True)],
+    Input("uv-chromatogram-plot", "relayoutData"),
+    [State("p-line-store", "data"), 
+     State("baseline-mode", "data"), 
+     State("clear-shapes-trigger", "data"),
+     State("easy-integration", "value"),
+     State("selected-layer", "data")],  # ← ADD this!
+    prevent_initial_call=True)
+def store_line(relayout, line, mode, clear_counter, easy_mode, selected_layer):
     if not relayout:
         return line, clear_counter
 
+    print(f"🔍 [STORE_LINE] Mode: {mode}, Easy: {easy_mode}, Layer: {selected_layer}")
+
     # Draw mode: user finished drawing a new shape
     if mode == "draw" and "shapes" in relayout and relayout["shapes"]:
-        s   = relayout["shapes"][-1]
+        s = relayout["shapes"][-1]
         pts = [(s["x0"], s["y0"]), (s["x1"], s["y1"])]
+        
+        print(f"🔍 [DRAW] Original points: {pts}")
         
         # If easy integration is on, force y-coordinates to 0
         if easy_mode and "easy" in easy_mode:
             pts = [(pts[0][0], 0), (pts[1][0], 0)]
+            print(f"🔍 [DRAW] Easy mode - forced to: {pts}")
 
-        # keep only if integration is valid
-        res, *_ = area_with_constraints(DF, *pts)
-        if res is None:
-            return [], clear_counter + 1  # 👈 trigger refresh & increment counter
+        # Validate integration - USE selected_layer from State, not data_manager
+        df = _get_chrom_data(data_manager, selected_layer)
+        if df is not None:
+            print(f"🔍 [DRAW] Got chromatogram data: {df.shape}")
+            
+            try:
+                res, q1, q2 = area_with_constraints(df, *pts)
+                print(f"🔍 [DRAW] Constraint result: res={res is not None}, q1={q1}, q2={q2}")
+                
+                if res is None:
+                    print("❌ [DRAW] Integration invalid - clearing shapes")
+                    return [], clear_counter + 1
+                else:
+                    print(f"✅ [DRAW] Valid integration: area={res.get('area', 'N/A')}")
+                    
+            except Exception as e:
+                print(f"❌ [DRAW] Error in area_with_constraints: {e}")
+                import traceback
+                print(f"❌ [DRAW] Traceback: {traceback.format_exc()}")
+                return [], clear_counter + 1
+        else:
+            print("❌ [DRAW] No chromatogram data available")
+            return [], clear_counter + 1
+            
         return pts, clear_counter
 
     # Edit mode: drag of first shape
     if mode == "edit" and line:
         (x0, y0), (x1, y1) = line
+        print(f"🔍 [EDIT] Original edit line: {line}")
+        
         for k, v in relayout.items():
             if k.startswith("shapes[0]."):
                 if   k.endswith(".x0"): x0 = v
@@ -164,11 +197,15 @@ def store_line(relayout, line, mode, clear_counter, easy_mode):
                 elif k.endswith(".x1"): x1 = v
                 elif k.endswith(".y1"): y1 = v
         
+        new_line = [(x0, y0), (x1, y1)]
+        print(f"🔍 [EDIT] After relayout update: {new_line}")
+        
         # If easy integration is on, force y-coordinates to 0
         if easy_mode and "easy" in easy_mode:
-            y0, y1 = 0, 0
+            new_line = [(x0, 0), (x1, 0)]
+            print(f"🔍 [EDIT] Easy mode - forced to: {new_line}")
             
-        return [(x0, y0), (x1, y1)], clear_counter
+        return new_line, clear_counter
 
     return line, clear_counter
 

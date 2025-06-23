@@ -12,6 +12,7 @@ from utils.toast_system import register_toast_callbacks
 from callbacks.interaction_callbacks import register_interaction_callbacks
 from callbacks.hplc_callbacks import register_peak_grouping_callback
 
+
 # Initialize Dash app
 app = dash.Dash(__name__, suppress_callback_exceptions=True)
 
@@ -347,4 +348,4 @@ app.index_string = '''
 
 # Run app
 if __name__ == "__main__":
-    app.run(debug=True)
+    app.run(debug=True, port=8051)

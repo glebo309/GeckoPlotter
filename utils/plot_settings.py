@@ -156,7 +156,8 @@ def get_default_plot_settings():
         "line_width": 2,
         "marker_size": 6,
         "opacity": 0.8,
-        "options": ["show_grid", "show_legend", "auto_scale", "show_hover", "show_labels"],
+        # Gridlines OFF by default: remove 'show_grid' from default options
+        "options": ["show_legend", "auto_scale", "show_hover", "show_labels"],
         "x_min": None,
         "x_max": None,
         "y_min": None,

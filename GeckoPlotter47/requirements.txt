@@ -1,0 +1,22 @@
+# LCMS CDF File Reader - Python Dependencies
+# Install with: pip install -r requirements.txt
+
+# Core Dash and Plotly libraries
+dash>=2.14.0
+plotly>=5.17.0
+
+# CDF file reading (pure Python implementation)
+cdflib>=1.3.3
+
+# Data processing libraries
+pandas>=2.0.0
+numpy>=1.24.0
+scipy>=1.10.0
+
+# Optional: Additional scientific computing tools
+# scikit-learn>=1.3.0  # For advanced data analysis
+# matplotlib>=3.7.0    # For additional plotting capabilities
+
+# Development and deployment (optional)
+# gunicorn>=21.2.0     # For production deployment
+# flask>=2.3.0         # Flask server (included with Dash)
