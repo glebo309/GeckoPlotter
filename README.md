@@ -4,22 +4,60 @@ Interactive data visualization and analysis tool for analytical chemistry — bu
 
 Supports **HPLC chromatograms**, **LC-MS** (TIC + mass spectra), and **UV-VIS spectroscopy** data.
 
-## Quick Start
+## Getting Started
+
+### Prerequisites
+
+- **Python 3.11+** — check with `python3 --version`
+- **Node.js / npm** — needed to install Claude Code (`node --version` to check)
+- **Git** — should already be installed (`git --version` to check)
+
+If you don't have Python: https://www.python.org/downloads/  
+If you don't have Node/npm: https://nodejs.org/
+
+### 1. Clone the repo
 
 ```bash
-# Clone
 git clone git@github.com:glebo309/GeckoPlotter.git
 cd GeckoPlotter
-
-# Set up environment
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
-
-# Run
-python app.py
-# Open http://localhost:8050
 ```
+
+### 2. Set up Python environment
+
+```bash
+# Create a virtual environment (keeps dependencies isolated)
+python3 -m venv .venv
+
+# Activate it (you need to do this every time you open a new terminal)
+source .venv/bin/activate        # macOS / Linux
+# .venv\Scripts\activate         # Windows
+
+# Install all dependencies
+pip install -r requirements.txt
+```
+
+### 3. Test that it runs
+
+```bash
+python app.py
+# Open http://localhost:8050 in your browser
+# Ctrl+C to stop
+```
+
+### 4. Install Claude Code
+
+```bash
+npm install -g @anthropic-ai/claude-code
+```
+
+Then open the project with Claude Code:
+
+```bash
+cd GeckoPlotter
+claude
+```
+
+On first launch, Claude will ask you to log in with your Anthropic account.
 
 ## Project Structure
 
