@@ -4,6 +4,7 @@ import logging
 
 logging.getLogger('werkzeug').setLevel(logging.ERROR)  # Suppress Flask access logs
 
+
 if os.environ.get("GP_DEBUG", "") != "1":
     builtins.print = lambda *args, **kwargs: None
 

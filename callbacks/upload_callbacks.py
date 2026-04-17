@@ -18,6 +18,38 @@ import pandas as pd
 # COMBINED UPLOAD + CLEAR CALLBACKS
 # -----------------------------------------------------------------------------
 
+def create_file_selector_options(data_manager):
+    """Builds the options for the file selector dropdown."""
+    options = []
+    loaded_files = data_manager.get_loaded_files()
+    for fname in loaded_files:
+        fdata = data_manager.get_file_data(fname)
+        if not fdata:
+            continue
+        if fdata["type"] == "lcms_bundle":
+            bundle_data = fdata.get("bundle_data", {})
+            options.append({
+                "label": f"📦 {fname.replace('_LCMS_BUNDLE', '')} (LC-MS Bundle)",
+                "value": fname
+            })
+            # Add sub-options for each component
+            if bundle_data.get('ms_positive'):
+                options.append({"label": f"  └─ 🔬 MS+ TIC", "value": f"{fname}|ms_positive"})
+            if bundle_data.get('ms_negative'):
+                options.append({"label": f"  └─ 🔬 MS- TIC", "value": f"{fname}|ms_negative"})
+            if bundle_data.get('vwd_a'):
+                wl = bundle_data['vwd_a']['metadata'].get('wavelength', '?')
+                options.append({"label": f"  └─ 📊 UV Channel A ({wl} nm)", "value": f"{fname}|vwd_a"})
+            if bundle_data.get('vwd_b'):
+                wl = bundle_data['vwd_b']['metadata'].get('wavelength', '?')
+                options.append({"label": f"  └─ 📊 UV Channel B ({wl} nm)", "value": f"{fname}|vwd_b"})
+        else:
+            options.append({
+                "label": f"📄 {fname}",
+                "value": fname
+            })
+    return options
+
 def register_upload_callbacks(app, data_manager):
     """File-upload, parsing and sidebar rendering."""
 
@@ -259,36 +291,7 @@ def register_upload_callbacks(app, data_manager):
             else:
                 overview = "No files loaded."
 
-
-            # Build options for file selector
-            options = []
-            loaded_files = data_manager.get_loaded_files()
-            for fname in loaded_files:
-                fdata = data_manager.get_file_data(fname)
-                if not fdata:
-                    continue
-                if fdata["type"] == "lcms_bundle":
-                    bundle_data = fdata.get("bundle_data", {})
-                    options.append({
-                        "label": f"📦 {fname.replace('_LCMS_BUNDLE', '')} (LC-MS Bundle)",
-                        "value": fname
-                    })
-                    # Add sub-options for each component
-                    if bundle_data.get('ms_positive'):
-                        options.append({"label": f"  └─ 🔬 MS+ TIC", "value": f"{fname}|ms_positive"})
-                    if bundle_data.get('ms_negative'):
-                        options.append({"label": f"  └─ 🔬 MS- TIC", "value": f"{fname}|ms_negative"})
-                    if bundle_data.get('vwd_a'):
-                        wl = bundle_data['vwd_a']['metadata'].get('wavelength', '?')
-                        options.append({"label": f"  └─ 📊 UV Channel A ({wl} nm)", "value": f"{fname}|vwd_a"})
-                    if bundle_data.get('vwd_b'):
-                        wl = bundle_data['vwd_b']['metadata'].get('wavelength', '?')
-                        options.append({"label": f"  └─ 📊 UV Channel B ({wl} nm)", "value": f"{fname}|vwd_b"})
-                else:
-                    options.append({
-                        "label": f"📄 {fname}",
-                        "value": fname
-                    })
+            options = create_file_selector_options(data_manager)
 
             return (
                 [],  # Empty status - now using toasts only

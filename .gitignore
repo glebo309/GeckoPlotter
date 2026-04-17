@@ -1,0 +1,43 @@
+# Virtual environment
+.venv/
+venv/
+env/
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+dist/
+build/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+
+# Temp / backup files
+*.bak
+*.tmp
+temp_code.txt
+
+# Old versions (archived)
+GeckoPlotter47/
+OLD_STREAMLIT_APP/
+
+# Test data outputs
+output_data.csv
+*.xlsx
+~$*
+
+# Reload flag
+.reload-cascade

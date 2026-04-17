@@ -28,8 +28,9 @@ class DataManager:
             'lcms_vwd_cdf': LCMSVWDCDFReader
         }
         self.loaded_data = {}
-        self.temp_files = []  # Track temp files for cleanup
+        self.temp_files = set()  # Track temp files for cleanup
         self.lcms_bundles = {}  # Track LC-MS bundles being built
+        self.custom_labels: dict[str, str] = {}
     
     def detect_file_type(self, content, filename):
         print(f"[DEBUG] 🔍 detect_file_type called for: {filename}")
@@ -190,6 +191,9 @@ class DataManager:
         """Load a file using the appropriate reader."""
 
         print(f"[DEBUG] 🔍 Loading file: {filename}")
+        
+        # Detect file type first
+        file_type = self.detect_file_type(content, filename)
         content_type = "binary" if isinstance(content, bytes) else "text"
         content_length = len(content)
         print(f"[DEBUG] 🔍 Content type: {content_type}, length: {content_length}")
@@ -205,7 +209,7 @@ class DataManager:
         if file_type and file_type in self.readers:
             reader = self.readers[file_type]()
             temp_fd, temp_path = tempfile.mkstemp(suffix=f"_{filename}", prefix="temp_")
-            self.temp_files.append(temp_path)
+            self.temp_files.add(temp_path)
 
             try:
                 # Write content to temp file
@@ -540,6 +544,72 @@ class DataManager:
 
     def get_loaded_files(self):
         return list(self.loaded_data.keys())
+
+    def get_custom_label(self, identifier: str) -> str | None:
+        """Get the custom label for a given file or component identifier."""
+        return self.custom_labels.get(identifier)
+
+    def set_custom_label(self, identifier: str, label: str):
+        """Set a custom label for a given identifier."""
+        self.custom_labels[identifier] = label
+
+    def clear_custom_label(self, identifier: str):
+        """Remove a custom label and any child labels."""
+        keys_to_remove = [k for k in self.custom_labels if k == identifier or k.startswith(f"{identifier}|")]
+        for key in keys_to_remove:
+            self.custom_labels.pop(key, None)
+    
+    def remove_data_entry(self, identifier: str):
+        """Remove a data entry and all associated data.
+
+        Behaviour: deleting a child layer (e.g. "file|component") removes the entire parent file.
+        Also sweeps any related keys that start with the same prefix and clears bundles and labels.
+        """
+        # Always resolve to top-level file id
+        root_id = identifier.split("|")[0]
+
+        # Collect all loaded_data keys to delete (exact or prefixed variants)
+        keys_to_delete = [k for k in list(self.loaded_data.keys()) if k == root_id or k.startswith(root_id)]
+
+        if not keys_to_delete:
+            # Still clear any labels for safety
+            self.clear_custom_label(root_id)
+            print(f"[DATA] remove_data_entry: nothing to delete for {identifier}; ensured labels cleared")
+            return
+
+        for key in keys_to_delete:
+            entry = self.loaded_data.get(key)
+            if not entry:
+                continue
+
+            # Clean up any temp file associated
+            if 'temp_file' in entry and entry['temp_file']:
+                self._cleanup_temp_file(entry['temp_file'])
+
+            # Remove entry
+            self.loaded_data.pop(key, None)
+            print(f"[DATA] Removed loaded_data key: {key}")
+
+        # Remove from LCMS bundles if present. Bundles may be keyed by base names.
+        # Attempt to remove a direct key match and any bundle referencing this base.
+        self.lcms_bundles.pop(root_id, None)
+        # Also remove bundles that contain the base name in their metadata/base_name
+        bundles_to_remove = []
+        for bkey, bval in self.lcms_bundles.items():
+            base = None
+            try:
+                base = bval.get('base_name') or bval.get('metadata', {}).get('base_name')
+            except Exception:
+                base = None
+            if base and (base == root_id or str(base).startswith(root_id)):
+                bundles_to_remove.append(bkey)
+        for bkey in bundles_to_remove:
+            self.lcms_bundles.pop(bkey, None)
+            print(f"[DATA] Removed lcms_bundle key: {bkey}")
+
+        # Clear all custom labels for this file and its children
+        self.clear_custom_label(root_id)
+        print(f"[DATA] Cleared custom labels for: {root_id}")
     
     def get_file_data(self, filename):
         entry = self.loaded_data.get(filename)
@@ -708,6 +778,7 @@ class DataManager:
         """Clear all loaded data and clean up any remaining temp files."""
         self.loaded_data.clear()
         self.lcms_bundles.clear()
+        self.custom_labels.clear()
         
         # Clean up any tracked temp files
         for temp_path in self.temp_files.copy():

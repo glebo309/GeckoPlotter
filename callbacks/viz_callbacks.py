@@ -687,9 +687,9 @@ def debug_peak_keys(data_manager):
     except Exception as e:
         print(f"❌ Error in peak key debug: {e}")
 
-def add_baseline_peaks_to_figure(fig, filename, stored_peaks, data_manager):
+def add_baseline_peaks_to_figure(fig, filename, stored_peaks, data_manager, row=None, col=None):
     print("[BASELINE PEAKS DEBUG] add_baseline_peaks_to_figure CALLED")
-    print(f"[BASELINE PEAKS DEBUG] stored_peaks: {stored_peaks}")
+    print(f"[BASELINE PEAKS DEBUG] filename: {filename}, row: {row}, col: {col}")
     """Add filled areas for baseline integration peaks to the figure"""
     if not stored_peaks:
         return fig
@@ -712,15 +712,39 @@ def add_baseline_peaks_to_figure(fig, filename, stored_peaks, data_manager):
         intensity_col = 'Value (mAU)'
         if time_col not in chromatogram_data.columns or intensity_col not in chromatogram_data.columns:
             return fig
-            
-        print(f"[BASELINE PEAKS DEBUG] Number of stored_peaks: {len(stored_peaks)}")
-        # For each stored peak, fill area, draw baseline, THEN always draw q-points and q-line
+        
+        # Filter peaks by data source with enhanced debugging
+        filtered_peaks = []
+        print(f"[BASELINE PEAKS] Filtering peaks for {filename} from {len(stored_peaks)} total peaks")
         for i, peak in enumerate(stored_peaks):
+            # Check if peak belongs to this data source
+            peak_source = peak.get('data_source')
+            
+            # CRITICAL FIX: Compare the actual filename part without path
+            # This ensures we match peaks with their data sources correctly
+            import os
+            filename_base = os.path.basename(filename) if filename else filename
+            peak_source_base = os.path.basename(peak_source) if peak_source else peak_source
+            
+            is_match = (peak_source == filename) or (peak_source_base == filename_base)
+            print(f"[BASELINE PEAKS] Peak {i}: data_source={peak_source}, filename={filename}")
+            print(f"[BASELINE PEAKS] Basename comparison: peak_source_base={peak_source_base}, filename_base={filename_base}, match={is_match}")
+            
+            if is_match or peak_source is None:  # Include peaks without data_source for backward compatibility
+                filtered_peaks.append(peak)
+                print(f"[BASELINE PEAKS] ✅ Including peak {i} for {filename}")
+            else:
+                print(f"[BASELINE PEAKS] ❌ Excluding peak {i} with source {peak_source} from {filename}")
+        
+        print(f"[BASELINE PEAKS] Found {len(filtered_peaks)} peaks for {filename} out of {len(stored_peaks)} total peaks")
+        
+        # For each stored peak, fill area, draw baseline, THEN always draw q-points and q-line
+        for i, peak in enumerate(filtered_peaks):
             q1, q2 = peak.get("q1"), peak.get("q2")
-            print(f"[BASELINE PEAKS DEBUG] Peak {i}: q1={q1}, q2={q2}")
+            print(f"[BASELINE PEAKS] Peak {i}: q1={q1}, q2={q2}")
             # 1) area fill under curve
             if 'poly_x' in peak and 'poly_y' in peak:
-                fig.add_scatter(
+                scatter_args = dict(
                     x=peak["poly_x"],
                     y=peak["poly_y"],
                     fill="toself",
@@ -730,21 +754,34 @@ def add_baseline_peaks_to_figure(fig, filename, stored_peaks, data_manager):
                     showlegend=False,
                     name=f"Peak {i+1}"
                 )
+                
+                # Add to specific subplot if row/col provided
+                if row is not None and col is not None:
+                    fig.add_trace(go.Scatter(**scatter_args), row=row, col=col)
+                else:
+                    fig.add_scatter(**scatter_args)
 
             # 2) dashed baseline line (p-line)
             if 'p_line' in peak:
                 (p0, p1) = peak["p_line"]
-                fig.add_shape(go.layout.Shape(
+                shape = go.layout.Shape(
                     type="line",
                     x0=p0[0], y0=p0[1], x1=p1[0], y1=p1[1],
                     line=dict(color="#005F8C", width=3),
                     editable=True, layer="above"
-                ))
+                )
+                
+                # For subplots, we need to adjust the shape coordinates
+                if row is not None and col is not None:
+                    # Add shape to specific subplot
+                    fig.add_shape(shape, row=row, col=col)
+                else:
+                    fig.add_shape(shape)
 
             # 3) ALWAYS add the two q-point markers
             q1, q2 = peak.get("q1"), peak.get("q2")
             if q1 and q2:
-                fig.add_trace(go.Scatter(
+                scatter_args = dict(
                     x=[q1[0], q2[0]],
                     y=[q1[1], q2[1]],
                     mode='markers',
@@ -752,10 +789,16 @@ def add_baseline_peaks_to_figure(fig, filename, stored_peaks, data_manager):
                     showlegend=False,
                     hoverinfo='skip',
                     name=f"q-points {i+1}"
-                ))
+                )
+                
+                # Add to specific subplot if row/col provided
+                if row is not None and col is not None:
+                    fig.add_trace(go.Scatter(**scatter_args), row=row, col=col)
+                else:
+                    fig.add_trace(go.Scatter(**scatter_args))
 
                 # 4) ALWAYS add the dashed q-line
-                fig.add_trace(go.Scatter(
+                line_args = dict(
                     x=[q1[0], q2[0]],
                     y=[q1[1], q2[1]],
                     mode='lines',
@@ -763,7 +806,13 @@ def add_baseline_peaks_to_figure(fig, filename, stored_peaks, data_manager):
                     showlegend=False,
                     hoverinfo='skip',
                     name=f"q-line {i+1}"
-                ))
+                )
+                
+                # Add to specific subplot if row/col provided
+                if row is not None and col is not None:
+                    fig.add_trace(go.Scatter(**line_args), row=row, col=col)
+                else:
+                    fig.add_trace(go.Scatter(**line_args))
 
         return fig
 
@@ -771,7 +820,7 @@ def add_baseline_peaks_to_figure(fig, filename, stored_peaks, data_manager):
         print(f"[BASELINE PEAKS] ❌ Major error: {e}")
         return fig
 
-def add_peak_areas_to_figure(fig, filename, data_manager):
+def add_peak_areas_to_figure(fig, filename, data_manager, row=None, col=None):
     """Add filled area under detected/integrated peaks to the figure"""
     try:
         import numpy as np
@@ -1286,8 +1335,7 @@ def create_separate_chromatogram_subplots_fixed(visible_files, data_manager, plo
             row=i, col=1
         )
         
-        # Add peak areas to this subplot
-        print(f"[SUBPLOT] Adding peak areas for: {filename} in subplot {i}")
+        # Peak areas will be added later in a separate loop
         
     # Set figure height based on number of plots
     height_per_plot = 250
@@ -1345,18 +1393,19 @@ def create_separate_chromatogram_subplots_fixed(visible_files, data_manager, plo
 
 
 
-    # Add peak areas to all subplots
-    for filename in visible_files:
-        print(f"[SEPARATE PLOTS] Adding peak areas for: {filename}")
-        fig = add_peak_areas_to_figure(fig, filename, data_manager)
+    # Add peak areas to all subplots with proper row/col indexing
+    for i, filename in enumerate(visible_files, 1):
+        print(f"[SEPARATE PLOTS] Adding peak areas for: {filename} in subplot {i}")
+        # Add detected peaks from peak_manager
+        fig = add_peak_areas_to_figure(fig, filename, data_manager, row=i, col=1)
         
         # Add baseline integration peaks if available
         print(f"[SEPARATE DEBUG] stored_peaks type: {type(stored_peaks)}, value: {stored_peaks}")
         if stored_peaks:
-            print(f"[SEPARATE DEBUG] Calling add_baseline_peaks_to_figure with {len(stored_peaks)} peaks")
-            fig = add_baseline_peaks_to_figure(fig, filename, stored_peaks, data_manager)
+            print(f"[SEPARATE DEBUG] Calling add_baseline_peaks_to_figure with {len(stored_peaks)} peaks for {filename} in subplot {i}")
+            fig = add_baseline_peaks_to_figure(fig, filename, stored_peaks, data_manager, row=i, col=1)
         else:
-            print(f"[SEPARATE DEBUG] No stored_peaks to add")
+            print(f"[SEPARATE DEBUG] No stored_peaks to add for {filename}")
     
     # Apply scientific styling with grid control
     fig = apply_scientific_styling(fig, show_legend=show_legend, title=None, show_x_grid=show_grid, show_y_grid=show_grid)
@@ -1606,18 +1655,19 @@ def create_overlay_chromatogram_plot_fixed(visible_chrom_files, data_manager, pl
             if axis_range.get('y_min') is not None and axis_range.get('y_max') is not None:
                 fig.update_yaxes(range=[axis_range['y_min'], axis_range['y_max']], row=i, col=1)
 
-    # Add peak areas to all subplots
-    for filename in visible_files:
-        print(f"[SEPARATE PLOTS] Adding peak areas for: {filename}")
-        fig = add_peak_areas_to_figure(fig, filename, data_manager)
+    # Add peak areas to all subplots with proper row/col indexing
+    for i, filename in enumerate(visible_files, 1):
+        print(f"[SEPARATE PLOTS] Adding peak areas for: {filename} in subplot {i}")
+        # Add detected peaks from peak_manager
+        fig = add_peak_areas_to_figure(fig, filename, data_manager, row=i, col=1)
         
         # Add baseline integration peaks if available
         print(f"[SEPARATE DEBUG] stored_peaks type: {type(stored_peaks)}, value: {stored_peaks}")
         if stored_peaks:
-            print(f"[SEPARATE DEBUG] Calling add_baseline_peaks_to_figure with {len(stored_peaks)} peaks")
-            fig = add_baseline_peaks_to_figure(fig, filename, stored_peaks, data_manager)
+            print(f"[SEPARATE DEBUG] Calling add_baseline_peaks_to_figure with {len(stored_peaks)} peaks for {filename} in subplot {i}")
+            fig = add_baseline_peaks_to_figure(fig, filename, stored_peaks, data_manager, row=i, col=1)
         else:
-            print(f"[SEPARATE DEBUG] No stored_peaks to add")
+            print(f"[SEPARATE DEBUG] No stored_peaks to add for {filename}")
     
     # Apply scientific publication styling with grid control
     fig = apply_scientific_styling(fig, show_legend=show_legend, title=None, show_x_grid=show_grid, show_y_grid=show_grid)

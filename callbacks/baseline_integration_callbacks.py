@@ -272,11 +272,12 @@ def create_baseline_integration_controls():
         html.Div([
             dcc.Checklist(id="easy-integration", 
                          options=[{"label": " Easy Integration (baseline to y=0)", "value": "easy"}], 
-                         value=["easy"], 
+                         value=[],  # Default OFF
                          style={"marginTop": "10px"})
         ]),
         html.Div(id="baseline-integration-table-container", style={"marginTop": "20px"})
     ])
+
 
 # --- Callback Registration ---
 
@@ -362,6 +363,7 @@ def register_baseline_integration_callbacks(app, data_manager_instance):
             raise dash.exceptions.PreventUpdate
         
         print(f"🔍 [ADD_PEAK] Mode: {mode}, Line: {line}, Easy: {easy_mode}")
+        print(f"🔍 [ADD_PEAK] Selected layer: {selected_layer}")
         print(f"🔍 [ADD_PEAK] Easy mode type: {type(easy_mode)}, Easy mode value: {easy_mode}")
         print(f"🔍 [ADD_PEAK] Easy mode check: {'easy' in easy_mode if easy_mode else 'easy_mode is falsy'}")
         
@@ -384,17 +386,23 @@ def register_baseline_integration_callbacks(app, data_manager_instance):
             raise dash.exceptions.PreventUpdate
 
         peaks = peaks or []
-        # overwrite if apex very close
+        # overwrite if apex very close and belongs to same data source
         found = False
+        print(f"🔍 [ADD_PEAK] Checking for existing peaks with similar apex and same data source: {selected_layer}")
         for i, p in enumerate(peaks):
-            if abs(p["apex_x"] - res["apex_x"]) < 0.05:
-                peaks[i] = dict(p_line=line, q1=q1, q2=q2, **res)
+            print(f"🔍 [ADD_PEAK] Comparing with peak {i}: apex_x={p.get('apex_x')}, data_source={p.get('data_source')}")
+            apex_close = abs(p.get("apex_x", 0) - res["apex_x"]) < 0.05
+            same_source = p.get("data_source") == selected_layer
+            print(f"🔍 [ADD_PEAK] Peak {i}: apex_close={apex_close}, same_source={same_source}")
+            
+            if apex_close and same_source:
+                peaks[i] = dict(p_line=line, q1=q1, q2=q2, data_source=selected_layer, **res)
                 found = True
-                print(f"✅ [ADD_PEAK] Updated existing peak {i}")
+                print(f"✅ [ADD_PEAK] Updated existing peak {i} for {selected_layer}")
                 break
         if not found:
-            peaks.append(dict(p_line=line, q1=q1, q2=q2, **res))
-            print(f"✅ [ADD_PEAK] Added new peak: area={res['area']:.2f}")
+            peaks.append(dict(p_line=line, q1=q1, q2=q2, data_source=selected_layer, **res))
+            print(f"✅ [ADD_PEAK] Added new peak: area={res['area']:.2f} for {selected_layer}, total peaks now: {len(peaks)}")
         return peaks
 
     # Select peak by click - EXACT REPLICA from mini_dash.py
@@ -465,7 +473,7 @@ def register_baseline_integration_callbacks(app, data_manager_instance):
 
         return line, clear_counter
 
-    # update_peak callback - EXACT mini_dash.py logic:
+    # update_peak callback - Modified to maintain data source association:
     @app.callback(Output("stored-peaks","data", allow_duplicate=True),
                 [Input("uv-chromatogram-plot","relayoutData"),
                 Input("p-line-store","data")],
@@ -487,7 +495,7 @@ def register_baseline_integration_callbacks(app, data_manager_instance):
                 print(f"⚠️ [UPDATE_PEAK] Attempted to edit imported peak at idx={idx}, skipping.")
                 raise dash.exceptions.PreventUpdate
         
-        # Apply easy integration if enabled - EXACT mini_dash.py
+        # Apply easy integration if enabled
         if easy_mode and "easy" in easy_mode:
             line = [(line[0][0], 0), (line[1][0], 0)]
         
@@ -499,7 +507,10 @@ def register_baseline_integration_callbacks(app, data_manager_instance):
         if not res: raise dash.exceptions.PreventUpdate
         
         if 0 <= idx < len(peaks):
-            peaks[idx] = dict(p_line=line,q1=q1,q2=q2,**res)
+            # Preserve the original data_source or use current selected_layer
+            data_source = peaks[idx].get("data_source", selected_layer)
+            peaks[idx] = dict(p_line=line, q1=q1, q2=q2, data_source=data_source, **res)
+            print(f"✅ [UPDATE_PEAK] Updated peak {idx} for {data_source}")
         return peaks
 
     # P-line visibility callback

@@ -19,4 +19,5 @@ scipy>=1.10.0
 
 # Development and deployment (optional)
 # gunicorn>=21.2.0     # For production deployment
-# flask>=2.3.0         # Flask server (included with Dash)
+# flask>=2.3.0         # Flask server (included with Dash)netCDF4
+dash-mantine-components
