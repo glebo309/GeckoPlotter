@@ -102,15 +102,72 @@ User uploads file
 
 All state lives in the `DataManager` instance (created once in `app.py` and passed to every callback module).
 
+## Claude Code Setup
+
+We use [Claude Code](https://claude.ai/claude-code) (Anthropic's CLI) to build this app. Here's how to set it up properly.
+
+### Install & basics
+
+```bash
+# Install Claude Code
+npm install -g @anthropic-ai/claude-code
+
+# Open the project
+cd GeckoPlotter
+claude
+```
+
+### Model & settings
+
+- Use **Opus 4.6** — type `/model` and select `claude-opus-4-6`
+- The **status line** at the bottom shows: model, context usage %, git branch, and permission mode
+- Press **Shift+Tab** to cycle the permission mode. Set it to **bypass** so Claude can run commands without asking you every time. The status line will show `⏵⏵ bypass permissions on`
+
+### Useful slash commands
+
+| Command | What it does |
+|---------|-------------|
+| `/init` | Generate a CLAUDE.md file so Claude understands the project |
+| `/model` | Switch model (use Opus 4.6) |
+| `/review` | Review a pull request |
+| `/clear` | Clear conversation context when it gets long |
+
+### Superpowers skills
+
+We have extra skills installed that make Claude much better at building things. Use them by typing the command:
+
+| Skill | When to use |
+|-------|------------|
+| `/superpowers:brainstorming` | Before building anything new — explores what you actually want before writing code |
+| `/superpowers:subagent-driven-development` | For bigger tasks — Claude splits work into parallel agents that work simultaneously |
+| `/superpowers:test-driven-development` | Write tests first, then implement |
+| `/superpowers:systematic-debugging` | When something breaks — structured debugging instead of random guessing |
+| `/superpowers:writing-plans` | For complex features — creates a step-by-step plan before coding |
+| `/superpowers:verification-before-completion` | Makes Claude actually verify things work before claiming "done" |
+
+**Tip:** When you want to build something, start with `/superpowers:brainstorming` — it forces Claude to understand what you want before it starts writing code. Saves a lot of back-and-forth.
+
+### Golden rule
+
+Before you start working, always tell Claude:
+
+> "Create a new branch called `yourname/what-you-are-doing`"
+
+When you're done:
+
+> "Commit everything, push, and create a PR"
+
+Never work directly on `main`.
+
 ## Contributing
 
-### Workflow
+### Workflow (vibe-coding edition)
 
-1. **Pull latest**: `git pull origin main`
-2. **Create a branch**: `git checkout -b feature/your-feature-name`
-3. **Make changes, test locally**: `python app.py` → check http://localhost:8050
-4. **Commit & push**: `git push -u origin feature/your-feature-name`
-5. **Open a Pull Request** on GitHub → get it reviewed before merging
+1. Open Claude Code in the project folder
+2. Tell Claude: "create a branch called `yourname/feature-name`"
+3. Describe what you want to build — Claude does the coding
+4. Tell Claude: "commit, push, and create a PR"
+5. The other person reviews the PR on GitHub and merges
 
 ### What's safe to change
 
