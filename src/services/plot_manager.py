@@ -555,9 +555,70 @@ class PlotManager:
         
         return fig
 
+    def create_standardized_plot(self, result) -> go.Figure:
+        """Create a plot from a StandardizedResult. Format-agnostic."""
+        from src.ingestion.types import ColumnRole, PlotHint
+
+        fig = go.Figure()
+        df = result.data
+
+        x_cols = result.x_columns
+        y_cols = result.y_columns
+
+        if x_cols:
+            x_col = x_cols[0]
+            x_vals = df[x_col]
+            x_title = x_col
+        else:
+            x_vals = list(range(len(df)))
+            x_title = "Index"
+
+        if not y_cols:
+            return self.create_empty_plot("No Y columns identified")
+
+        mode_map = {
+            PlotHint.LINE: "lines",
+            PlotHint.SCATTER: "markers",
+            PlotHint.MULTI_Y: "lines",
+        }
+        mode = mode_map.get(result.plot_hint, "lines")
+
+        for i, col in enumerate(y_cols[:8]):
+            color = self.default_colors[i % len(self.default_colors)]
+            fig.add_trace(go.Scatter(
+                x=x_vals,
+                y=pd.to_numeric(df[col], errors="coerce"),
+                mode=mode,
+                name=col,
+                line=dict(color=color, width=2),
+                hovertemplate=f"{col}<br>{x_title}: %{{x}}<br>%{{y:.4f}}<extra></extra>",
+            ))
+
+        title = result.sample_name or result.identity.original_name
+        wl = result.metadata.get("wavelength", "")
+        if wl:
+            title += f" ({wl} nm)"
+
+        y_title = y_cols[0] if len(y_cols) == 1 else "Value"
+
+        fig.update_layout(
+            title=title,
+            xaxis_title=x_title,
+            yaxis_title=y_title,
+            template="plotly_white",
+            autosize=True,
+            showlegend=len(y_cols) > 1,
+            hovermode="closest",
+        )
+        return fig
+
     def get_plot_for_file(self, file_data: Dict[str, Any]) -> go.Figure:
         """Get appropriate plot for a file based on its type."""
         try:
+            sr = file_data.get('standardized')
+            if sr is not None:
+                return self.create_standardized_plot(sr)
+
             metadata = file_data.get('metadata', {})
             file_type = (metadata.get('file_type')
                          or file_data.get('type')
