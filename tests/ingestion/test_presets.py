@@ -3,6 +3,9 @@ import os
 import pandas as pd
 from src.ingestion.presets.cary_kinetics import CaryKineticsPreset
 from src.ingestion.presets.chromeleon_txt import ChromeleonTxtPreset
+from src.ingestion.presets.plate_reader_csv import PlateReaderCSVPreset
+from src.ingestion.presets.lcms_cdf import LCMSCDFPreset
+from src.ingestion.presets.lcms_vwd_cdf import LCMSVWDCDFPreset
 from src.ingestion.types import ColumnRole, PlotHint
 
 FIXTURES = os.path.join(os.path.dirname(__file__), "fixtures")
@@ -73,3 +76,30 @@ class TestChromeleonTxt:
         assert result["column_roles"]["Value (mAU)"] == ColumnRole.Y
         assert result["plot_hint"] == PlotHint.LINE
         assert len(df) == 5
+
+
+class TestPlateReaderCSV:
+    def test_sniff_matches_plate_reader(self):
+        path = os.path.join(FIXTURES, "plate_reader.csv")
+        with open(path, "rb") as f:
+            head_bytes = f.read(4096)
+        lines = head_bytes.decode("utf-8").splitlines()[:50]
+        assert PlateReaderCSVPreset.sniff(path, head_bytes, lines) is True
+
+    def test_sniff_rejects_cary_kinetics(self):
+        path = os.path.join(FIXTURES, "cary_kinetics.csv")
+        with open(path, "rb") as f:
+            head_bytes = f.read(4096)
+        lines = head_bytes.decode("utf-8").splitlines()[:50]
+        assert PlateReaderCSVPreset.sniff(path, head_bytes, lines) is False
+
+    def test_parse_returns_wavelength_x_wells_y(self):
+        path = os.path.join(FIXTURES, "plate_reader.csv")
+        preset = PlateReaderCSVPreset()
+        result = preset.parse(path)
+        df = result["data"]
+        assert "Wavelength" in df.columns
+        assert result["column_roles"]["Wavelength"] == ColumnRole.X
+        well_cols = [c for c, r in result["column_roles"].items() if r == ColumnRole.Y]
+        assert len(well_cols) >= 2
+        assert result["plot_hint"] == PlotHint.MULTI_Y
