@@ -136,19 +136,49 @@ def register_upload_callbacks(app: dash.Dash, data_manager) -> None:
                 print(f"🎉 Successfully uploaded {success_count} files!")
 
             # Auto-switch to analysis mode for generic/unknown file types
+            # Exception: generic CSVs with auto-detected axes have a good raw plot
             auto_view_mode = dash.no_update
             if file_data and auto_active_file and auto_active_file != dash.no_update:
                 ft = (file_data.get('metadata', {}).get('file_type')
+                      or file_data.get('type')
                       or file_data.get('record', {}).get('type', ''))
                 if ft not in KNOWN_RAW_TYPES:
-                    auto_view_mode = 'analysis'
-                    print(f"🔀 Auto-switching to analysis mode for uploaded file type: {ft}")
+                    has_auto_axes = (file_data.get('metadata', {}).get('auto_x')
+                                    and file_data.get('metadata', {}).get('auto_y'))
+                    if has_auto_axes:
+                        auto_view_mode = 'raw'
+                        print(f"📊 Showing raw plot for uploaded generic CSV with auto-detected axes")
+                    else:
+                        auto_view_mode = 'analysis'
+                        print(f"🔀 Auto-switching to analysis mode for uploaded file type: {ft}")
 
             return merged_files, tree_items, auto_plot, auto_active_file, auto_table, table_editor, pub_data, auto_view_mode
 
         except Exception as e:
             print(f"❌ Upload failed: {str(e)}")
             return dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update
+
+
+    # Mirror of handle_file_upload that triggers from drag-and-drop zone
+    @app.callback(
+        [Output('loaded-files', 'data', allow_duplicate=True),
+         Output('file-tree', 'children', allow_duplicate=True),
+         Output('main-plot', 'figure', allow_duplicate=True),
+         Output('active-file', 'data', allow_duplicate=True),
+         Output('metadata-container', 'children', allow_duplicate=True),
+         Output('table-editor-container', 'children', allow_duplicate=True),
+         Output('pub-data-store', 'data', allow_duplicate=True),
+         Output('view-mode', 'data', allow_duplicate=True)],
+        Input('drop-zone', 'contents'),
+        [State('drop-zone', 'filename'),
+         State('drop-zone', 'last_modified'),
+         State('loaded-files', 'data')],
+        prevent_initial_call=True
+    )
+    def handle_drop_upload(contents_list, filenames, last_modified_list, existing_files):
+        if not contents_list or not filenames:
+            return (dash.no_update,) * 8
+        return handle_file_upload(contents_list, filenames, last_modified_list, existing_files)
 
 
 def render_file_tree_with_bundles(records: List[dict], data_manager) -> List[html.Div]:
@@ -353,6 +383,8 @@ def render_individual_file_item_selected(item: dict, is_selected: bool = False, 
     # Define icons for different file types
     TYPE_ICONS = {
         'table': '📊',
+        'csv': '📊',
+        'generic_csv': '📊',
         'structured': '🧩',
         'image': '🖼️',
         'chromatogram': '🌊',
@@ -367,8 +399,8 @@ def render_individual_file_item_selected(item: dict, is_selected: bool = False, 
         'binary': '💾',
         'unknown': '❓',
     }
-    
-    icon = TYPE_ICONS.get(item.get('type'), TYPE_ICONS['unknown'])
+
+    icon = TYPE_ICONS.get(item.get('type'), TYPE_ICONS.get('unknown', '❓'))
     file_id = item.get('id')
     file_type = item.get('type')
     

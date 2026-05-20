@@ -217,52 +217,73 @@ class PlotManager:
         return fig
 
     def create_generic_table_plot(self, data: pd.DataFrame, metadata: Dict[str, Any]) -> go.Figure:
-        """Create a simple plot for generic CSV/table data.
+        """Create a plot for generic CSV/table data.
 
-        Tries to plot numeric columns. If the first column looks like labels/categories,
-        uses it as the X axis; otherwise plots columns against row index.
+        Uses auto-detected X/Y columns from metadata when available,
+        otherwise falls back to heuristic detection.
         """
         try:
-            import numpy as np
             fig = go.Figure()
 
-            # Find numeric columns
             numeric_cols = data.select_dtypes(include='number').columns.tolist()
-            # Exclude internal columns
             numeric_cols = [c for c in numeric_cols if c != '_row_id']
 
             if not numeric_cols:
                 return self.create_empty_plot("No numeric columns found to plot.\nUse the publication plotter to select data manually.")
 
-            # Decide X axis: use first non-numeric column as labels, or row index
-            non_numeric = [c for c in data.columns if c not in numeric_cols and c != '_row_id']
-            if non_numeric:
-                x_col = non_numeric[0]
-                x_vals = data[x_col].astype(str)
+            auto_x = metadata.get('auto_x')
+            auto_y = metadata.get('auto_y', [])
+
+            if auto_x and auto_x in data.columns:
+                x_col = auto_x
+                x_vals = data[x_col]
                 x_title = x_col
             else:
-                x_vals = list(range(len(data)))
-                x_title = 'Index'
+                non_numeric = [c for c in data.columns if c not in numeric_cols and c != '_row_id']
+                if non_numeric:
+                    x_col = non_numeric[0]
+                    x_vals = data[x_col].astype(str)
+                    x_title = x_col
+                elif len(numeric_cols) >= 2:
+                    x_col = numeric_cols[0]
+                    x_vals = data[x_col]
+                    x_title = x_col
+                else:
+                    x_col = None
+                    x_vals = list(range(len(data)))
+                    x_title = 'Index'
 
-            for i, col in enumerate(numeric_cols[:8]):  # max 8 traces
+            y_cols = [c for c in auto_y if c in data.columns and c != x_col]
+            if not y_cols:
+                y_cols = [c for c in numeric_cols if c != x_col][:8]
+
+            for i, col in enumerate(y_cols):
                 color = self.default_colors[i % len(self.default_colors)]
                 fig.add_trace(go.Scatter(
                     x=x_vals,
                     y=pd.to_numeric(data[col], errors='coerce'),
-                    mode='lines+markers',
+                    mode='lines',
                     name=col,
                     line=dict(color=color, width=2),
-                    marker=dict(size=5),
+                    hovertemplate=f'{col}<br>{x_title}: %{{x}}<br>%{{y:.4f}}<extra></extra>',
                 ))
 
-            file_name = metadata.get('name', 'Data')
+            sample_name = metadata.get('sample_name', '')
+            file_name = metadata.get('file_name', metadata.get('name', 'Data'))
+            title = sample_name if sample_name else file_name
+            wavelength = metadata.get('wavelength', '')
+            if wavelength:
+                title += f' (λ = {wavelength} nm)'
+
+            y_title = y_cols[0] if len(y_cols) == 1 else 'Value'
+
             fig.update_layout(
-                title=f'{file_name}',
+                title=title,
                 xaxis_title=x_title,
-                yaxis_title='Value',
+                yaxis_title=y_title,
                 template='plotly_white',
                 autosize=True,
-                showlegend=True,
+                showlegend=len(y_cols) > 1,
                 hovermode='closest',
             )
             return fig
@@ -461,13 +482,17 @@ class PlotManager:
                     line=dict(color=color, width=2),
                 ))
         else:
-            # Generic numeric data
-            import numpy as np
+            # Generic numeric data — use auto-detected axes if available
+            auto_x = metadata.get('auto_x')
+            auto_y = metadata.get('auto_y', [])
             numeric_cols = [c for c in data.columns
                            if c != '_row_id' and pd.api.types.is_numeric_dtype(data[c])]
-            if len(numeric_cols) >= 2:
-                x_col = numeric_cols[0]
-                for j, y_col in enumerate(numeric_cols[1:4]):
+            x_col = auto_x if auto_x and auto_x in data.columns else (numeric_cols[0] if len(numeric_cols) >= 2 else None)
+            y_cols = [c for c in auto_y if c in data.columns and c != x_col]
+            if not y_cols and x_col:
+                y_cols = [c for c in numeric_cols if c != x_col][:4]
+            if x_col and y_cols:
+                for j, y_col in enumerate(y_cols):
                     c = self.default_colors[(color_offset + j) % len(self.default_colors)]
                     fig.add_trace(go.Scatter(
                         x=data[x_col], y=data[y_col],
@@ -533,9 +558,11 @@ class PlotManager:
     def get_plot_for_file(self, file_data: Dict[str, Any]) -> go.Figure:
         """Get appropriate plot for a file based on its type."""
         try:
-            file_type = file_data.get('record', {}).get('type', 'unknown')
-            data = file_data.get('data')
             metadata = file_data.get('metadata', {})
+            file_type = (metadata.get('file_type')
+                         or file_data.get('type')
+                         or file_data.get('record', {}).get('type', 'unknown'))
+            data = file_data.get('data')
             
             if data is None or data.empty:
                 return self._create_error_plot("No data available")
@@ -544,7 +571,7 @@ class PlotManager:
                 return self.create_chromatogram_plot(data, metadata)
             elif file_type == 'uvvis_csv':
                 return self.create_uvvis_plot(data, metadata)
-            elif file_type in {'table', 'generic_csv'}:
+            elif file_type in {'table', 'generic_csv', 'csv'}:
                 # Generic CSV/table: try UV-Vis if Wavelength column exists,
                 # otherwise show a simple table preview plot
                 if 'Wavelength' in data.columns:

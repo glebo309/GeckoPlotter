@@ -199,15 +199,32 @@ app.layout = html.Div(
                                                 ),
                                             ],
                                         ),
-                                        html.Div(
-                                            className='panel-content',
-                                            children=[
-                                                html.Div(
-                                                    id='file-tree',
-                                                    className='file-tree',
-                                                    children=render_file_tree([]),
-                                                )
-                                            ],
+                                        dcc.Upload(
+                                            id='drop-zone',
+                                            multiple=True,
+                                            disable_click=True,
+                                            style={
+                                                'flex': '1',
+                                                'overflow': 'auto',
+                                                'minHeight': '60px',
+                                                'border': '2px dashed transparent',
+                                                'borderRadius': '4px',
+                                                'transition': 'border-color 0.2s',
+                                            },
+                                            style_active={
+                                                'border': '2px dashed #ff6b35',
+                                                'backgroundColor': '#fff5f0',
+                                            },
+                                            children=html.Div(
+                                                className='panel-content',
+                                                children=[
+                                                    html.Div(
+                                                        id='file-tree',
+                                                        className='file-tree',
+                                                        children=render_file_tree([]),
+                                                    )
+                                                ],
+                                            ),
                                         ),
                                     ],
                                 ),

@@ -40,7 +40,7 @@ def guess_file_type(filename: str) -> str:
     extension = (filename.rsplit(".", 1)[-1] if "." in filename else "").lower()
     name_lower = filename.lower()
     if extension in {"csv", "tsv"}:
-        return "uvvis_csv"  # Changed from "table" to "uvvis_csv"
+        return "csv"
     if extension in {"json", "xml"}:
         return "structured"
     if extension in IMAGE_EXTENSIONS:
@@ -57,7 +57,7 @@ def guess_file_type(filename: str) -> str:
 
 
 def _build_preview(content: bytes, file_type: str) -> str:
-    if file_type in {"text", "uvvis_csv", "chromatogram", "structured"}:
+    if file_type in {"text", "uvvis_csv", "csv", "chromatogram", "structured", "generic_csv"}:
         try:
             text = content.decode("utf-8", errors="replace")
         except UnicodeDecodeError:
@@ -409,6 +409,10 @@ class DataManager:
             # Detect file type (pass temp file path for content-based detection)
             file_type = self.detect_file_type(file_record['name'], temp_file.name)
 
+            # Update the record type to match content-based detection
+            if file_type:
+                file_record['type'] = file_type
+
             # Register the file_id ↔ filename mapping so persistent state
             # can be looked up by filename across sessions.
             self.register_file_id(file_record['id'], file_record['name'])
@@ -499,8 +503,16 @@ class DataManager:
         filename_lower = filename.lower()
 
         if filename_lower.endswith('.txt'):
+            if file_path:
+                try:
+                    with open(file_path, 'r', encoding='utf-8') as f:
+                        head = f.read(2048)
+                    if 'Raw Data:' in head and ('Time (min)' in head or 'Value (mAU)' in head):
+                        return 'chromatogram'
+                except Exception:
+                    pass
             return 'chromatogram'
-        
+
         if filename_lower.endswith('.csv'):
             # Check file content to distinguish UV-Vis from generic CSV
             if file_path:
@@ -664,8 +676,15 @@ class DataManager:
             
             bundle_id = None
             
+            # Check actual detected type from loaded data (more reliable than record type)
+            actual_type = file_type
+            if file_id in self.loaded_data:
+                actual_type = (self.loaded_data[file_id].get('metadata', {}).get('file_type')
+                              or self.loaded_data[file_id].get('type')
+                              or file_type)
+
             # Try Chromeleon bundle first (for HPLC main files)
-            if file_type == 'chromatogram' or file_name.endswith('_UV_VIS_1.txt'):
+            if actual_type == 'chromatogram' or file_name.endswith('_UV_VIS_1.txt'):
                 print(f"🧬 Trying to create Chromeleon bundle for: {file_name}")
                 bundle_id = self.bundle_manager.try_create_chromeleon_bundle(file_record)
                 if bundle_id:

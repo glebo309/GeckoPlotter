@@ -180,7 +180,7 @@ def _classify_file_type(metadata, fdata):
         return 'lcms_ms'
     if ft in ('lcms_vwd_cdf', 'lcms_uv_a', 'lcms_uv_b'):
         return 'lcms_uv'
-    if ft in ('generic_csv', 'table'):
+    if ft in ('generic_csv', 'table', 'csv'):
         return 'table'
     return 'other'
 
@@ -503,16 +503,37 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
             pub_data = table_data.to_json(orient='split') if table_data is not None else None
 
         if data_manager.get_publication_memory(file_id) is None:
-            data_manager.initialise_publication_memory(file_id, get_empty_selections())
+            auto_x = metadata.get('auto_x')
+            auto_y = metadata.get('auto_y', [])
+            if auto_x and auto_y and table_data is not None and '_row_id' in table_data.columns:
+                all_row_ids = table_data['_row_id'].tolist()
+                sel = get_empty_selections()
+                sel['x']['data']['column_id'] = auto_x
+                sel['x']['data']['row_ids'] = all_row_ids
+                if auto_y:
+                    sel['y1']['series'][0]['column_id'] = auto_y[0]
+                    sel['y1']['series'][0]['row_ids'] = all_row_ids
+                for extra_y in auto_y[1:]:
+                    sel['y1']['series'].append({'column_id': extra_y, 'row_ids': all_row_ids})
+                data_manager.initialise_publication_memory(file_id, sel)
+                log.debug(f"📊 Auto-populated selections: X={auto_x}, Y={auto_y}")
+            else:
+                data_manager.initialise_publication_memory(file_id, get_empty_selections())
 
         # Auto-switch to analysis mode for generic/unknown file types that
         # don't have a meaningful raw-data plot (e.g. plain CSVs, tables).
+        # Exception: generic CSVs with auto-detected axes have a good raw plot.
         # On shared tabs, don't change view mode.
         if on_shared_tab:
             new_view_mode = dash.no_update
         elif file_type not in KNOWN_RAW_TYPES:
-            new_view_mode = 'analysis'
-            log.debug(f"🔀 Auto-switching to analysis mode for file type: {file_type}")
+            has_auto_axes = metadata.get('auto_x') and metadata.get('auto_y')
+            if has_auto_axes:
+                new_view_mode = 'raw'
+                log.debug(f"📊 Showing raw plot for generic CSV with auto-detected axes")
+            else:
+                new_view_mode = 'analysis'
+                log.debug(f"🔀 Auto-switching to analysis mode for file type: {file_type}")
         else:
             new_view_mode = dash.no_update
 

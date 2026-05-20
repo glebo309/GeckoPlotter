@@ -26,12 +26,31 @@ def register_file_tree_callbacks(app: dash.Dash, data_manager: DataManager) -> N
         """Toggle bundle expansion/collapse and update button icon."""
         if not n_clicks:
             return dash.no_update, dash.no_update
-        
+
         current_display = current_style.get('display', 'block')
         new_display = 'none' if current_display == 'block' else 'block'
         new_icon = '▶' if new_display == 'none' else '▼'
-        
+
         return new_icon, {**current_style, 'display': new_display}
+
+    @app.callback(
+        Output('active-file', 'data', allow_duplicate=True),
+        Input({'type': 'expand-btn', 'index': dash.dependencies.ALL}, 'n_clicks'),
+        prevent_initial_call=True
+    )
+    def select_bundle_on_expand(n_clicks_list):
+        """Select the bundle when its expand button is clicked."""
+        if not any(n_clicks_list):
+            return dash.no_update
+        ctx = callback_context
+        if not ctx.triggered:
+            return dash.no_update
+        try:
+            import json
+            component_id = json.loads(ctx.triggered[0]['prop_id'].split('.')[0])
+            return component_id['index']
+        except Exception:
+            return dash.no_update
 
     # UV-Vis file collapse/expand callback
     @app.callback(
