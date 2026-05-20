@@ -25,6 +25,7 @@ from .plot_settings_service import PlotSettingsService
 from .export_service import ExportService
 from .lcms_service import LCMSService
 from .persistence import ProjectPersistence
+from src.ingestion import ingest_file
 
 TEXT_EXTENSIONS = {"txt", "csv", "tsv", "log", "json", "xml", "cdf", "cdfx"}
 BINARY_EXTENSIONS = {"cdf", "cdfx", "cdf.vwd", "raw", "dat", "bin"}
@@ -406,6 +407,8 @@ class DataManager:
             # Track temp file for cleanup
             self.temp_files.append(temp_file.name)
 
+            standardized = ingest_file(temp_file.name, file_record['name'])
+
             # Detect file type (pass temp file path for content-based detection)
             file_type = self.detect_file_type(file_record['name'], temp_file.name)
 
@@ -445,6 +448,9 @@ class DataManager:
                             'type': file_type,
                         }
 
+                        if standardized is not None:
+                            component_entry['standardized'] = standardized
+
                         if file_type == 'lcms_cdf':
                             mode = metadata.get('ionization_mode', 'unknown')
                             key = 'ms_positive' if mode == 'positive' else 'ms_negative' if mode == 'negative' else None
@@ -462,13 +468,17 @@ class DataManager:
                         return component_entry
 
                     # Non-LCMS storage
-                    self.loaded_data[file_id] = {
+                    entry = {
                         'record': file_record,
                         'data': data,
                         'metadata': metadata,
                         'reader': reader,
                         'type': file_type
                     }
+                    if standardized is not None:
+                        entry['standardized'] = standardized
+
+                    self.loaded_data[file_id] = entry
 
                     print(f"✅ Loaded {file_record['name']} as {file_type}")
                     return self.loaded_data[file_id]
