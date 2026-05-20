@@ -143,8 +143,15 @@ def register_upload_callbacks(app: dash.Dash, data_manager) -> None:
                       or file_data.get('type')
                       or file_data.get('record', {}).get('type', ''))
                 if ft not in KNOWN_RAW_TYPES:
-                    has_auto_axes = (file_data.get('metadata', {}).get('auto_x')
-                                    and file_data.get('metadata', {}).get('auto_y'))
+                    sr = file_data.get('standardized')
+                    has_auto_axes = False
+                    if sr is not None:
+                        has_auto_axes = bool(sr.x_columns and sr.y_columns)
+                    else:
+                        has_auto_axes = bool(
+                            file_data.get('metadata', {}).get('auto_x')
+                            and file_data.get('metadata', {}).get('auto_y')
+                        )
                     if has_auto_axes:
                         auto_view_mode = 'raw'
                         print(f"📊 Showing raw plot for uploaded generic CSV with auto-detected axes")

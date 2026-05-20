@@ -503,8 +503,13 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
             pub_data = table_data.to_json(orient='split') if table_data is not None else None
 
         if data_manager.get_publication_memory(file_id) is None:
-            auto_x = metadata.get('auto_x')
-            auto_y = metadata.get('auto_y', [])
+            sr = file_data.get('standardized')
+            if sr is not None and sr.x_columns and sr.y_columns:
+                auto_x = sr.x_columns[0]
+                auto_y = sr.y_columns
+            else:
+                auto_x = file_data.get('metadata', {}).get('auto_x')
+                auto_y = file_data.get('metadata', {}).get('auto_y', [])
             if auto_x and auto_y and table_data is not None and '_row_id' in table_data.columns:
                 all_row_ids = table_data['_row_id'].tolist()
                 sel = get_empty_selections()
@@ -527,7 +532,14 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
         if on_shared_tab:
             new_view_mode = dash.no_update
         elif file_type not in KNOWN_RAW_TYPES:
-            has_auto_axes = metadata.get('auto_x') and metadata.get('auto_y')
+            sr = file_data.get('standardized')
+            has_auto_axes = False
+            if sr is not None:
+                has_auto_axes = bool(sr.x_columns and sr.y_columns)
+            else:
+                has_auto_axes = bool(
+                    metadata.get('auto_x') and metadata.get('auto_y')
+                )
             if has_auto_axes:
                 new_view_mode = 'raw'
                 log.debug(f"📊 Showing raw plot for generic CSV with auto-detected axes")
@@ -770,6 +782,36 @@ def create_data_table(file_data: Dict[str, Any]) -> html.Div:
             ], style={'margin': '0 0 15px 0', 'fontSize': '14px', 'color': '#666'})
         ])
 
+        # StandardizedResult identity section (pipeline info)
+        sr_section = html.Div()
+        sr = file_data.get('standardized')
+        if sr is not None:
+            identity = sr.identity
+            sr_items = [
+                html.P(f"Format: {identity.detected_format} (Stage {identity.detection_stage})",
+                       style={'margin': '2px 0', 'fontSize': '13px'}),
+                html.P(f"Columns: {', '.join(sr.x_columns)} (X) / {', '.join(sr.y_columns)} (Y)",
+                       style={'margin': '2px 0', 'fontSize': '13px'}),
+                html.P(f"Plot hint: {sr.plot_hint.value}",
+                       style={'margin': '2px 0', 'fontSize': '13px'}),
+            ]
+            if sr.sample_name:
+                sr_items.append(html.P(f"Sample: {sr.sample_name}",
+                                        style={'margin': '2px 0', 'fontSize': '13px'}))
+            for key, val in sr.metadata.items():
+                if isinstance(val, dict):
+                    for k2, v2 in val.items():
+                        sr_items.append(html.P(f"{k2}: {v2}",
+                                               style={'margin': '2px 0', 'fontSize': '13px'}))
+                else:
+                    sr_items.append(html.P(f"{key}: {val}",
+                                           style={'margin': '2px 0', 'fontSize': '13px'}))
+            sr_section = html.Div([
+                html.H6("Pipeline Detection", style={'margin': '0 0 6px 0', 'color': '#333'}),
+                html.Div(sr_items, style={'paddingLeft': '4px'})
+            ], style={'marginBottom': '15px', 'padding': '8px', 'backgroundColor': '#f8f9fa',
+                      'border': '1px solid #e0e0e0', 'borderRadius': '4px'})
+
         # Metadata section
         if metadata:
             metadata_items = []
@@ -780,7 +822,7 @@ def create_data_table(file_data: Dict[str, Any]) -> html.Div:
                         html.Td(display_key, style={'fontWeight': 'bold', 'padding': '4px 8px'}),
                         html.Td(str(value), style={'padding': '4px 8px'})
                     ]))
-            
+
             if metadata_items:
                 metadata_section = html.Div([
                     html.H6("📊 Metadata", style={'margin': '0 0 8px 0', 'color': '#333'}),
@@ -812,6 +854,7 @@ def create_data_table(file_data: Dict[str, Any]) -> html.Div:
 
         return html.Div([
             file_info,
+            sr_section,
             metadata_section,
             data_info
         ], style={'width': '100%', 'boxSizing': 'border-box'})
