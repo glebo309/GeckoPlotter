@@ -103,3 +103,35 @@ class TestPlateReaderCSV:
         well_cols = [c for c, r in result["column_roles"].items() if r == ColumnRole.Y]
         assert len(well_cols) >= 2
         assert result["plot_hint"] == PlotHint.MULTI_Y
+
+
+class TestLCMSCDF:
+    def test_sniff_matches_cdf_file(self, tmp_path):
+        f = tmp_path / "sample_MS1.cdf"
+        f.write_bytes(b"\x89HDF\r\n\x1a\nsome_cdf_content")
+        head_bytes = f.read_bytes()[:4096]
+        lines = []
+        assert LCMSCDFPreset.sniff(str(f), head_bytes, lines) is True
+
+    def test_sniff_rejects_vwd_cdf(self, tmp_path):
+        f = tmp_path / "sample_VWD1A.cdf"
+        f.write_bytes(b"\x89HDF\r\n\x1a\nsome_cdf_content")
+        head_bytes = f.read_bytes()[:4096]
+        lines = []
+        assert LCMSCDFPreset.sniff(str(f), head_bytes, lines) is False
+
+
+class TestLCMSVWDCDF:
+    def test_sniff_matches_vwd_cdf(self, tmp_path):
+        f = tmp_path / "sample_VWD1A.cdf"
+        f.write_bytes(b"\x89HDF\r\n\x1a\nsome_vwd_content")
+        head_bytes = f.read_bytes()[:4096]
+        lines = []
+        assert LCMSVWDCDFPreset.sniff(str(f), head_bytes, lines) is True
+
+    def test_sniff_rejects_ms_cdf(self, tmp_path):
+        f = tmp_path / "sample_MS1.cdf"
+        f.write_bytes(b"\x89HDF\r\n\x1a\n")
+        head_bytes = f.read_bytes()[:4096]
+        lines = []
+        assert LCMSVWDCDFPreset.sniff(str(f), head_bytes, lines) is False
