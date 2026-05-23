@@ -69,8 +69,6 @@ class StoreID:
     CROSS_SAMPLE_TABLE_STORE = "cross-sample-table-store"
 
     # -- UI-only (layout components, no dcc.Store backing) -------------------
-    RESIZE_STATE        = "resize-state"
-    AUTO_SELECT_TRIGGER = "auto-select-trigger"
     ACTIVE_SELECTOR     = "active-selector"
     Y1_SERIES_COUNT     = "y1-series-count"
     RESIZE_INIT_TRIGGER = "resize-init-trigger"

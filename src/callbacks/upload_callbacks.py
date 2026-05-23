@@ -1,9 +1,14 @@
 # Clean version of upload_callbacks.py with just the essential functions
+import logging
+
 from typing import List, Dict, Any
 import dash
 from dash import dcc, html, Input, Output, State, dash_table
 import pandas as pd
 
+
+
+log = logging.getLogger(__name__)
 
 def register_upload_callbacks(app: dash.Dash, data_manager) -> None:
     """Register upload-related callbacks."""
@@ -51,12 +56,12 @@ def register_upload_callbacks(app: dash.Dash, data_manager) -> None:
                 try:
                     file_data = data_manager.load_file_data(record)
                     if file_data:
-                        print(f"✅ Successfully loaded {record['name']}")
+                        log.debug(f"Successfully loaded {record['name']}")
                         success_count += 1
                     else:
-                        print(f"❌ Failed to process {record['name']}")
+                        log.error(f"Failed to process {record['name']}")
                 except Exception as e:
-                    print(f"❌ Error loading {record['name']}: {str(e)}")
+                    log.error(f"Error loading {record['name']}: {str(e)}")
 
             # Prevent duplicates - merge files by name
             merged_files = []
@@ -76,9 +81,9 @@ def register_upload_callbacks(app: dash.Dash, data_manager) -> None:
                     merged_files.append(record)
                     existing_names.add(fname)
                 else:
-                    print(f"⚠️ Skipping duplicate file: {fname}")
+                    log.warning(f"Skipping duplicate file: {fname}")
             
-            print(f"📊 Merged files: {len(merged_files)} total ({len(existing_names)} unique names)")
+            log.debug(f"Merged files: {len(merged_files)} total ({len(existing_names)} unique names)")
             
             # Get bundled tree items (this handles bundling logic)
             bundled_items = data_manager.get_bundled_tree_items(merged_files)
@@ -113,9 +118,7 @@ def register_upload_callbacks(app: dash.Dash, data_manager) -> None:
                             else:
                                 auto_table = create_data_table(file_data)
                     except Exception as e:
-                        print(f"Error auto-plotting: {e}")
-                        import traceback
-                        traceback.print_exc()
+                        log.exception("Error auto-plotting")
 
             # Render tree with selection highlighting
             tree_items = render_file_tree_with_bundles_selected(merged_files, data_manager, auto_active_file)
@@ -133,7 +136,7 @@ def register_upload_callbacks(app: dash.Dash, data_manager) -> None:
             
             # Simple success message
             if success_count > 0:
-                print(f"🎉 Successfully uploaded {success_count} files!")
+                log.debug(f"Successfully uploaded {success_count} files!")
 
             # Auto-switch to analysis mode for generic/unknown file types
             # Exception: generic CSVs with auto-detected axes have a good raw plot
@@ -154,15 +157,15 @@ def register_upload_callbacks(app: dash.Dash, data_manager) -> None:
                         )
                     if has_auto_axes:
                         auto_view_mode = 'raw'
-                        print(f"📊 Showing raw plot for uploaded generic CSV with auto-detected axes")
+                        log.debug(f"Showing raw plot for uploaded generic CSV with auto-detected axes")
                     else:
                         auto_view_mode = 'analysis'
-                        print(f"🔀 Auto-switching to analysis mode for uploaded file type: {ft}")
+                        log.debug(f"Auto-switching to analysis mode for uploaded file type: {ft}")
 
             return merged_files, tree_items, auto_plot, auto_active_file, auto_table, table_editor, pub_data, auto_view_mode
 
         except Exception as e:
-            print(f"❌ Upload failed: {str(e)}")
+            log.error(f"Upload failed: {str(e)}")
             return dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update
 
 
@@ -267,7 +270,7 @@ def render_bundle_item_selected(bundle_item: dict, is_selected: bool = False, da
         if stored_state == 'expanded':
             initial_icon = '▼'
             children_display = 'block'
-            print(f"🔓 Restoring expanded LCMS bundle state for {bundle_id}")
+            log.debug(f"Restoring expanded LCMS bundle state for {bundle_id}")
     
     return html.Div([
         # Main container using CSS Grid for clean layout
@@ -523,7 +526,7 @@ def render_individual_file_item_selected(item: dict, is_selected: bool = False, 
             stored_state = data_manager.collapse_state.get(file_id, 'collapsed')
             if stored_state == 'expanded':
                 initial_icon = '▼'  # Expanded
-                print(f"🔓 Restoring expanded button for {file_id}")
+                log.debug(f"Restoring expanded button for {file_id}")
         
         collapse_button_area = html.Div([
             html.Button(
@@ -628,7 +631,7 @@ def render_individual_file_item_selected(item: dict, is_selected: bool = False, 
             stored_state = data_manager.collapse_state.get(file_id, 'collapsed')
             if stored_state == 'expanded':
                 initial_display = 'block'
-                print(f"🔓 Restoring expanded state for {file_id}")
+                log.debug(f"Restoring expanded state for {file_id}")
         
         return html.Div([
             main_item,
@@ -639,10 +642,6 @@ def render_individual_file_item_selected(item: dict, is_selected: bool = False, 
         return main_item
 
 
-def render_individual_file_item(item: dict, is_child: bool = False, data_manager=None) -> html.Div:
-    """Render an individual file item."""
-    # Just call the selected version without selection highlighting
-    return render_individual_file_item_selected(item, is_selected=False, is_child=is_child, data_manager=data_manager)
 
 
 def register_clear_callbacks(app: dash.Dash, data_manager) -> None:

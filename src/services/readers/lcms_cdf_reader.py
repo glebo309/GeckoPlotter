@@ -9,6 +9,8 @@ comprehensive metadata dictionary.
 
 from __future__ import annotations
 
+import logging
+
 import os
 from datetime import datetime
 from typing import Any, Dict, Optional, Tuple
@@ -18,6 +20,8 @@ import numpy as np
 import pandas as pd
 
 from .base_reader import BaseReader
+
+log = logging.getLogger(__name__)
 
 
 class LCMSCDFReader(BaseReader):
@@ -48,7 +52,7 @@ class LCMSCDFReader(BaseReader):
 
             return True
         except Exception as exc:  # pragma: no cover - defensive logging helper
-            print(f"❌ LCMS CDF analysis error for {path}: {exc}")
+            log.error(f"LCMS CDF analysis error for {path}: {exc}")
             return False
 
     def _process_file(self) -> None:
@@ -205,21 +209,21 @@ class LCMSCDFReader(BaseReader):
         return self.mass_range
 
     def print_full_analysis(self) -> None:
-        """Pretty-print a summary to stdout (useful for debugging)."""
-        print("\n📋 LC-MS CDF ANALYSIS SUMMARY")
-        print("=" * 60)
-        print(f"📁 File: {self.get_file_name()}")
-        print(f"⚡ Mode: {self.get_ionization_mode().upper()}")
-        print(f"🔬 Instrument: {self.instrument_info.get('instrument_name', 'Unknown')}")
+        """Log a summary of the CDF analysis (useful for debugging)."""
+        log.debug("LC-MS CDF ANALYSIS SUMMARY")
+        log.debug("=" * 60)
+        log.debug(f"File: {self.get_file_name()}")
+        log.debug(f"Mode: {self.get_ionization_mode().upper()}")
+        log.debug(f"Instrument: {self.instrument_info.get('instrument_name', 'Unknown')}")
         rt_min, rt_max = self.get_retention_time_range()
-        print(f"🕒 Retention Time: {rt_min:.2f} - {rt_max:.2f} min")
+        log.debug(f"Retention Time: {rt_min:.2f} - {rt_max:.2f} min")
         low_mz, high_mz = self.mass_range
         if low_mz or high_mz:
-            print(f"⚖️ Mass Range: {low_mz:.1f} - {high_mz:.1f} m/z")
+            log.debug(f"Mass Range: {low_mz:.1f} - {high_mz:.1f} m/z")
         if self.tic_data is not None and not self.tic_data.empty:
-            print(f"📊 TIC points: {len(self.tic_data)}")
-            print(f"📈 Max Intensity: {float(self.tic_data['Intensity'].max()):,.0f}")
-        print("=" * 60)
+            log.debug(f"TIC points: {len(self.tic_data)}")
+            log.debug(f"Max Intensity: {float(self.tic_data['Intensity'].max()):,.0f}")
+        log.debug("=" * 60)
 
     # ------------------------------------------------------------------
     # Utility helpers

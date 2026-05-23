@@ -1022,7 +1022,6 @@ def register_publication_callbacks(app: dash.Dash, data_manager) -> None:
         import plotly.graph_objects as go
         import pandas as pd
         import time
-        import traceback as _tb
         from services.plot_settings_service import DEFAULT_PLOT_SETTINGS
 
         try:
@@ -1094,9 +1093,7 @@ def register_publication_callbacks(app: dash.Dash, data_manager) -> None:
             return fig, time.time(), export_data
 
         except Exception as e:
-            print(f"❌ update_pub_plot CRASH: {e}", flush=True)
-            _tb.print_exc()
-            log.exception(f"Error creating publication plot: {e}")
+            log.exception("Error creating publication plot")
             fig = go.Figure()
             fig.add_annotation(text=f"Error creating plot: {str(e)}", xref="paper", yref="paper",
                                x=0.5, y=0.5, showarrow=False, font=dict(size=12, color='#d32f2f'))

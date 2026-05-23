@@ -1,11 +1,16 @@
 # =============================================================================
 # File: services/readers/uvvis_csv_reader.py
 # =============================================================================
+import logging
+
 import pandas as pd
 import os
 from typing import Optional, Dict, Any, List, Tuple
 from .base_reader import BaseReader
 
+
+
+log = logging.getLogger(__name__)
 
 class UVVISCSVReader(BaseReader):
     """Reader for UV-Vis CSV files from Synergy H1 plate readers."""
@@ -43,7 +48,7 @@ class UVVISCSVReader(BaseReader):
             return True
 
         except Exception as e:
-            print(f"Failed to load UV-Vis CSV {path}: {e}")
+            log.error(f"Failed to load UV-Vis CSV {path}: {e}")
             return False
 
     def _process_file(self) -> None:

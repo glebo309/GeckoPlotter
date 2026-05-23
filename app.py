@@ -20,6 +20,7 @@ if os.environ.get("GP_DEBUG", "") != "1":
     # Temporarily disable print suppression for debugging
     pass  # builtins.print = lambda *args, **kwargs: None
 
+log = logging.getLogger(__name__)
 logging.getLogger('werkzeug').setLevel(logging.ERROR)
 
 # Import our modular components
@@ -102,13 +103,11 @@ def render_file_tree(records):
 # Clean layout with proper CSS classes and structure
 app.layout = html.Div(
     [
-        dcc.Store(id='resize-state', data={'mainSplit': 30, 'leftSplit': 50, 'rightSplit': 60}),
         dcc.Store(id='loaded-files', data=[]),
         dcc.Store(id='active-file', data=None),
         dcc.Store(id='file-ui-state', data={}),
         dcc.Store(id='active-tab', data='data-overview'),
         dcc.Store(id='view-mode', data='raw'),
-        dcc.Store(id='auto-select-trigger', data=None),
         dcc.Store(id='active-plot-context', data=None),
         dcc.Store(id='current-plot-settings', data={}),
         dcc.Store(id='toolbox-tab', data='pub-plotter'),
@@ -1249,6 +1248,6 @@ def update_status(files):
     return f'Loaded {file_count} file{"s" if file_count != 1 else ""}', f'{file_count} file{"s" if file_count != 1 else ""} available'
 
 if __name__ == '__main__':
-    print("🚀 Starting GeckoPlotter V2...")
-    print("📊 Upload TXT chromatograms or CSV UV-Vis files to get started!")
+    log.info("Starting GeckoPlotter V2...")
+    log.info("Upload TXT chromatograms or CSV UV-Vis files to get started!")
     app.run(debug=True, port=8052)

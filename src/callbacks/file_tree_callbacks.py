@@ -5,12 +5,16 @@
 File tree interaction callbacks for GeckoPlotter V2.
 """
 
+import logging
+
 import dash
 from dash import Input, Output, State, callback_context, html
 import os
 from typing import List, Dict, Any
 
 from services.storage_manager import DataManager
+
+log = logging.getLogger(__name__)
 
 
 def register_file_tree_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
@@ -114,7 +118,7 @@ def register_file_tree_callbacks(app: dash.Dash, data_manager: DataManager) -> N
         except:
             return (dash.no_update,) * 8
 
-        print(f"🗑️ Deleting file/bundle: {file_id}")
+        log.debug(f"Deleting file/bundle: {file_id}")
 
         files_to_remove = []
 
@@ -122,7 +126,7 @@ def register_file_tree_callbacks(app: dash.Dash, data_manager: DataManager) -> N
         if '|' in file_id:
             # This is a well deletion (e.g., "fileId|H1")
             parent_file_id, well_name = file_id.split('|', 1)
-            print(f"🧪 Deleting well: {well_name} from parent file: {parent_file_id}")
+            log.debug(f"Deleting well: {well_name} from parent file: {parent_file_id}")
             
             # Get parent file data
             parent_file_data = data_manager.get_data_by_id(parent_file_id)
@@ -132,7 +136,7 @@ def register_file_tree_callbacks(app: dash.Dash, data_manager: DataManager) -> N
                 if well_name in filled_wells:
                     filled_wells.remove(well_name)
                     parent_file_data['metadata']['filled_wells'] = filled_wells
-                    print(f"✅ Removed well {well_name} from parent file metadata")
+                    log.debug(f"Removed well {well_name} from parent file metadata")
                     
                     # Update the data by removing the well column
                     if 'data' in parent_file_data and parent_file_data['data'] is not None:
@@ -140,11 +144,11 @@ def register_file_tree_callbacks(app: dash.Dash, data_manager: DataManager) -> N
                         if well_name in df.columns:
                             df = df.drop(columns=[well_name])
                             parent_file_data['data'] = df
-                            print(f"✅ Removed well {well_name} column from data")
+                            log.debug(f"Removed well {well_name} column from data")
                     
                     # If no wells left, delete the entire file
                     if not filled_wells:
-                        print(f"🗑️ No wells left, deleting entire parent file: {parent_file_id}")
+                        log.debug(f"No wells left, deleting entire parent file: {parent_file_id}")
                         if parent_file_id in data_manager.loaded_data:
                             del data_manager.loaded_data[parent_file_id]
                         
@@ -154,16 +158,16 @@ def register_file_tree_callbacks(app: dash.Dash, data_manager: DataManager) -> N
                             if f.get('id') != parent_file_id:
                                 updated_files.append(f)
                             else:
-                                print(f"✅ Removed parent file from records: {f.get('name')}")
+                                log.debug(f"Removed parent file from records: {f.get('name')}")
                     else:
                         # Keep the file but update it
                         updated_files = current_files.copy()
-                        print(f"✅ Updated parent file, {len(filled_wells)} wells remaining: {filled_wells}")
+                        log.debug(f"Updated parent file, {len(filled_wells)} wells remaining: {filled_wells}")
                 else:
-                    print(f"⚠️ Well {well_name} not found in parent file")
+                    log.warning(f"Well {well_name} not found in parent file")
                     updated_files = current_files.copy()
             else:
-                print(f"❌ Parent file not found or not UV-Vis: {parent_file_id}")
+                log.error(f"Parent file not found or not UV-Vis: {parent_file_id}")
                 updated_files = current_files.copy()
         
         # Check if this is a bundle deletion
@@ -172,16 +176,16 @@ def register_file_tree_callbacks(app: dash.Dash, data_manager: DataManager) -> N
             lcms_bundle = data_manager.get_lcms_bundle_by_id(file_id)
             if bundle:
                 bundle_base_name = bundle.base_name
-                print(f"📦 Deleting bundle: {file_id}")
+                log.debug(f"Deleting bundle: {file_id}")
             elif lcms_bundle:
                 bundle_base_name = file_id[: -len('_LCMS_BUNDLE')]
-                print(f"🧪 Deleting LCMS bundle: {file_id}")
+                log.debug(f"Deleting LCMS bundle: {file_id}")
             
             # IMPORTANT: Get ALL files that belong to this bundle from the file records
             # Don't rely on the bundle structure which might be incomplete
             files_to_remove = []
             
-            print(f"🔍 Looking for all files with base name: {bundle_base_name}")
+            log.debug(f"Looking for all files with base name: {bundle_base_name}")
             
             # Find ALL files in current_files that belong to this bundle
             for f in current_files:
@@ -195,35 +199,35 @@ def register_file_tree_callbacks(app: dash.Dash, data_manager: DataManager) -> N
                          file_name.endswith('_Peak Analysis.txt') or
                          file_name.endswith('_SST.txt'))):
                         files_to_remove.append(f.get('id'))
-                        print(f"🔒 Will remove: {file_name} (ID: {f.get('id')})")
+                        log.debug(f"Will remove: {file_name} (ID: {f.get('id')})")
                 else:
                     # LCMS bundle: remove all component IDs tracked in bundle metadata
                     _, bundle_record = data_manager.find_lcms_bundle_for_component(f.get('id'))
                     if bundle_record and bundle_record.get('base_name') == bundle_base_name:
                         files_to_remove.append(f.get('id'))
-                        print(f"🔬 Will remove LCMS member: {file_name} (ID: {f.get('id')})")
+                        log.debug(f"Will remove LCMS member: {file_name} (ID: {f.get('id')})")
                     elif file_name.startswith(bundle_base_name):
                         files_to_remove.append(f.get('id'))
-                        print(f"🔬 Will remove LCMS record by name match: {file_name}")
+                        log.debug(f"Will remove LCMS record by name match: {file_name}")
             if lcms_bundle:
                 files_to_remove.append(file_id)
-                print(f"🔬 Will remove LCMS bundle parent record: {file_id}")
+                log.debug(f"Will remove LCMS bundle parent record: {file_id}")
             
-            print(f"🔍 Total files to remove: {len(files_to_remove)}")
+            log.debug(f"Total files to remove: {len(files_to_remove)}")
             
             # Remove from loaded data
             for fid in files_to_remove:
                 if fid in data_manager.loaded_data:
                     del data_manager.loaded_data[fid]
-                    print(f"✅ Removed from loaded_data: {fid}")
+                    log.debug(f"Removed from loaded_data: {fid}")
             
             # Remove bundle data itself
             if file_id in data_manager.loaded_data:
                 del data_manager.loaded_data[file_id]
-                print(f"✅ Removed bundle data: {file_id}")
+                log.debug(f"Removed bundle data: {file_id}")
             if lcms_bundle:
                 removed_bundle = data_manager.remove_lcms_bundle(bundle_base_name)
-                print(f"🧪 Removed LCMS bundle record: {removed_bundle is not None}")
+                log.debug(f"Removed LCMS bundle record: {removed_bundle is not None}")
             
             # Remove from file records - remove ALL files that were in the bundle
             updated_files = []
@@ -232,10 +236,10 @@ def register_file_tree_callbacks(app: dash.Dash, data_manager: DataManager) -> N
                 if f.get('id') not in files_to_remove:
                     updated_files.append(f)
                 else:
-                    print(f"✅ Removed from file records: {f.get('name')} (ID: {f.get('id')})")
+                    log.debug(f"Removed from file records: {f.get('name')} (ID: {f.get('id')})")
                     removed_count += 1
             
-            print(f"🔍 Removed {removed_count} files from file records")
+            log.debug(f"Removed {removed_count} files from file records")
             
             # Remove the bundle from bundle manager
             if bundle:
@@ -245,19 +249,19 @@ def register_file_tree_callbacks(app: dash.Dash, data_manager: DataManager) -> N
             
         else:
             # Regular file deletion
-            print(f"📄 Deleting individual file: {file_id}")
+            log.debug(f"Deleting individual file: {file_id}")
 
             lcms_base, lcms_bundle = data_manager.find_lcms_bundle_for_component(file_id)
             is_lcms_component_deletion = False
             lcms_parent_id = None
             if lcms_bundle:
-                print(f"🧪 Removing LCMS component from bundle {lcms_base}")
+                log.debug(f"Removing LCMS component from bundle {lcms_base}")
                 # Preserve collapse state for the LCMS bundle parent so it stays open
                 if not hasattr(data_manager, 'collapse_state'):
                     data_manager.collapse_state = {}
                 lcms_parent_id = f"{lcms_base}_LCMS_BUNDLE"
                 data_manager.collapse_state[lcms_parent_id] = 'expanded'
-                print(f"🔒 Stored collapse state for LCMS bundle {lcms_parent_id}: expanded")
+                log.debug(f"Stored collapse state for LCMS bundle {lcms_parent_id}: expanded")
                 is_lcms_component_deletion = True
                 bundle_files = lcms_bundle.get('files', [])
                 if file_id in bundle_files:
@@ -268,7 +272,7 @@ def register_file_tree_callbacks(app: dash.Dash, data_manager: DataManager) -> N
 
             if file_id in data_manager.loaded_data:
                 del data_manager.loaded_data[file_id]
-                print(f"✅ Removed from loaded_data: {file_id}")
+                log.debug(f"Removed from loaded_data: {file_id}")
 
             # Remove from file records
             updated_files = []
@@ -276,7 +280,7 @@ def register_file_tree_callbacks(app: dash.Dash, data_manager: DataManager) -> N
                 if f.get('id') != file_id:
                     updated_files.append(f)
                 else:
-                    print(f"✅ Removed from file records: {f.get('name')}")
+                    log.debug(f"Removed from file records: {f.get('name')}")
                     if is_lcms_component_deletion and 'children' in f:
                         # Ensure bundle parent stays expanded after child removal
                         bundle_parent_id = f.get('parent_bundle_id')
@@ -293,13 +297,13 @@ def register_file_tree_callbacks(app: dash.Dash, data_manager: DataManager) -> N
             parent_to_expand = lcms_parent_id
 
         if parent_to_expand:
-            print(f"🔄 Preserving collapse state for parent {parent_to_expand}")
+            log.debug(f"Preserving collapse state for parent {parent_to_expand}")
             
             if not hasattr(data_manager, 'collapse_state'):
                 data_manager.collapse_state = {}
             
             data_manager.collapse_state[parent_to_expand] = 'expanded'
-            print(f"🔒 Stored collapse state for {parent_to_expand}: expanded")
+            log.debug(f"Stored collapse state for {parent_to_expand}: expanded")
             
             if hasattr(data_manager, '_last_processed_files'):
                 delattr(data_manager, '_last_processed_files')
@@ -319,16 +323,16 @@ def register_file_tree_callbacks(app: dash.Dash, data_manager: DataManager) -> N
             from callbacks.upload_callbacks import render_file_tree_with_bundles
             tree_items = render_file_tree_with_bundles(updated_files, data_manager)
 
-        print(f"✅ Delete complete. Remaining files: {len(updated_files)}")
-        print(f"🔍 Returning tree with {len(tree_items)} items")
+        log.debug(f"Delete complete. Remaining files: {len(updated_files)}")
+        log.debug(f"Returning tree with {len(tree_items)} items")
         
         # Auto-update plot if the deleted item affects the currently active file
         updated_plot = dash.no_update
         if active_file_id:
-            print(f"🔍 Checking plot update for active file: {active_file_id}")
+            log.debug(f"Checking plot update for active file: {active_file_id}")
             # Get the main file ID (remove well suffix if present)
             main_file_id = active_file_id.split('|')[0] if '|' in active_file_id else active_file_id
-            print(f"🔍 Main file ID: {main_file_id}")
+            log.debug(f"Main file ID: {main_file_id}")
             
             # Check if the deletion affects the current plot
             affects_current_plot = False
@@ -336,39 +340,39 @@ def register_file_tree_callbacks(app: dash.Dash, data_manager: DataManager) -> N
             if '|' in file_id:
                 # Well deletion - check if it's from the current file
                 deleted_parent_id = file_id.split('|')[0]
-                print(f"🔍 Deleted parent ID: {deleted_parent_id}")
+                log.debug(f"Deleted parent ID: {deleted_parent_id}")
                 if deleted_parent_id == main_file_id:
                     affects_current_plot = True
-                    print(f"🎯 Well deletion affects current plot: {file_id}")
+                    log.debug(f"Well deletion affects current plot: {file_id}")
             elif file_id == main_file_id:
                 # Main file deletion - affects current plot
                 affects_current_plot = True
-                print(f"🎯 Main file deletion affects current plot: {file_id}")
+                log.debug(f"Main file deletion affects current plot: {file_id}")
             elif main_file_id in files_to_remove:
                 # Bundle deletion includes the active file
                 affects_current_plot = True
-                print(f"🎯 Bundle deletion affects current plot: active file {main_file_id} in removed set")
+                log.debug(f"Bundle deletion affects current plot: active file {main_file_id} in removed set")
             
-            print(f"🔍 Affects current plot: {affects_current_plot}")
+            log.debug(f"Affects current plot: {affects_current_plot}")
             
             if affects_current_plot:
-                print("🔄 Starting plot update...")
+                log.debug("Starting plot update...")
                 try:
                     from services.plot_manager import PlotManager
                     plot_manager = PlotManager()
                     
                     # Check if the main file still exists
                     file_data = data_manager.get_data_by_id(main_file_id)
-                    print(f"🔍 File data exists: {file_data is not None}")
+                    log.debug(f"File data exists: {file_data is not None}")
                     
                     if file_data and file_data.get('metadata', {}).get('file_type') == 'uvvis_csv':
-                        print("🧪 Processing UV-Vis file for plot update")
+                        log.debug("Processing UV-Vis file for plot update")
                         # For UV-Vis, create plot with remaining wells
                         visible_wells = []
                         filled_wells = file_data.get('metadata', {}).get('filled_wells', [])
                         
-                        print(f"🧪 Filled wells: {filled_wells}")
-                        print(f"🧪 Updating plot with {len(filled_wells)} remaining wells")
+                        log.debug(f"Filled wells: {filled_wells}")
+                        log.debug(f"Updating plot with {len(filled_wells)} remaining wells")
                         
                         for well in filled_wells:
                             well_id = f"{main_file_id}|{well}"
@@ -376,11 +380,11 @@ def register_file_tree_callbacks(app: dash.Dash, data_manager: DataManager) -> N
                             if not hasattr(data_manager, 'visibility_state'):
                                 data_manager.visibility_state = {}
                             is_well_visible = data_manager.visibility_state.get(well_id, True)
-                            print(f"   Well {well} visible: {is_well_visible}")
+                            log.debug(f"Well {well} visible: {is_well_visible}")
                             if is_well_visible:
                                 visible_wells.append(well)
                         
-                        print(f"🧪 Visible wells: {visible_wells}")
+                        log.debug(f"Visible wells: {visible_wells}")
                         
                         if visible_wells:
                             updated_plot = plot_manager.create_uvvis_plot(
@@ -388,7 +392,7 @@ def register_file_tree_callbacks(app: dash.Dash, data_manager: DataManager) -> N
                                 file_data['metadata'], 
                                 selected_columns=visible_wells
                             )
-                            print(f"🎨 Auto-updated plot after deletion with {len(visible_wells)} wells: {visible_wells}")
+                            log.debug(f"Auto-updated plot after deletion with {len(visible_wells)} wells: {visible_wells}")
                         else:
                             # No visible wells, show empty plot
                             import plotly.graph_objects as go
@@ -400,7 +404,7 @@ def register_file_tree_callbacks(app: dash.Dash, data_manager: DataManager) -> N
                                 showarrow=False,
                                 font=dict(size=16, color="#666")
                             )
-                            print("🚫 All wells deleted/hidden, showing empty plot")
+                            log.debug("All wells deleted/hidden, showing empty plot")
                     elif not file_data:
                         # File was completely deleted, show empty plot
                         import plotly.graph_objects as go
@@ -412,15 +416,13 @@ def register_file_tree_callbacks(app: dash.Dash, data_manager: DataManager) -> N
                             showarrow=False,
                             font=dict(size=16, color="#666")
                         )
-                        print("🗑️ File deleted, showing empty plot")
+                        log.debug("File deleted, showing empty plot")
                     else:
-                        print(f"🔍 File type: {file_data.get('metadata', {}).get('file_type', 'unknown')}")
+                        log.debug(f"File type: {file_data.get('metadata', {}).get('file_type', 'unknown')}")
                 except Exception as e:
-                    print(f"❌ Error updating plot after deletion: {e}")
-                    import traceback
-                    traceback.print_exc()
+                    log.exception("Error updating plot after deletion")
         else:
-            print("🔍 No active file for plot update")
+            log.debug("No active file for plot update")
         
         # Clear table and selections if the deleted file affects the active view
         from components.data_table_editor import create_data_table_editor
@@ -462,7 +464,7 @@ def register_file_tree_callbacks(app: dash.Dash, data_manager: DataManager) -> N
         
         # Ensure arrays match
         if len(current_icons) != len(button_ids) or len(n_clicks_list) != len(button_ids):
-            print(f"❌ Array length mismatch: icons={len(current_icons)}, ids={len(button_ids)}, clicks={len(n_clicks_list)}")
+            log.error(f"Array length mismatch: icons={len(current_icons)}, ids={len(button_ids)}, clicks={len(n_clicks_list)}")
             return dash.no_update, dash.no_update
         
         # Get which button was clicked
@@ -475,7 +477,7 @@ def register_file_tree_callbacks(app: dash.Dash, data_manager: DataManager) -> N
             component_id = json.loads(ctx.triggered[0]['prop_id'].rsplit('.', 1)[0])
             clicked_file_id = component_id['index']
         except Exception as e:
-            print(f"❌ Error parsing callback trigger: {e}")
+            log.error(f"Error parsing callback trigger: {e}")
             return dash.no_update, dash.no_update
         
         # Initialize visibility state if needed
@@ -490,7 +492,7 @@ def register_file_tree_callbacks(app: dash.Dash, data_manager: DataManager) -> N
                 break
         
         if current_icon is None:
-            print(f"❌ Could not find clicked button: {clicked_file_id}")
+            log.error(f"Could not find clicked button: {clicked_file_id}")
             return dash.no_update, dash.no_update
         
         # Toggle visibility state
@@ -498,7 +500,7 @@ def register_file_tree_callbacks(app: dash.Dash, data_manager: DataManager) -> N
         new_visibility = not is_visible
         data_manager.visibility_state[clicked_file_id] = new_visibility
         
-        print(f"👁 Toggling visibility for {clicked_file_id}: {'visible' if new_visibility else 'hidden'}")
+        log.debug(f"Toggling visibility for {clicked_file_id}: {'visible' if new_visibility else 'hidden'}")
         
         # Check if this is a parent button and get children
         bundle = data_manager.bundle_manager.get_bundle_by_id(clicked_file_id)
@@ -508,23 +510,23 @@ def register_file_tree_callbacks(app: dash.Dash, data_manager: DataManager) -> N
         if bundle:
             # HPLC Bundle - get auxiliary file IDs
             is_parent_click = True
-            print(f"📦 Setting all bundle children to {'visible' if new_visibility else 'hidden'}")
+            log.debug(f"Setting all bundle children to {'visible' if new_visibility else 'hidden'}")
             for aux_file in bundle.auxiliary_files:
                 aux_file_id = aux_file.get('id')
                 if aux_file_id:
                     child_ids.append(aux_file_id)
                     data_manager.visibility_state[aux_file_id] = new_visibility
-                    print(f"  📎 Set {aux_file.get('name')} to {'visible' if new_visibility else 'hidden'}")
+                    log.debug(f"Set {aux_file.get('name')} to {'visible' if new_visibility else 'hidden'}")
         else:
             # Check for LCMS bundle parent
             lcms_bundle = data_manager.get_lcms_bundle_by_id(clicked_file_id)
             if lcms_bundle:
                 is_parent_click = True
-                print(f"🧪 Setting all LCMS components to {'visible' if new_visibility else 'hidden'}")
+                log.debug(f"Setting all LCMS components to {'visible' if new_visibility else 'hidden'}")
                 for component_id in lcms_bundle.get('files', []):
                     child_ids.append(component_id)
                     data_manager.visibility_state[component_id] = new_visibility
-                    print(f"  🧪 Set LCMS component {component_id} to {'visible' if new_visibility else 'hidden'}")
+                    log.debug(f"Set LCMS component {component_id} to {'visible' if new_visibility else 'hidden'}")
             else:
                 # UV-Vis file - get well IDs
                 file_data = data_manager.get_data_by_id(clicked_file_id)
@@ -532,12 +534,12 @@ def register_file_tree_callbacks(app: dash.Dash, data_manager: DataManager) -> N
                     filled_wells = file_data.get('metadata', {}).get('filled_wells', [])
                     if len(filled_wells) > 0:
                         is_parent_click = True
-                        print(f"🧪 Setting all UV-Vis wells to {'visible' if new_visibility else 'hidden'}")
+                        log.debug(f"Setting all UV-Vis wells to {'visible' if new_visibility else 'hidden'}")
                         for well in filled_wells:
                             well_id = f"{clicked_file_id}|{well}"
                             child_ids.append(well_id)
                             data_manager.visibility_state[well_id] = new_visibility
-                            print(f"  🧪 Set Well {well} to {'visible' if new_visibility else 'hidden'}")
+                            log.debug(f"Set Well {well} to {'visible' if new_visibility else 'hidden'}")
         
         # Update ALL buttons based on their current visibility state
         new_icons = []
@@ -566,13 +568,13 @@ def register_file_tree_callbacks(app: dash.Dash, data_manager: DataManager) -> N
                     'borderRadius': '3px'
                 })
         except Exception as e:
-            print(f"❌ Error updating button arrays: {e}")
+            log.error(f"Error updating button arrays: {e}")
             return dash.no_update, dash.no_update
         
         if is_parent_click:
-            print(f"🎨 Photoshop-style sync: Updated parent + {len(child_ids)} children")
+            log.debug(f"Photoshop-style sync: Updated parent + {len(child_ids)} children")
         
-        print(f"✅ Returning {len(new_icons)} icons and {len(new_styles)} styles")
+        log.debug(f"Returning {len(new_icons)} icons and {len(new_styles)} styles")
         return new_icons, new_styles
 
     # Plot update callback - SEPARATE from button updates with delay
@@ -650,33 +652,3 @@ def register_file_tree_callbacks(app: dash.Dash, data_manager: DataManager) -> N
     if not hasattr(data_manager, 'collapse_state'):
         data_manager.collapse_state = {}
 
-    # DISABLED: Clientside callback was causing JavaScript errors
-    # The visibility state is properly managed server-side
-    # Child buttons will show correct state when file tree refreshes
-    # 
-    # app.clientside_callback(
-    #     """
-    #     function(n_clicks_list) {
-    #         return null;
-    #     }
-    #     """,
-    #     Output('dummy-output', 'children', allow_duplicate=True),
-    #     Input({'type': 'visibility-btn', 'index': dash.dependencies.ALL}, 'n_clicks'),
-    #     prevent_initial_call=True
-    # )
-
-    # DISABLED: Tree refresh was causing collapse state loss and plot update conflicts
-    # The visibility functionality works perfectly, just the visual button sync is missing
-    # This is a minor UX issue vs major functionality breaking
-    # 
-    # @app.callback(
-    #     Output('file-tree', 'children', allow_duplicate=True),
-    #     Input({'type': 'visibility-btn', 'index': dash.dependencies.ALL}, 'n_clicks'),
-    #     State('loaded-files', 'data'),
-    #     prevent_initial_call=True
-    # )
-    # def refresh_tree_for_button_sync(n_clicks_list, current_files):
-    #     """DISABLED: Was causing collapse state loss and plot update conflicts."""
-    #     return dash.no_update
-    #     """Refresh file tree after visibility changes to sync button states."""
-    #     return dash.no_update

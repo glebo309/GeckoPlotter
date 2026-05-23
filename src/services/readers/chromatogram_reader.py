@@ -1,6 +1,8 @@
 # =============================================================================
 # File: services/readers/chromatogram_reader.py
 # =============================================================================
+import logging
+
 import os
 import re
 import pandas as pd
@@ -8,6 +10,9 @@ from io import StringIO
 from typing import Optional, Dict, Any
 from .base_reader import BaseReader
 
+
+
+log = logging.getLogger(__name__)
 
 class ChromatogramReader(BaseReader):
     """Reader for chromatogram data files (TXT format with German number format support)."""
@@ -72,7 +77,7 @@ class ChromatogramReader(BaseReader):
             return self._process_file_content(content)
 
         except Exception as e:
-            print(f"Failed to load chromatogram {path}: {e}")
+            log.error(f"Failed to load chromatogram {path}: {e}")
             return False
 
     def _process_file(self) -> None:
@@ -131,7 +136,7 @@ class ChromatogramReader(BaseReader):
             return True
 
         except Exception as e:
-            print(f"Failed to process chromatogram content: {e}")
+            log.error(f"Failed to process chromatogram content: {e}")
             return False
 
     def get_wavelength(self) -> Optional[str]:

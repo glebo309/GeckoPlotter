@@ -5,6 +5,7 @@ Smart parsing: detects header rows, trailing delimiters, European number
 formats (semicolon-separated, comma decimals), instrument metadata footers,
 and auto-identifies X/Y columns for immediate plotting.
 """
+import logging
 import re
 import pandas as pd
 import numpy as np
@@ -12,6 +13,8 @@ import os
 from io import StringIO
 from typing import Optional, Dict, Any, List, Tuple
 from .base_reader import BaseReader
+
+log = logging.getLogger(__name__)
 
 # Patterns that identify a column as an X-axis candidate (ranked by priority)
 _X_PATTERNS = [
@@ -80,7 +83,7 @@ class GenericCSVReader(BaseReader):
 
             raw_lines = self._read_raw_lines(path)
             if not raw_lines:
-                print(f"⚠️ CSV file is empty: {path}")
+                log.warning(f"CSV file is empty: {path}")
                 return False
 
             delimiter = self._detect_delimiter(raw_lines)
@@ -114,19 +117,18 @@ class GenericCSVReader(BaseReader):
 
             self.metadata = self._build_metadata()
 
-            print(f"✅ Loaded generic CSV: {len(self.data)} rows × {len(self.data.columns)} columns")
-            print(f"   Columns: {list(self.data.columns)}")
+            log.debug(f"Loaded generic CSV: {len(self.data)} rows × {len(self.data.columns)} columns")
+            log.debug(f"Columns: {list(self.data.columns)}")
             if self.sample_name:
-                print(f"   Sample: {self.sample_name}")
+                log.debug(f"Sample: {self.sample_name}")
             if self.x_column:
-                print(f"   Auto X: {self.x_column}")
+                log.debug(f"Auto X: {self.x_column}")
             if self.y_columns:
-                print(f"   Auto Y: {self.y_columns}")
+                log.debug(f"Auto Y: {self.y_columns}")
             return True
 
         except Exception as e:
-            print(f"❌ Failed to load generic CSV {path}: {e}")
-            import traceback; traceback.print_exc()
+            log.exception("Failed to load generic CSV %s", path)
             return False
 
     # ------------------------------------------------------------------

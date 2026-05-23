@@ -26,6 +26,7 @@ from callbacks.peak_overlay import (
     overlay_peaks_on_figure,
     patch_figure_with_peaks,
     add_selected_baseline_handle,
+    _y_curve,
 )
 
 log = logging.getLogger('geckoplotter.baseline')
@@ -40,10 +41,6 @@ if not log.handlers:
 # Math helpers (ported from old DashPlotter baseline_integration_callbacks.py)
 # ---------------------------------------------------------------------------
 
-def _y_curve(time_arr, signal_arr, x):
-    """Get chromatogram intensity at time x via interpolation."""
-    interp = interpolate.interp1d(time_arr, signal_arr, bounds_error=False, fill_value=0)
-    return max(0, float(interp(x)))
 
 
 def _baseline_area(time_arr, signal_arr, p1, p2):

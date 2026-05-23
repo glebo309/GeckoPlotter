@@ -265,20 +265,20 @@ def _collect_visible_files(dm, active_file_id=None, loaded_files=None):
 
     # First pass: collect all candidate files and their groups
     candidates = []
-    print(f"🔍 _collect_visible_files: active={active_file_id}, valid_ids={valid_ids}, bundled_main_ids={bundled_main_ids}, bundle_ids={bundle_ids}")
+    log.debug(f"_collect_visible_files: active={active_file_id}, valid_ids={valid_ids}, bundled_main_ids={bundled_main_ids}, bundle_ids={bundle_ids}")
     for fid, fdata in dm.loaded_data.items():
         if valid_ids is not None and fid not in valid_ids:
-            print(f"  ❌ {fid}: not in valid_ids")
+            log.error(f"{fid}: not in valid_ids")
             continue
         if fid in bundled_main_ids and fid not in bundle_ids:
-            print(f"  ❌ {fid}: bundled main (raw dupe)")
+            log.error(f"{fid}: bundled main (raw dupe)")
             continue
         if fdata.get('type') == 'lcms_bundle':
-            print(f"  ❌ {fid}: lcms_bundle type")
+            log.error(f"{fid}: lcms_bundle type")
             continue
         metadata = fdata.get('metadata', {})
         group = _get_overlay_group(metadata, fdata)
-        print(f"  ✅ {fid}: group={group}, name={fdata.get('record', {}).get('name', '?')}")
+        log.debug(f"{fid}: group={group}, name={fdata.get('record', {}).get('name', '?')}")
         candidates.append((fid, fdata, metadata, group))
 
     # If active file was deleted/invalid, fall back to the first candidate's group
@@ -382,7 +382,7 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
             log.debug(f"Error parsing callback trigger: {e}")
             return (dash.no_update,) * 7
 
-        print(f"📊 File clicked: {file_id} (tab={active_tab})")
+        log.debug(f"File clicked: {file_id} (tab={active_tab})")
 
         # Don't redraw if the same file is already active
         if file_id == active_file:
@@ -396,10 +396,10 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
         file_data = data_manager.get_data_by_id(file_id)
 
         if file_data:
-            print(f"✅ Found direct file data for: {file_id}")
+            log.debug(f"Found direct file data for: {file_id}")
         else:
-            print(f"🔍 No direct data found for '{file_id}', checking if it's a bundle...")
-            print(f"   loaded_data keys: {list(data_manager.loaded_data.keys())}")
+            log.debug(f"No direct data found for '{file_id}', checking if it's a bundle...")
+            log.debug(f"loaded_data keys: {list(data_manager.loaded_data.keys())}")
 
             # Check if this is a bundle
             bundle = data_manager.get_bundle_by_id(file_id)
@@ -409,12 +409,12 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
                 file_data = data_manager.get_data_by_id(main_file_id)
 
                 if file_data:
-                    print(f"✅ Using main file data for bundle: {bundle.base_name}")
+                    log.debug(f"Using main file data for bundle: {bundle.base_name}")
                 else:
-                    print(f"❌ No data found for main file: {main_file_id}")
+                    log.error(f"No data found for main file: {main_file_id}")
             else:
-                print(f"❌ No bundle found for ID: {file_id}")
-                print(f"   bundle_manager bundles: {list(data_manager.bundle_manager.bundles.keys())}")
+                log.error(f"No bundle found for ID: {file_id}")
+                log.debug(f"bundle_manager bundles: {list(data_manager.bundle_manager.bundles.keys())}")
 
         # Check if this is a well selection (file_id contains |)
         if not file_data and '|' in file_id:
@@ -750,18 +750,6 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
     # Keeping a second DOM-mutation callback here causes stale/high-conflicting
     # selection state where multiple file items can remain highlighted.
 
-    # DISABLED: Event propagation handling - trying CSS z-index approach instead
-    # app.clientside_callback(
-    #     """
-    #     function() {
-    #         return null;
-    #     }
-    #     """,
-    #     Output('dummy-output', 'style'),
-    #     Input('file-tree', 'children')
-    # )
-
-
 def create_bundle_data_table(bundle, file_data: Dict[str, Any], data_manager) -> html.Div:
     """Create a data table display for a bundle with rich metadata."""
     try:
@@ -842,8 +830,7 @@ def create_bundle_data_table(bundle, file_data: Dict[str, Any], data_manager) ->
         return html.Div([bundle_header, files_section, metadata_section], style={'padding': '5px 0'})
 
     except Exception as e:
-        import traceback
-        traceback.print_exc()
+        log.exception("Unable to display bundle details")
         return build_message_state(title="Unable to display bundle details", subtitle=str(e), icon="⚠️", variant="error")
 
 

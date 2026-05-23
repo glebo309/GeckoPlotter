@@ -4,8 +4,7 @@ Persistence Layer for GeckoPlotter V2.
 Three distinct persistence tiers:
 
 1. **Ephemeral UI state** — lives only in dcc.Store / browser memory.
-   Lost on page refresh.  Examples: resize-state, active-selector,
-   auto-select-trigger.
+   Lost on page refresh.  Examples: active-selector.
 
 2. **Project/session state** — survives page refresh, saved to a local
    JSON file.  Contains per-file UI settings, peak data, calibration

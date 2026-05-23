@@ -5,10 +5,15 @@
 Bundle Manager for GeckoPlotter V2 - Groups related files into bundles.
 """
 
+import logging
+
 import re
 from typing import Dict, List, Any, Optional, Tuple
 from dataclasses import dataclass
 
+
+
+log = logging.getLogger(__name__)
 
 @dataclass
 class FileBundle:
@@ -270,7 +275,7 @@ class BundleManager:
         )
 
         self.bundles[bundle_id] = bundle
-        print(f"📦 Created Chromeleon bundle: {bundle_id}")
+        log.debug(f"Created Chromeleon bundle: {bundle_id}")
 
         return bundle_id
 
@@ -281,7 +286,7 @@ class BundleManager:
         
         bundle = self.bundles[bundle_id]
         bundle.auxiliary_files.append(aux_file)
-        print(f"📎 Added auxiliary file {aux_file.get('name')} to bundle {bundle_id}")
+        log.debug(f"Added auxiliary file {aux_file.get('name')} to bundle {bundle_id}")
         return True
 
     def find_chromeleon_bundle_for_file(self, file_record: Dict[str, Any], metadata: Optional[Dict[str, Any]] = None) -> Optional[str]:
@@ -335,7 +340,7 @@ class BundleManager:
         )
         
         self.bundles[bundle_id] = bundle
-        print(f"📊 Created UV-Vis bundle: {bundle_id} with {len(filled_wells)} wells")
+        log.debug(f"Created UV-Vis bundle: {bundle_id} with {len(filled_wells)} wells")
         
         return bundle_id
 
@@ -373,14 +378,14 @@ class BundleManager:
         """Remove a specific bundle by ID. Returns True if removed."""
         if bundle_id in self.bundles:
             del self.bundles[bundle_id]
-            print(f"Removed bundle from manager: {bundle_id}")
+            log.debug(f"Removed bundle from manager: {bundle_id}")
             return True
         return False
 
     def clear_bundles(self):
         """Clear all bundles."""
         self.bundles.clear()
-        print("Cleared all bundles")
+        log.debug("Cleared all bundles")
 
     def remove_file_from_bundles(self, file_id: str) -> None:
         """Remove a file from all bundles."""

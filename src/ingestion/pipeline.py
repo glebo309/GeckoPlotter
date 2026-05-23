@@ -7,6 +7,8 @@ Stage 3: heuristic_parse()      -> fallback for unrecognized formats
 Output: StandardizedResult or None
 """
 from __future__ import annotations
+
+import logging
 from typing import Optional
 
 from .types import StandardizedResult, FileIdentity, PlotHint, ColumnRole
@@ -14,6 +16,8 @@ from .stage_1_detect import detect_by_extension
 from .stage_2_registry import FormatRegistry
 from .stage_3_heuristic import heuristic_parse
 from .presets import load_all_presets
+
+log = logging.getLogger(__name__)
 
 
 class IngestionPipeline:
@@ -41,7 +45,7 @@ class IngestionPipeline:
                     metadata=raw.get("metadata", {}),
                 )
             except Exception as e:
-                print(f"Stage 2 preset {preset.name} failed for {original_name}: {e}")
+                log.debug(f"Stage 2 preset {preset.name} failed for {original_name}: {e}")
 
         raw = heuristic_parse(path, extension)
         if raw is not None:

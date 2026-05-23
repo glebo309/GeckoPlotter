@@ -3,9 +3,14 @@ Data Table Editor Component
 Interactive table with cell selection for publication plotting
 """
 
+import logging
+
 from dash import dash_table, html
 import pandas as pd
 
+
+
+log = logging.getLogger(__name__)
 
 def create_data_table_editor(df=None, table_id='pub-table', default_selected_columns=None):
     """Create an editable data table with cell selection capabilities.
@@ -39,9 +44,9 @@ def create_data_table_editor(df=None, table_id='pub-table', default_selected_col
         df.insert(0, '_row_id', range(len(df)))
     
     # DEBUG: Check data shape before creating table
-    print(f"📋 create_data_table_editor: df.shape = {df.shape}")
-    print(f"   Columns: {list(df.columns)}")
-    print(f"   First row: {df.iloc[0].to_dict() if len(df) > 0 else 'empty'}")
+    log.debug(f"create_data_table_editor: df.shape = {df.shape}")
+    log.debug(f"Columns: {list(df.columns)}")
+    log.debug(f"First row: {df.iloc[0].to_dict() if len(df) > 0 else 'empty'}")
     
     # Prepare data for table — mark columns as selectable/deletable/renamable
     # (except _row_id which is internal). This is critical for column header

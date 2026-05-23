@@ -1,6 +1,7 @@
 """LC-MS VWD (UV detector) CDF reader for GeckoPlotter V2."""
-
 from __future__ import annotations
+
+import logging
 
 import os
 from typing import Any, Dict, Optional
@@ -11,6 +12,9 @@ import pandas as pd
 
 from .base_reader import BaseReader
 
+
+
+log = logging.getLogger(__name__)
 
 class LCMSVWDCDFReader(BaseReader):
     """Parser for LC-MS UV/VWD NetCDF files."""
@@ -34,7 +38,7 @@ class LCMSVWDCDFReader(BaseReader):
 
             return True
         except Exception as exc:  # pragma: no cover - defensive logging helper
-            print(f"❌ LCMS VWD CDF analysis error for {path}: {exc}")
+            log.error(f"LCMS VWD CDF analysis error for {path}: {exc}")
             return False
 
     def _process_file(self) -> None:

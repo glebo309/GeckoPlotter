@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import json
 import os
 import re
@@ -26,6 +27,9 @@ from .export_service import ExportService
 from .lcms_service import LCMSService
 from .persistence import ProjectPersistence
 from src.ingestion import ingest_file
+
+
+log = logging.getLogger(__name__)
 
 TEXT_EXTENSIONS = {"txt", "csv", "tsv", "log", "json", "xml", "cdf", "cdfx"}
 BINARY_EXTENSIONS = {"cdf", "cdfx", "cdf.vwd", "raw", "dat", "bin"}
@@ -212,8 +216,7 @@ class DataManager:
             if integ:
                 self.integration_service.deserialize(integ)
         except Exception as e:
-            import logging
-            logging.getLogger('geckoplotter').warning(f"Could not restore services: {e}")
+            log.warning("Could not restore services: %s", e)
 
     def persist_services(self) -> None:
         """Save current domain service state to ProjectPersistence."""
@@ -231,9 +234,9 @@ class DataManager:
             if os.path.exists(self._STATE_FILE):
                 with open(self._STATE_FILE, 'r') as f:
                     self._persistent_state = json.load(f)
-                print(f"Loaded persistent state for {len(self._persistent_state)} files from {self._STATE_FILE}")
+                log.debug(f"Loaded persistent state for {len(self._persistent_state)} files from {self._STATE_FILE}")
         except Exception as e:
-            print(f"Could not load persistent state: {e}")
+            log.warning(f"Could not load persistent state: {e}")
             self._persistent_state = {}
 
     def _save_persistent_state(self) -> None:
@@ -242,7 +245,7 @@ class DataManager:
             with open(self._STATE_FILE, 'w') as f:
                 json.dump(self._persistent_state, f, indent=2, default=str)
         except Exception as e:
-            print(f"Could not save persistent state: {e}")
+            log.warning(f"Could not save persistent state: {e}")
 
     def register_file_id(self, file_id: str, filename: str) -> None:
         """Map a runtime file_id to its filename for persistent lookup.
@@ -432,7 +435,7 @@ class DataManager:
                 try:
                     reader_ok = reader.load_file(temp_file.name)
                 except Exception as e:
-                    print(f"⚠️ Reader {file_type} failed for {file_record['name']}: {e}")
+                    log.warning(f"Reader {file_type} failed for {file_record['name']}: {e}")
 
                 if reader_ok:
                     data = reader.get_data()
@@ -464,7 +467,7 @@ class DataManager:
                 metadata.update(standardized.metadata)
                 file_type = 'generic_csv'
                 file_record['type'] = file_type
-                print(f"🔄 Reader failed, falling back to ingestion pipeline for {file_record['name']}")
+                log.debug(f"Reader failed, falling back to ingestion pipeline for {file_record['name']}")
 
             if data is not None:
                 if file_type in {'lcms_cdf', 'lcms_vwd_cdf'}:
@@ -499,7 +502,7 @@ class DataManager:
                     self.loaded_data[file_id] = component_entry
                     self._update_lcms_bundle_metadata(base_name)
 
-                    print(f"✅ Loaded {file_record['name']} as {file_type} (LCMS bundle {base_name})")
+                    log.debug(f"Loaded {file_record['name']} as {file_type} (LCMS bundle {base_name})")
                     return component_entry
 
                 # Non-LCMS storage
@@ -515,14 +518,14 @@ class DataManager:
 
                 self.loaded_data[file_id] = entry
 
-                print(f"✅ Loaded {file_record['name']} as {file_type}")
+                log.debug(f"Loaded {file_record['name']} as {file_type}")
                 return self.loaded_data[file_id]
 
-            print(f"❌ Could not load {file_record['name']} - no reader succeeded and no pipeline result")
+            log.error(f"Could not load {file_record['name']} - no reader succeeded and no pipeline result")
             return None
 
         except Exception as e:
-            print(f"❌ Error loading {file_record['name']}: {str(e)}")
+            log.error(f"Error loading {file_record['name']}: {str(e)}")
             return None
 
     # ------------------------------------------------------------------
@@ -600,11 +603,11 @@ class DataManager:
                             if i > 50:  # Check first 50 lines for plate reader files
                                 break
                             if 'Wavelength' in line:
-                                print(f"✅ Found 'Wavelength' in line {i} - detected as UV-Vis CSV")
+                                log.debug(f"Found 'Wavelength' in line {i} - detected as UV-Vis CSV")
                                 return 'uvvis_csv'
-                        print(f"⚠️ No 'Wavelength' found in first 50 lines - treating as generic CSV")
+                        log.warning(f"No 'Wavelength' found in first 50 lines - treating as generic CSV")
                 except Exception as e:
-                    print(f"❌ Error checking CSV content: {e}")
+                    log.error(f"Error checking CSV content: {e}")
             # Default to generic CSV for simple tabular data
             return 'generic_csv'
         
@@ -738,14 +741,14 @@ class DataManager:
         """Get tree items with bundles and individual files."""
         # Check if we've already processed these files to avoid double processing
         if hasattr(self, '_last_processed_files') and self._last_processed_files == individual_files:
-            print("Skipping duplicate bundling call")
+            log.debug("Skipping duplicate bundling call")
             return self._last_tree_items
         
         tree_items = []
         bundled_file_ids = set()
         
         # FIRST PASS: Create main bundles (UV_VIS files, CSV files with multiple wells)
-        print(f"Processing {len(individual_files)} files for bundling...")
+        log.debug(f"Processing {len(individual_files)} files for bundling...")
         for file_record in individual_files:
             file_id = file_record.get('id')
             file_type = file_record.get('type')
@@ -764,27 +767,27 @@ class DataManager:
             # Content-based: use parsed metadata (injection name) rather than filename
             if actual_type == 'chromatogram':
                 loaded_meta = self.loaded_data.get(file_id, {}).get('metadata', {})
-                print(f"🧬 Trying to create Chromeleon bundle for: {file_name} (injection={loaded_meta.get('injection')})")
+                log.debug(f"Trying to create Chromeleon bundle for: {file_name} (injection={loaded_meta.get('injection')})")
                 bundle_id = self.bundle_manager.try_create_chromeleon_bundle(file_record, metadata=loaded_meta)
                 if bundle_id:
-                    print(f"📦 Created Chromeleon bundle: {bundle_id}")
+                    log.debug(f"Created Chromeleon bundle: {bundle_id}")
                     bundled_file_ids.add(file_id)
                 else:
-                    print(f"❌ Failed to create Chromeleon bundle for: {file_name}")
+                    log.error(f"Failed to create Chromeleon bundle for: {file_name}")
             
             # UV-Vis files get wells as children (like old system)
             elif file_type == 'uvvis_csv' and file_id in self.loaded_data:
                 file_data = self.loaded_data[file_id]
                 filled_wells = file_data.get('metadata', {}).get('filled_wells', [])
                 
-                print(f"🧪 UV-Vis file {file_name}: {len(filled_wells)} wells found: {filled_wells[:5]}")
+                log.debug(f"UV-Vis file {file_name}: {len(filled_wells)} wells found: {filled_wells[:5]}")
                 
                 # Don't create a separate bundle - just mark this file to have wells as children
                 # The tree rendering will handle adding wells as children
                 if len(filled_wells) > 0:
-                    print(f"📊 UV-Vis file {file_name} will have {len(filled_wells)} well children")
+                    log.debug(f"UV-Vis file {file_name} will have {len(filled_wells)} well children")
                 else:
-                    print(f"⚠️ UV-Vis file {file_name} has no wells")
+                    log.warning(f"UV-Vis file {file_name} has no wells")
         
         # SECOND PASS: Add auxiliary files to existing bundles
         for file_record in individual_files:
@@ -804,7 +807,7 @@ class DataManager:
             if existing_bundle_id:
                 self.bundle_manager.add_auxiliary_file_to_bundle(existing_bundle_id, file_record)
                 bundled_file_ids.add(file_id)
-                print(f"📎 Added {file_name} to bundle {existing_bundle_id}")
+                log.debug(f"Added {file_name} to bundle {existing_bundle_id}")
                 continue
         
         # STEP 2: Get all bundle tree items and mark ALL their children as bundled
@@ -816,16 +819,16 @@ class DataManager:
                 main_file_id = bundle.main_file.get('id')
                 if main_file_id in self.loaded_data:
                     self.loaded_data[bundle_item['id']] = self.loaded_data[main_file_id]
-                    print(f"📦 Stored bundle data for: {bundle_item['id']}")
+                    log.debug(f"Stored bundle data for: {bundle_item['id']}")
                 
                 # Mark ALL files in this bundle as bundled
                 bundled_file_ids.add(main_file_id)
-                print(f"🔒 Marked main file {main_file_id} as bundled")
+                log.debug(f"Marked main file {main_file_id} as bundled")
                 
                 for aux_file in bundle.auxiliary_files:
                     aux_id = aux_file.get('id')
                     bundled_file_ids.add(aux_id)
-                    print(f"🔒 Marked auxiliary file {aux_id} as bundled")
+                    log.debug(f"Marked auxiliary file {aux_id} as bundled")
             
             tree_items.append(bundle_item)
         
@@ -835,21 +838,21 @@ class DataManager:
             lcms_component_ids.update(bundle.get('files', []))
 
         # STEP 3: Add individual files that are NOT bundled, with UV-Vis wells as children
-        print(f"🔍 Checking individual files against bundled set: {bundled_file_ids}")
+        log.debug(f"Checking individual files against bundled set: {bundled_file_ids}")
         for file_record in individual_files:
             file_id = file_record.get('id')
             file_name = file_record.get('name')
             file_type = file_record.get('type')
 
             if file_id in lcms_component_ids:
-                print(f"🧪 Skipping standalone LCMS component already in bundle: {file_name}")
+                log.debug(f"Skipping standalone LCMS component already in bundle: {file_name}")
                 continue
 
             if file_id not in bundled_file_ids:
                 if file_type in {'lcms_cdf', 'lcms_vwd_cdf'}:
-                    print(f"🧪 LCMS component {file_name} not in bundle yet, showing individually")
+                    log.debug(f"LCMS component {file_name} not in bundle yet, showing individually")
                     # fall through to add individually (helps debugging)
-                print(f"✅ Adding individual file: {file_name} (ID: {file_id})")
+                log.debug(f"Adding individual file: {file_name} (ID: {file_id})")
                 # For UV-Vis files, add wells as children (like old system)
                 if file_type == 'uvvis_csv' and file_id in self.loaded_data:
                     file_data = self.loaded_data[file_id]
@@ -872,17 +875,17 @@ class DataManager:
                             file_record_copy['children'].append(well_child)
                         
                         tree_items.append(file_record_copy)
-                        print(f"📊 Added UV-Vis file {file_name} with {len(filled_wells)} well children")
+                        log.debug(f"Added UV-Vis file {file_name} with {len(filled_wells)} well children")
                     else:
                         tree_items.append(file_record)
                 else:
                     tree_items.append(file_record)
             else:
-                print(f"⚠️ SKIPPING bundled file: {file_name} (ID: {file_id}) - already in bundle")
+                log.warning(f"SKIPPING bundled file: {file_name} (ID: {file_id}) - already in bundle")
         
         # STEP 4: Append LC-MS bundles collected via DataManager
         if self.lcms_bundles:
-            print(f"🧪 Integrating {len(self.lcms_bundles)} LC-MS bundles into tree")
+            log.debug(f"Integrating {len(self.lcms_bundles)} LC-MS bundles into tree")
 
         for base_name, bundle in self.lcms_bundles.items():
             bundle_key = f"{base_name}_LCMS_BUNDLE"
@@ -952,7 +955,7 @@ class DataManager:
                 bundled_file_ids.add(component_id)
 
             if not components:
-                print(f"⚠️ LC-MS bundle {base_name} has no component records yet")
+                log.warning(f"LC-MS bundle {base_name} has no component records yet")
                 continue
 
             metadata = bundle.get('metadata', {})
@@ -970,7 +973,7 @@ class DataManager:
 
             tree_items.append(bundle_item)
 
-        print(f"✅ Final tree: {len(tree_items)} items, {len(bundled_file_ids)} files bundled")
+        log.debug(f"Final tree: {len(tree_items)} items, {len(bundled_file_ids)} files bundled")
         
         # Cache the result to avoid double processing
         self._last_processed_files = individual_files
