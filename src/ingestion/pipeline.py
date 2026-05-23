@@ -11,7 +11,7 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
-from .types import StandardizedResult, FileIdentity, PlotHint, ColumnRole
+from .types import StandardizedResult, FileIdentity, PlotHint, ColumnRole, SourceCategory
 from .stage_1_detect import detect_by_extension
 from .stage_2_registry import FormatRegistry
 from .stage_3_heuristic import heuristic_parse
@@ -41,6 +41,7 @@ class IngestionPipeline:
                         detection_stage=2,
                     ),
                     plot_hint=raw.get("plot_hint", PlotHint.LINE),
+                    source_category=raw.get("source_category", SourceCategory.GENERIC),
                     sample_name=raw.get("sample_name"),
                     metadata=raw.get("metadata", {}),
                 )
@@ -59,6 +60,7 @@ class IngestionPipeline:
                     detection_stage=3,
                 ),
                 plot_hint=raw.get("plot_hint", PlotHint.LINE),
+                source_category=raw.get("source_category", SourceCategory.GENERIC),
                 sample_name=raw.get("sample_name"),
                 metadata=raw.get("metadata", {}),
             )

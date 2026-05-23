@@ -13,7 +13,7 @@ from io import StringIO
 from typing import Dict, Any
 
 from ..stage_2_registry import FormatPreset
-from ..types import ColumnRole, PlotHint
+from ..types import ColumnRole, PlotHint, SourceCategory
 
 
 _FOOTER_MARKERS = re.compile(
@@ -77,6 +77,7 @@ class CaryKineticsPreset(FormatPreset):
             "data": df,
             "column_roles": column_roles,
             "plot_hint": PlotHint.LINE,
+            "source_category": SourceCategory.KINETICS,
             "sample_name": sample_name,
             "metadata": metadata,
         }

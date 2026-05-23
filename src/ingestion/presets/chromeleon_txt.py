@@ -13,7 +13,7 @@ from io import StringIO
 from typing import Dict
 
 from ..stage_2_registry import FormatPreset
-from ..types import ColumnRole, PlotHint
+from ..types import ColumnRole, PlotHint, SourceCategory
 
 
 class ChromeleonTxtPreset(FormatPreset):
@@ -105,6 +105,7 @@ class ChromeleonTxtPreset(FormatPreset):
             "data": df,
             "column_roles": column_roles,
             "plot_hint": PlotHint.LINE,
+            "source_category": SourceCategory.CHROMATOGRAM,
             "sample_name": None,
             "metadata": {
                 "file_type_detail": "chromeleon_chromatogram",

@@ -8,7 +8,7 @@ import os
 from typing import Dict
 
 from ..stage_2_registry import FormatPreset
-from ..types import ColumnRole, PlotHint
+from ..types import ColumnRole, PlotHint, SourceCategory
 
 
 _VWD_TAGS = ("vwd", "uvw", "uv-")
@@ -45,6 +45,7 @@ class LCMSVWDCDFPreset(FormatPreset):
             "data": data,
             "column_roles": column_roles,
             "plot_hint": PlotHint.LINE,
+            "source_category": SourceCategory.LCMS_UV,
             "sample_name": None,
             "metadata": metadata,
         }

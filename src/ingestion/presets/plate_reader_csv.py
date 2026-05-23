@@ -10,7 +10,7 @@ from io import StringIO
 from typing import Dict
 
 from ..stage_2_registry import FormatPreset
-from ..types import ColumnRole, PlotHint
+from ..types import ColumnRole, PlotHint, SourceCategory
 
 
 class PlateReaderCSVPreset(FormatPreset):
@@ -109,6 +109,7 @@ class PlateReaderCSVPreset(FormatPreset):
             "data": df,
             "column_roles": column_roles,
             "plot_hint": PlotHint.MULTI_Y,
+            "source_category": SourceCategory.SPECTRUM,
             "sample_name": None,
             "metadata": {
                 "file_type_detail": "plate_reader",

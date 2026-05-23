@@ -12,7 +12,7 @@ import pandas as pd
 from io import StringIO
 from typing import Dict, Any, List, Optional, Tuple
 
-from .types import ColumnRole, PlotHint
+from .types import ColumnRole, PlotHint, SourceCategory
 
 _X_PATTERNS = [
     (r"\btime\b", "time"),
@@ -103,6 +103,7 @@ def heuristic_parse(path: str, extension: str) -> Optional[dict]:
         return None
 
     column_roles = _detect_column_roles(df)
+    cat = _infer_source_category(df, column_roles)
     plot_hint = _choose_plot_hint(df, column_roles)
 
     metadata: Dict[str, Any] = {}
@@ -119,6 +120,7 @@ def heuristic_parse(path: str, extension: str) -> Optional[dict]:
         "data": df,
         "column_roles": column_roles,
         "plot_hint": plot_hint,
+        "source_category": cat,
         "sample_name": sample_name,
         "metadata": metadata,
     }
@@ -260,6 +262,24 @@ def _coerce_numerics(df: pd.DataFrame) -> pd.DataFrame:
             if converted.notna().sum() > len(df) * 0.5:
                 df[col] = converted
     return df
+
+
+def _infer_source_category(
+    df: pd.DataFrame, roles: Dict[str, ColumnRole]
+) -> SourceCategory:
+    """Infer source category from the X column's semantic meaning."""
+    x_col = next((c for c, r in roles.items() if r == ColumnRole.X), None)
+    if x_col is None:
+        return SourceCategory.GENERIC
+    lower = str(x_col).lower()
+    for pat, kind in _X_PATTERNS:
+        if re.search(pat, lower):
+            if kind == "time":
+                return SourceCategory.CHROMATOGRAM
+            if kind == "wavelength":
+                return SourceCategory.SPECTRUM
+            break
+    return SourceCategory.GENERIC
 
 
 def _detect_column_roles(df: pd.DataFrame) -> Dict[str, ColumnRole]:
