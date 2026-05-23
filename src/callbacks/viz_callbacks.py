@@ -9,7 +9,7 @@ import logging
 import sys
 from typing import Dict, Any, Optional
 import dash
-from dash import Input, Output, State, html, dash_table
+from dash import Input, Output, State, html, dash_table, Patch
 import numpy as np
 import pandas as pd
 from services.plot_manager import PlotManager
@@ -151,6 +151,7 @@ def _overlay_peaks_on_figure(dm, active_file_id, figure, selected_peak_id=None):
     """Overlay manual/imported/detected peak markers on the raw figure."""
     import plotly.graph_objects as go
     fig = go.Figure(figure) if isinstance(figure, dict) else figure
+    fig.data = [t for t in fig.data if not (hasattr(t, 'meta') and t.meta == 'peak_overlay')]
     fig.layout.shapes = ()
     fig.update_layout(uirevision='main-plot')
 
@@ -264,6 +265,28 @@ def _overlay_peaks_on_figure(dm, active_file_id, figure, selected_peak_id=None):
     return fig
 
 
+def _peak_overlay_patch(dm, active_file_id, previous_file_id=None, previous_selected_peak_id=None, selected_peak_id=None):
+    """Patch only peak overlays, leaving existing chromatogram traces and view intact."""
+    import plotly.graph_objects as go
+
+    previous_json = {}
+    if previous_file_id:
+        previous_fig = _overlay_peaks_on_figure(dm, previous_file_id, go.Figure(), previous_selected_peak_id)
+        previous_json = previous_fig.to_plotly_json()
+
+    overlay_fig = _overlay_peaks_on_figure(dm, active_file_id, go.Figure(), selected_peak_id)
+    overlay_json = overlay_fig.to_plotly_json()
+
+    patch = Patch()
+    for trace in previous_json.get('data', []):
+        patch['data'].remove(trace)
+    for trace in overlay_json.get('data', []):
+        patch['data'].append(trace)
+    patch['layout']['shapes'] = overlay_json.get('layout', {}).get('shapes', [])
+    patch['layout']['uirevision'] = 'main-plot'
+    return patch
+
+
 def _get_source_category(metadata, fdata):
     """Return the instrument/source category for a file."""
     ft = metadata.get('file_type') or fdata.get('record', {}).get('type', '')
@@ -273,6 +296,13 @@ def _get_source_category(metadata, fdata):
         return 'uvvis'
     if ft in ('lcms_cdf', 'lcms_ms_positive', 'lcms_ms_negative'):
         return 'lcms_ms'
+    if ft == 'lcms_bundle':
+        bundle_data = fdata.get('bundle_data') or {}
+        if bundle_data.get('ms_positive') or bundle_data.get('ms_negative'):
+            return 'lcms_ms'
+        if bundle_data.get('vwd_a') or bundle_data.get('vwd_b'):
+            return 'lcms_uv'
+        return 'lcms_uv'
     if ft in ('lcms_vwd_cdf', 'lcms_uv_a', 'lcms_uv_b'):
         return 'lcms_uv'
     return 'generic'
@@ -290,7 +320,7 @@ def _get_x_axis_name(metadata, fdata):
         return 'Wavelength'
     if ft in ('lcms_cdf', 'lcms_ms_positive', 'lcms_ms_negative'):
         return 'm/z'
-    if ft in ('lcms_vwd_cdf', 'lcms_uv_a', 'lcms_uv_b'):
+    if ft in ('lcms_vwd_cdf', 'lcms_uv_a', 'lcms_uv_b', 'lcms_bundle'):
         return 'Time (min)'
 
     data = fdata.get('data')
@@ -325,6 +355,62 @@ def _get_active_file_group(dm, active_file_id):
         return None
     metadata = fdata.get('metadata', {})
     return _get_overlay_group(metadata, fdata)
+
+
+def _is_hplc_view_group(group):
+    """Return True for chromatogram-like groups where x-range can be reused."""
+    if isinstance(group, tuple) and group:
+        return group[0] in ('chromatogram', 'lcms_ms', 'lcms_uv')
+    return group in ('chromatogram', 'lcms_ms', 'lcms_uv')
+
+
+def _axis_range_from_relayout(relayout_data, axis_name='xaxis'):
+    """Extract a user-controlled axis range from Plotly relayoutData."""
+    if not relayout_data:
+        return None
+
+    stored_axis = relayout_data.get(axis_name)
+    if isinstance(stored_axis, dict):
+        stored_range = stored_axis.get('range')
+        if isinstance(stored_range, (list, tuple)) and len(stored_range) == 2:
+            return list(stored_range)
+
+    direct = relayout_data.get(f'{axis_name}.range')
+    if isinstance(direct, (list, tuple)) and len(direct) == 2:
+        return list(direct)
+
+    start = relayout_data.get(f'{axis_name}.range[0]')
+    end = relayout_data.get(f'{axis_name}.range[1]')
+    if start is not None and end is not None:
+        return [start, end]
+
+    return None
+
+
+def _apply_preserved_hplc_view(dm, figure, previous_file_id, next_file_id, relayout_data):
+    """Carry the current viewport across compatible HPLC bundle switches."""
+    previous_group = _get_active_file_group(dm, previous_file_id)
+    next_group = _get_active_file_group(dm, next_file_id)
+    if not (_is_hplc_view_group(previous_group) and _is_hplc_view_group(next_group)):
+        return figure
+
+    return _apply_current_hplc_view(dm, figure, next_file_id, relayout_data)
+
+
+def _apply_current_hplc_view(dm, figure, active_file_id, relayout_data):
+    """Apply the current HPLC retention-time window to a freshly rendered figure."""
+    active_group = _get_active_file_group(dm, active_file_id)
+    if not _is_hplc_view_group(active_group):
+        return figure
+
+    x_range = _axis_range_from_relayout(relayout_data, 'xaxis')
+    if not x_range:
+        return figure
+
+    import plotly.graph_objects as go
+    fig = go.Figure(figure) if isinstance(figure, dict) else figure
+    fig.update_layout(xaxis=dict(range=x_range, autorange=False))
+    return fig
 
 
 def _collect_visible_files(dm, active_file_id=None, loaded_files=None):
@@ -429,6 +515,7 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
     @app.callback(
         [Output('main-plot', 'figure', allow_duplicate=True),
          Output('active-file', 'data', allow_duplicate=True),
+         Output('selected-peak-idx', 'data', allow_duplicate=True),
          Output('metadata-container', 'children', allow_duplicate=True),
          Output('table-editor-container', 'children', allow_duplicate=True),
          Output('pub-data-store', 'data', allow_duplicate=True),
@@ -437,10 +524,12 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
         [State('loaded-files', 'data'),
          State('active-file', 'data'),
          State('view-mode', 'data'),
-         State('active-tab', 'data')],
+         State('active-tab', 'data'),
+         State('main-plot', 'relayoutData'),
+         State('selected-peak-idx', 'data')],
         prevent_initial_call=True
     )
-    def handle_file_selection(n_clicks_list, loaded_files, active_file, view_mode, active_tab):
+    def handle_file_selection(n_clicks_list, loaded_files, active_file, view_mode, active_tab, relayout_data, selected_peak_id):
         """Handle file selection from the tree."""
         
         from components.axis_mapper import get_empty_selections
@@ -448,12 +537,12 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
         # Check if any file was clicked
         ctx = dash.callback_context
         if not ctx.triggered:
-            return dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update
+            return (dash.no_update,) * 7
 
         # Find which file was clicked
         triggered_id = ctx.triggered[0]['prop_id']
         if 'n_clicks' not in triggered_id:
-            return dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update
+            return (dash.no_update,) * 7
 
         # Extract file ID from the triggered component
         import json
@@ -471,22 +560,22 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
                 'expand-btn' in triggered_id or 
                 'collapse-btn' in triggered_id):
                 log.debug(f"🚫 Ignoring control button click: {triggered_id}")
-                return dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update
+                return (dash.no_update,) * 7
             
             # Check if this click actually happened (n_clicks > 0)
             trigger_value = ctx.triggered[0]['value']
             if not trigger_value or trigger_value == 0:
-                return dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update
+                return (dash.no_update,) * 7
                 
         except Exception as e:
             log.debug(f"Error parsing callback trigger: {e}")
-            return dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update
+            return (dash.no_update,) * 7
 
         print(f"📊 File clicked: {file_id} (tab={active_tab})")
 
         # Don't redraw if the same file is already active
         if file_id == active_file:
-            return dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update
+            return (dash.no_update,) * 7
 
         # On shared tabs, only update active-file and metadata — don't touch
         # main-plot or pub-data-store (those hold shared analysis data).
@@ -539,7 +628,7 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
                     pub_data = table_data.to_json(orient='split') if table_data is not None else None
                 if data_manager.get_publication_memory(file_id) is None:
                     data_manager.initialise_publication_memory(file_id, get_empty_selections())
-                return dash.no_update if on_shared_tab else figure, file_id, data_table, table_editor, pub_data, dash.no_update
+                return dash.no_update if on_shared_tab else figure, file_id, None, data_table, table_editor, pub_data, dash.no_update
 
         if not file_data:
             log.debug(f"❌ File data not found for ID: {file_id}")
@@ -553,7 +642,18 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
             empty_table_editor = create_data_table_editor(None, table_id='pub-table')
             if data_manager.get_publication_memory(file_id) is None:
                 data_manager.initialise_publication_memory(file_id, get_empty_selections())
-            return dash.no_update if on_shared_tab else error_fig, file_id, error_table, empty_table_editor, dash.no_update if on_shared_tab else None, dash.no_update
+            return dash.no_update if on_shared_tab else error_fig, file_id, None, error_table, empty_table_editor, dash.no_update if on_shared_tab else None, dash.no_update
+
+        previous_group = _get_active_file_group(data_manager, active_file)
+        next_group = _get_active_file_group(data_manager, file_id)
+        if (
+            not on_shared_tab
+            and (view_mode or 'raw') == 'raw'
+            and previous_group == next_group
+            and _is_hplc_view_group(next_group)
+        ):
+            figure_patch = _peak_overlay_patch(data_manager, file_id, active_file, selected_peak_id, None)
+            return figure_patch, file_id, None, dash.no_update, dash.no_update, dash.no_update, dash.no_update
 
         log.debug(f"✅ Found file data, creating plot...")
 
@@ -613,7 +713,10 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
 
             # If user clicked bundle parent, default to positive TIC if available
             if file_type == 'lcms_bundle' or bundle:
-                lcms_bundle = data_manager.lcms_bundles.get(bundle.base_name if bundle else file_id)
+                lcms_bundle = (
+                    data_manager.get_lcms_bundle_by_id(file_id)
+                    or data_manager.lcms_bundles.get(bundle.base_name if bundle else file_id)
+                )
                 preferred_component = None
                 if lcms_bundle:
                     preferred_component = lcms_bundle.get('ms_positive') or lcms_bundle.get('ms_negative') or lcms_bundle.get('vwd_a') or lcms_bundle.get('vwd_b')
@@ -693,7 +796,10 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
         else:
             new_view_mode = dash.no_update
 
-        return dash.no_update if on_shared_tab else figure, file_id, data_table, table_editor, pub_data, new_view_mode
+        if not on_shared_tab:
+            figure = _apply_preserved_hplc_view(data_manager, figure, active_file, file_id, relayout_data)
+
+        return dash.no_update if on_shared_tab else figure, file_id, None, data_table, table_editor, pub_data, new_view_mode
 
     @app.callback(
         Output('main-plot', 'figure', allow_duplicate=True),
@@ -703,10 +809,11 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
          State('loaded-files', 'data'),
          State('pub-plot-figure', 'data'),
          State('current-plot-settings', 'data'),
-         State('selected-peak-idx', 'data')],
+         State('selected-peak-idx', 'data'),
+         State('main-plot', 'relayoutData')],
         prevent_initial_call=True
     )
-    def handle_view_mode_change(view_mode, plot_trigger, active_file, loaded_files, pub_plot_figure, plot_settings, selected_peak_id):
+    def handle_view_mode_change(view_mode, plot_trigger, active_file, loaded_files, pub_plot_figure, plot_settings, selected_peak_id, relayout_data):
         """Handle view mode toggle between Raw Data and Analysis Plot."""
         import plotly.graph_objects as go
         from services.plot_settings_service import PlotSettingsService, DEFAULT_PLOT_SETTINGS
@@ -761,7 +868,7 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
                     fig_obj = go.Figure(figure) if isinstance(figure, dict) else figure
                     ps = PlotSettingsService.from_dict(s)
                     PlotSettingsService.apply_to_figure(fig_obj, ps)
-                    figure = fig_obj
+                    figure = _apply_current_hplc_view(data_manager, fig_obj, active_file, relayout_data)
                 except Exception:
                     log.exception("Failed to apply plot settings to raw figure")
 
@@ -779,10 +886,11 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
         [State('view-mode', 'data'),
          State('active-file', 'data'),
          State('loaded-files', 'data'),
-         State('selected-peak-idx', 'data')],
+         State('selected-peak-idx', 'data'),
+         State('main-plot', 'relayoutData')],
         prevent_initial_call=True,
     )
-    def apply_settings_to_raw_plot(plot_settings, peak_change, view_mode, active_file, loaded_files, selected_peak_id):
+    def apply_settings_to_raw_plot(plot_settings, peak_change, view_mode, active_file, loaded_files, selected_peak_id, relayout_data):
         """Re-render raw plot when settings change, but only in raw mode.
 
         Skips redraw when triggered by peak-change-trigger (baseline callback
@@ -821,7 +929,7 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
             fig_obj = go.Figure(fig) if isinstance(fig, dict) else fig
             ps = PlotSettingsService.from_dict(s)
             PlotSettingsService.apply_to_figure(fig_obj, ps)
-            return fig_obj
+            return _apply_current_hplc_view(data_manager, fig_obj, active_file, relayout_data)
         except Exception:
             log.exception("Failed to apply settings to raw plot")
             return fig

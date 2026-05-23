@@ -242,7 +242,7 @@ def register_baseline_callbacks(app: dash.Dash, data_manager) -> None:
         trigger_id = callback_context.triggered[0]['prop_id'].rsplit('.', 1)[0] if callback_context.triggered else ''
 
         # ── Draw mode: browser-side custom integration line ──
-        if trigger_id == 'manual-draw-line-store' and mode == 'draw' and draw_line:
+        if trigger_id == 'manual-draw-line-store' and draw_line and (mode == 'draw' or draw_line.get('momentary')):
             display_pts = [(draw_line.get('x0'), draw_line.get('y0')), (draw_line.get('x1'), draw_line.get('y1'))]
             if any(v is None for pt in display_pts for v in pt):
                 raise PreventUpdate
@@ -715,10 +715,17 @@ def _patch_figure_with_peaks(data_manager, file_id, current_figure, time_arr, si
         data_manager, file_id, current_figure, time_arr, signal_arr, selected_peak_id
     )
     fig_json = fig.to_plotly_json()
+    old_traces = (current_figure or {}).get('data', []) if isinstance(current_figure, dict) else []
+    old_overlays = [t for t in old_traces if isinstance(t, dict) and t.get('meta') == 'peak_overlay']
+    new_overlays = [t for t in fig_json.get('data', []) if isinstance(t, dict) and t.get('meta') == 'peak_overlay']
 
     patch = Patch()
-    patch['data'] = fig_json.get('data', [])
+    for trace in old_overlays:
+        patch['data'].remove(trace)
+    for trace in new_overlays:
+        patch['data'].append(trace)
     patch['layout']['shapes'] = fig_json.get('layout', {}).get('shapes', [])
+    patch['layout']['uirevision'] = 'main-plot'
     return patch
 
 

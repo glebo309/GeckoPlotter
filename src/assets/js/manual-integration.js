@@ -172,6 +172,7 @@
                 y0: line.y0,
                 x1: line.x1,
                 y1: line.y1,
+                momentary: !!line.momentary,
                 ts: Date.now()
             }
         });
@@ -216,6 +217,40 @@
         var y = axisPixelToData(gd._fullLayout.yaxis, event.clientY - bounds.top, bounds.height, true);
         if (x === null || y === null || !isFinite(Number(x)) || !isFinite(Number(y))) return null;
         return { x: Number(x), y: Number(y) };
+    }
+
+    function axisRange(axis) {
+        if (!axis || !axis.range || axis.range.length !== 2) return null;
+        var start = Number(axis.range[0]);
+        var end = Number(axis.range[1]);
+        if (!isFinite(start) || !isFinite(end)) return null;
+        return [start, end];
+    }
+
+    function isPanModifier(event) {
+        return !!(event && (event.metaKey || event.ctrlKey));
+    }
+
+    function isDrawModifier(event) {
+        return !!(event && event.shiftKey);
+    }
+
+    function setMomentaryDrawActive(active) {
+        var button = document.getElementById('baseline-draw-btn');
+        if (!button) return;
+        button.classList.toggle('momentary-active', active);
+    }
+
+    function syncMomentaryDrawButton(event) {
+        var gd = getGraphDiv('main-plot');
+        var active = !!(
+            event &&
+            event.shiftKey &&
+            gd &&
+            gd.__geckoManualIntegrationMode !== 'draw' &&
+            !gd.__geckoManualIntegrationSelectedPeakId
+        );
+        setMomentaryDrawActive(active);
     }
 
     function isOverlayTarget(event) {
@@ -332,7 +367,7 @@
     function beginCustomDraw(gd, event) {
         if (
             !gd ||
-            gd.__geckoManualIntegrationMode !== 'draw' ||
+            (gd.__geckoManualIntegrationMode !== 'draw' && !isDrawModifier(event)) ||
             gd.__geckoManualIntegrationSelectedPeakId ||
             !isInsidePlotArea(gd, event) ||
             isOverlayTarget(event)
@@ -347,8 +382,12 @@
         gd.__geckoManualIntegrationDrawing = {
             startClientX: event.clientX,
             startClientY: event.clientY,
-            startData: startData
+            startData: startData,
+            momentary: isDrawModifier(event) && gd.__geckoManualIntegrationMode !== 'draw'
         };
+        if (gd.__geckoManualIntegrationDrawing.momentary) {
+            setMomentaryDrawActive(true);
+        }
         setDragBoxSuppressed(gd, true);
         syncInteractionDragmode(gd);
         updatePreviewLine(event.clientX, event.clientY, event.clientX, event.clientY);
@@ -376,6 +415,9 @@
             gd.__geckoManualIntegrationDrawing = null;
             removePreviewLine();
             setDragBoxSuppressed(gd, false);
+            if (drawing.momentary) {
+                setMomentaryDrawActive(false);
+            }
             syncInteractionDragmode(gd);
 
             var distance = Math.hypot(upEvent.clientX - drawing.startClientX, upEvent.clientY - drawing.startClientY);
@@ -386,8 +428,89 @@
                 x0: drawing.startData.x,
                 y0: drawing.startData.y,
                 x1: endData.x,
-                y1: endData.y
+                y1: endData.y,
+                momentary: drawing.momentary
             });
+        };
+
+        window.addEventListener('pointermove', move, true);
+        window.addEventListener('pointerup', finish, true);
+        window.addEventListener('pointercancel', finish, true);
+        return true;
+    }
+
+    function beginModifierPan(gd, event) {
+        if (
+            !gd ||
+            !window.Plotly ||
+            !isPanModifier(event) ||
+            event.button !== 0 ||
+            !isInsidePlotArea(gd, event)
+        ) {
+            return false;
+        }
+
+        var startData = dataPointAtEvent(gd, event);
+        var xRange = axisRange(gd._fullLayout && gd._fullLayout.xaxis);
+        var yRange = axisRange(gd._fullLayout && gd._fullLayout.yaxis);
+        var plotArea = gd.querySelector('.nsewdrag');
+        var bounds = plotArea ? plotArea.getBoundingClientRect() : null;
+        if (!startData || !bounds || (!xRange && !yRange)) return false;
+
+        stopPlotlyGesture(event);
+        clearEmptyClickTimer(gd);
+        gd.__geckoManualIntegrationPanning = {
+            startClientX: event.clientX,
+            startClientY: event.clientY,
+            xRange: xRange,
+            yRange: yRange,
+            plotWidth: bounds.width,
+            plotHeight: bounds.height,
+            lastEvent: event,
+            raf: null
+        };
+
+        var applyPan = function () {
+            var pan = gd.__geckoManualIntegrationPanning;
+            if (!pan || !pan.lastEvent) return;
+            pan.raf = null;
+
+            var update = {};
+            if (pan.xRange && pan.plotWidth) {
+                var dxPixels = pan.lastEvent.clientX - pan.startClientX;
+                var dx = dxPixels * (pan.xRange[1] - pan.xRange[0]) / pan.plotWidth;
+                update['xaxis.range'] = [pan.xRange[0] - dx, pan.xRange[1] - dx];
+            }
+            if (pan.yRange && pan.plotHeight) {
+                var dyPixels = pan.lastEvent.clientY - pan.startClientY;
+                var dy = dyPixels * (pan.yRange[1] - pan.yRange[0]) / pan.plotHeight;
+                update['yaxis.range'] = [pan.yRange[0] + dy, pan.yRange[1] + dy];
+            }
+            if (Object.keys(update).length) {
+                window.Plotly.relayout(gd, update);
+            }
+        };
+
+        var move = function (moveEvent) {
+            if (!gd.__geckoManualIntegrationPanning) return;
+            stopPlotlyGesture(moveEvent);
+            gd.__geckoManualIntegrationPanning.lastEvent = moveEvent;
+            if (!gd.__geckoManualIntegrationPanning.raf) {
+                gd.__geckoManualIntegrationPanning.raf = window.requestAnimationFrame(applyPan);
+            }
+        };
+
+        var finish = function (upEvent) {
+            if (!gd.__geckoManualIntegrationPanning) return;
+            stopPlotlyGesture(upEvent);
+            window.removeEventListener('pointermove', move, true);
+            window.removeEventListener('pointerup', finish, true);
+            window.removeEventListener('pointercancel', finish, true);
+            if (gd.__geckoManualIntegrationPanning.raf) {
+                window.cancelAnimationFrame(gd.__geckoManualIntegrationPanning.raf);
+            }
+            gd.__geckoManualIntegrationPanning = null;
+            gd.__geckoManualIntegrationLastPlotlyClickAt = Date.now();
         };
 
         window.addEventListener('pointermove', move, true);
@@ -399,6 +522,7 @@
     function handleGraphPointerDown(gd, event) {
         if (!gd || event.__geckoManualIntegrationHandled || event.__geckoManualIntegrationSeen) return;
         event.__geckoManualIntegrationSeen = true;
+        if (beginModifierPan(gd, event)) return;
         if (isDoublePointer(gd, event)) {
             stopPlotlyGesture(event);
             gd.__geckoManualIntegrationLastDoubleClickAt = Date.now();
@@ -451,7 +575,7 @@
             var consumeMouseBeforePlotly = function (event) {
                 var eventGd = graphDivFromEvent(event);
                 if (!eventGd) return;
-                if (eventGd.__geckoManualIntegrationDrawing) {
+                if (eventGd.__geckoManualIntegrationDrawing || eventGd.__geckoManualIntegrationPanning) {
                     stopPlotlyGesture(event);
                     return;
                 }
@@ -460,6 +584,11 @@
             };
             document.addEventListener('pointerdown', consumeBlankBeforePlotly, true);
             document.addEventListener('mousedown', consumeMouseBeforePlotly, true);
+            document.addEventListener('keydown', syncMomentaryDrawButton, true);
+            document.addEventListener('keyup', syncMomentaryDrawButton, true);
+            window.addEventListener('blur', function () {
+                setMomentaryDrawActive(false);
+            });
             document.__geckoManualIntegrationGlobalBlankClickInstalled = true;
         }
 
@@ -485,7 +614,7 @@
         }, true);
 
         gd.addEventListener('mousedown', function (event) {
-            if (gd.__geckoManualIntegrationDrawing) {
+            if (gd.__geckoManualIntegrationDrawing || gd.__geckoManualIntegrationPanning) {
                 stopPlotlyGesture(event);
                 return;
             }
