@@ -37,6 +37,7 @@ from callbacks.calibration_callbacks import register_calibration_callbacks
 
 # App setup
 app = dash.Dash(__name__, suppress_callback_exceptions=True, assets_folder='src/assets')
+app.config.suppress_callback_exceptions = True
 app.title = 'GeckoPlotter'
 
 # Global data manager
@@ -120,6 +121,7 @@ app.layout = html.Div(
         dcc.Store(id='cross-shared-selections', data={}),  # Shared selections for across-samples tab
         dcc.Store(id='peak-table-store', data=None),  # Mirror of peak-table data (JSON split) — always in layout
         dcc.Store(id='cross-sample-table-store', data=None),  # Mirror of cross-sample-table data (JSON split) — always in layout
+        dcc.Dropdown(id='peak-group-selector', style={'display': 'none'}),  # Placeholder for dynamically created dropdown
         # Baseline integration stores (p-line drawing)
         dcc.Store(id='baseline-mode', data='navigate'),  # 'draw' | 'edit' | 'navigate'
         dcc.Store(id='p-line-store', data=[]),  # Temporary line being drawn [(x0,y0),(x1,y1)]
@@ -127,6 +129,11 @@ app.layout = html.Div(
         dcc.Store(id='p-line-visible', data=False),  # Show/hide the p-line
         dcc.Store(id='clear-shapes-trigger', data=0),  # Counter to trigger shape clearing
         dcc.Store(id='peak-change-trigger', data=0),  # Counter to refresh tables/overlays after peak edits
+        dcc.Store(id='plot-peak-click-store', data=None),  # Browser-side peak hit-test selection
+        dcc.Store(id='manual-draw-line-store', data=None),  # Browser-side custom integration line
+        html.Button(id='plot-empty-click-trigger', n_clicks=0, style={'display': 'none'}),
+        html.Div(id='clear-transient-shapes-output', style={'display': 'none'}),
+        html.Div(id='selected-shapes-sync-output', style={'display': 'none'}),
         html.Div(id='dummy-output', style={'display': 'none'}),  # For clientside callbacks
 
         html.Div(
@@ -168,7 +175,7 @@ app.layout = html.Div(
                                 html.Div(
                                     id='left-top-panel',
                                     className='panel',
-                                    style={'height': '50%'},
+                                    style={'height': '50%', 'display': 'flex', 'flexDirection': 'column', 'overflow': 'hidden'},
                                     children=[
                                         html.Div(
                                             className='panel-header',
@@ -205,8 +212,10 @@ app.layout = html.Div(
                                             disable_click=True,
                                             style={
                                                 'flex': '1',
-                                                'overflow': 'auto',
-                                                'minHeight': '60px',
+                                                'minHeight': '0',
+                                                'overflow': 'hidden',
+                                                'display': 'flex',
+                                                'flexDirection': 'column',
                                                 'border': '2px dashed transparent',
                                                 'borderRadius': '4px',
                                                 'transition': 'border-color 0.2s',
@@ -217,6 +226,11 @@ app.layout = html.Div(
                                             },
                                             children=html.Div(
                                                 className='panel-content',
+                                                style={
+                                                    'flex': '1',
+                                                    'overflowY': 'auto',
+                                                    'minHeight': '0',
+                                                },
                                                 children=[
                                                     html.Div(
                                                         id='file-tree',
@@ -502,17 +516,17 @@ app.layout = html.Div(
                                                         # ── Manual Baseline Integration ──
                                                         html.Div('Manual Integration', className='toolbox-section-title'),
                                                         html.Div([
-                                                            html.Button('Draw', id='baseline-draw-btn', className='btn btn-primary',
+                                                            html.Button('Draw', id='baseline-draw-btn', className='btn btn-secondary',
                                                                         title='Draw baseline between two points',
                                                                         style={'padding': '4px 10px', 'fontSize': '12px'}),
                                                             html.Button('Edit', id='baseline-edit-btn', className='btn btn-secondary',
                                                                         title='Edit existing baseline',
-                                                                        style={'padding': '4px 10px', 'fontSize': '12px'}),
+                                                                        style={'display': 'none'}),
                                                             html.Button('Nav', id='baseline-nav-btn', className='btn btn-secondary',
                                                                         title='Pan / zoom (default)',
-                                                                        style={'padding': '4px 10px', 'fontSize': '12px'}),
+                                                                        style={'display': 'none'}),
                                                             html.Button('Clear', id='baseline-clear-btn', className='btn btn-secondary',
-                                                                        title='Clear all manual peaks',
+                                                                        title='Delete selected peak, or all manual peaks if none is selected',
                                                                         style={'padding': '4px 10px', 'fontSize': '12px'}),
                                                         ], style={'display': 'flex', 'gap': '4px', 'marginBottom': '6px', 'flexWrap': 'wrap'}),
                                                         html.Div([
@@ -524,7 +538,8 @@ app.layout = html.Div(
                                                                 labelStyle={'display': 'inline-flex', 'alignItems': 'center'},
                                                             ),
                                                         ], style={'marginBottom': '6px'}),
-                                                        html.Div(id='baseline-mode-indicator',
+                                                        html.Div('Draw: off',
+                                                                 id='baseline-mode-indicator',
                                                                  style={'fontSize': '11px', 'color': '#666', 'marginBottom': '10px'}),
                                                         html.Div(id='manual-peak-table-container', style={'marginBottom': '10px'}),
                                                         html.Hr(style={'margin': '10px 0', 'borderColor': '#e0e0e0'}),
@@ -676,6 +691,7 @@ app.layout = html.Div(
                                                     id='main-plot-loading',
                                                     type='circle',
                                                     color='#ff6b35',
+                                                    delay_show=350,
                                                     parent_className='loading-wrapper',
                                                     children=dcc.Graph(
                                                         id='main-plot',
@@ -684,6 +700,8 @@ app.layout = html.Div(
                                                                 xaxis={'visible': False},
                                                                 yaxis={'visible': False},
                                                                 template='plotly_white',
+                                                                dragmode='zoom',
+                                                                uirevision='main-plot',
                                                                 autosize=True,
                                                                 margin=dict(l=50, r=20, t=30, b=40),
                                                                 annotations=[dict(
@@ -696,7 +714,14 @@ app.layout = html.Div(
                                                         ),
                                                         responsive=True,
                                                         style={'width': '100%', 'height': '100%'},
-                                                        config={'responsive': True, 'displayModeBar': True, 'displaylogo': False},
+                                                        config={
+                                                            'responsive': True,
+                                                            'displayModeBar': False,
+                                                            'displaylogo': False,
+                                                            'doubleClick': 'reset+autosize',
+                                                            'scrollZoom': True,
+                                                            'edits': {'shapePosition': True},
+                                                        },
                                                     )
                                                 )
                                             ],

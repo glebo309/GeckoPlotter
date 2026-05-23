@@ -16,7 +16,7 @@ import logging
 import sys
 
 import dash
-from dash import Input, Output, State, html, callback_context
+from dash import Input, Output, State, html, callback_context, Patch
 from dash.exceptions import PreventUpdate
 import numpy as np
 from scipy import interpolate
@@ -160,32 +160,31 @@ def register_baseline_callbacks(app: dash.Dash, data_manager) -> None:
     @app.callback(
         [Output('baseline-mode', 'data'),
          Output('baseline-mode-indicator', 'children'),
-         Output('p-line-visible', 'data', allow_duplicate=True),
          Output('selected-peak-idx', 'data', allow_duplicate=True)],
         [Input('baseline-draw-btn', 'n_clicks'),
-         Input('baseline-edit-btn', 'n_clicks'),
          Input('baseline-nav-btn', 'n_clicks')],
         State('baseline-mode', 'data'),
         prevent_initial_call=True,
     )
-    def set_baseline_mode(n_draw, n_edit, n_nav, current_mode):
+    def set_baseline_mode(n_draw, n_nav, current_mode):
         ctx = callback_context
         if not ctx.triggered:
-            return current_mode, f'Mode: {current_mode}', False, None
-        button_id = ctx.triggered[0]['prop_id'].split('.')[0]
-        mode_map = {
-            'baseline-draw-btn': 'draw',
-            'baseline-edit-btn': 'edit',
-            'baseline-nav-btn': 'navigate',
-        }
-        mode = mode_map.get(button_id, current_mode)
-        return mode, f'Mode: {mode}', False, None
+            raise PreventUpdate
+        button_id = ctx.triggered[0]['prop_id'].rsplit('.', 1)[0]
+        if button_id == 'baseline-draw-btn':
+            mode = 'navigate' if current_mode == 'draw' else 'draw'
+        elif button_id == 'baseline-nav-btn':
+            mode = 'navigate'
+        else:
+            mode = current_mode or 'navigate'
+
+        indicator = 'Draw: on' if mode == 'draw' else 'Draw: off'
+        return mode, indicator, None
 
     # ── Sync button active states ───────────────────────────────────
 
     @app.callback(
         [Output('baseline-draw-btn', 'className'),
-         Output('baseline-edit-btn', 'className'),
          Output('baseline-nav-btn', 'className')],
         Input('baseline-mode', 'data'),
         prevent_initial_call=True,
@@ -195,230 +194,394 @@ def register_baseline_callbacks(app: dash.Dash, data_manager) -> None:
         active = 'btn btn-primary active'
         return (
             active if mode == 'draw' else base,
-            active if mode == 'edit' else base,
             active if mode == 'navigate' else base,
         )
 
-    # ── Store drawn line from relayoutData ────────────────────────────
-
-    @app.callback(
-        [Output('p-line-store', 'data', allow_duplicate=True),
-         Output('clear-shapes-trigger', 'data', allow_duplicate=True)],
-        Input('main-plot', 'relayoutData'),
-        [State('p-line-store', 'data'),
-         State('baseline-mode', 'data'),
-         State('clear-shapes-trigger', 'data'),
-         State('easy-integration', 'value'),
-         State('active-file', 'data')],
+    app.clientside_callback(
+        """
+        function(mode) {
+            window.setTimeout(function() {
+                if (window.GeckoPlotterManualIntegration) {
+                    window.GeckoPlotterManualIntegration.installEmptyClickHandler();
+                    window.GeckoPlotterManualIntegration.syncDrawMode('main-plot', mode);
+                }
+            }, 0);
+            return '';
+        }
+        """,
+        Output('dummy-output', 'children', allow_duplicate=True),
+        Input('baseline-mode', 'data'),
         prevent_initial_call=True,
     )
-    def store_line(relayout, line, mode, clear_counter, easy_mode, active_file):
-        if not relayout or not active_file:
-            return line or [], clear_counter or 0
 
-        # Draw mode: user finished drawing a new shape
-        if mode == 'draw' and 'shapes' in relayout and relayout['shapes']:
-            s = relayout['shapes'][-1]
-            pts = [(s['x0'], s['y0']), (s['x1'], s['y1'])]
-
-            if easy_mode and 'easy' in easy_mode:
-                pts = [(pts[0][0], 0), (pts[1][0], 0)]
-
-            # Validate integration
-            time_arr, signal_arr = _get_chrom(active_file)
-            if time_arr is not None:
-                res, *_ = _area_with_constraints(time_arr, signal_arr, *pts)
-                if res is None:
-                    return [], (clear_counter or 0) + 1
-            return pts, clear_counter or 0
-
-        # Edit mode: user dragged shape endpoints
-        if mode == 'edit' and line and len(line) == 2:
-            (x0, y0), (x1, y1) = line
-            for k, v in relayout.items():
-                if k.startswith('shapes[0].'):
-                    if k.endswith('.x0'):
-                        x0 = v
-                    elif k.endswith('.y0'):
-                        y0 = v
-                    elif k.endswith('.x1'):
-                        x1 = v
-                    elif k.endswith('.y1'):
-                        y1 = v
-
-            if easy_mode and 'easy' in easy_mode:
-                y0, y1 = 0, 0
-
-            return [(x0, y0), (x1, y1)], clear_counter or 0
-
-        return line or [], clear_counter or 0
-
-    # ── Add or update peak from drawn/edited line ──────────────────────
-    # Also clears the drawn shape from the plot after committing.
+    # ── Draw mode: capture new line from relayoutData ────────────────
 
     @app.callback(
         [Output('main-plot', 'figure', allow_duplicate=True),
-         Output('p-line-store', 'data', allow_duplicate=True),
+         Output('peak-change-trigger', 'data', allow_duplicate=True),
          Output('clear-shapes-trigger', 'data', allow_duplicate=True),
-         Output('peak-change-trigger', 'data', allow_duplicate=True)],
-        Input('p-line-store', 'data'),
+         Output('selected-peak-idx', 'data', allow_duplicate=True)],
+        [Input('main-plot', 'relayoutData'),
+         Input('manual-draw-line-store', 'data')],
         [State('baseline-mode', 'data'),
-         State('selected-peak-idx', 'data'),
          State('easy-integration', 'value'),
          State('active-file', 'data'),
          State('main-plot', 'figure'),
-         State('clear-shapes-trigger', 'data'),
-         State('peak-change-trigger', 'data')],
+         State('peak-change-trigger', 'data'),
+         State('selected-peak-idx', 'data'),
+         State('clear-shapes-trigger', 'data')],
         prevent_initial_call=True,
     )
-    def handle_baseline_peak(line, mode, idx, easy_mode, active_file, current_figure, counter, peak_counter):
-        """Handle both drawing new peaks and editing existing ones.
-        After a successful commit, clear the drawn shape from the plot.
-        """
-        if not line or len(line) != 2 or not active_file:
+    def handle_relayout(relayout, draw_line, mode, easy_mode, active_file, current_figure, peak_counter, selected_idx, clear_counter):
+        """Handle draw-mode new shapes and edit-mode shape drags."""
+        import plotly.graph_objects as go
+
+        if not active_file:
             raise PreventUpdate
-        if mode not in ('draw', 'edit'):
+
+        trigger_id = callback_context.triggered[0]['prop_id'].rsplit('.', 1)[0] if callback_context.triggered else ''
+
+        # ── Draw mode: browser-side custom integration line ──
+        if trigger_id == 'manual-draw-line-store' and mode == 'draw' and draw_line:
+            display_pts = [(draw_line.get('x0'), draw_line.get('y0')), (draw_line.get('x1'), draw_line.get('y1'))]
+            if any(v is None for pt in display_pts for v in pt):
+                raise PreventUpdate
+            calc_pts = display_pts
+
+            if easy_mode and 'easy' in easy_mode:
+                calc_pts = [(display_pts[0][0], 0), (display_pts[1][0], 0)]
+
+            time_arr, signal_arr = _get_chrom(active_file)
+            if time_arr is None:
+                raise PreventUpdate
+
+            res, q1, q2 = _area_with_constraints(time_arr, signal_arr, *calc_pts)
+            if not res:
+                raise PreventUpdate
+
+            # Check overlap with existing peaks — replace if >50% overlap
+            line_x_min = min(display_pts[0][0], display_pts[1][0])
+            line_x_max = max(display_pts[0][0], display_pts[1][0])
+            line_width = line_x_max - line_x_min
+
+            all_peaks = data_manager.peak_service.get_peaks(active_file)
+            replaced = False
+            changed_peak = None
+            for p in all_peaks:
+                if p.source not in ('manual', 'detected'):
+                    continue
+                if p.p_line and len(p.p_line) == 2:
+                    p_x_min = min(p.p_line[0][0], p.p_line[1][0])
+                    p_x_max = max(p.p_line[0][0], p.p_line[1][0])
+                else:
+                    p_x_min = p.rt_start
+                    p_x_max = p.rt_end
+                overlap = max(0, min(line_x_max, p_x_max) - max(line_x_min, p_x_min))
+                p_width = p_x_max - p_x_min
+                if p_width > 0 and overlap / p_width > 0.5:
+                    p.area = res['area']
+                    p.height = res['height']
+                    p.rt = res['apex_x']
+                    p.poly_x = res['poly_x']
+                    p.poly_y = res['poly_y']
+                    p.p_line = list(display_pts)
+                    p.q1 = q1
+                    p.q2 = q2
+                    p.rt_start = line_x_min
+                    p.rt_end = line_x_max
+                    p.width = line_width
+                    if p.source == 'detected':
+                        p.source = 'manual'
+                    replaced = True
+                    changed_peak = p
+                    log.debug(f"Replaced peak RT={p.rt:.3f}, area={res['area']:.1f}")
+                    break
+
+            if not replaced:
+                changed_peak = data_manager.peak_service.add_baseline_peak(
+                    file_id=active_file,
+                    area=res['area'],
+                    height=res['height'],
+                    apex_x=res['apex_x'],
+                    poly_x=res['poly_x'],
+                    poly_y=res['poly_y'],
+                    p_line=list(display_pts),
+                    q1=q1,
+                    q2=q2,
+                )
+                log.debug(f"Added peak RT={res['apex_x']:.3f}, area={res['area']:.1f}")
+
+            fig_patch = _patch_figure_with_peaks(
+                data_manager, active_file, current_figure, time_arr, signal_arr, None
+            )
+            return fig_patch, (peak_counter or 0) + 1, (clear_counter or 0) + 1, None
+
+        # ── Edit selected/all baseline shape endpoint(s) ──
+        if not relayout:
             raise PreventUpdate
-        if mode == 'edit' and idx is None:
+        if mode == 'edit' or selected_idx:
+            shape_keys = [k for k in relayout if k.startswith('shapes[')]
+            if not shape_keys:
+                raise PreventUpdate
+
+            # Parse which shape was edited and its new coordinates
+            shape_updates = {}
+            for k, v in relayout.items():
+                if k.startswith('shapes['):
+                    shape_updates[k] = v
+
+            # Find the shape index and new coordinates
+            shape_idx = None
+            for k in shape_updates:
+                try:
+                    idx_str = k.split('[')[1].split(']')[0]
+                    shape_idx = int(idx_str)
+                    break
+                except (IndexError, ValueError):
+                    pass
+
+            if shape_idx is None:
+                raise PreventUpdate
+
+            # Get current figure shapes to find original + updates
+            fig_obj = go.Figure(current_figure) if isinstance(current_figure, dict) else current_figure
+            shapes = list(fig_obj.layout.shapes) if fig_obj.layout.shapes else []
+            if shape_idx >= len(shapes):
+                raise PreventUpdate
+
+            shape = shapes[shape_idx]
+            x0 = shape_updates.get(f'shapes[{shape_idx}].x0', shape.x0)
+            y0 = shape_updates.get(f'shapes[{shape_idx}].y0', shape.y0)
+            x1 = shape_updates.get(f'shapes[{shape_idx}].x1', shape.x1)
+            y1 = shape_updates.get(f'shapes[{shape_idx}].y1', shape.y1)
+
+            display_p0 = (x0, y0)
+            display_p1 = (x1, y1)
+            calc_p0 = display_p0
+            calc_p1 = display_p1
+            if easy_mode and 'easy' in easy_mode:
+                calc_p0 = (x0, 0)
+                calc_p1 = (x1, 0)
+
+            all_peaks = data_manager.peak_service.get_peaks(active_file)
+            shape_name = getattr(shape, 'name', None)
+            p = None
+            if isinstance(shape_name, str) and shape_name.startswith('baseline:'):
+                shape_peak_id = shape_name.split(':', 1)[1]
+                if selected_idx and shape_peak_id != selected_idx:
+                    raise PreventUpdate
+                p = next((peak for peak in all_peaks if peak.peak_id == shape_peak_id), None)
+            if p is None:
+                if selected_idx:
+                    raise PreventUpdate
+                editable = sorted(
+                    [peak for peak in all_peaks if peak.source in ('manual', 'detected') and peak.p_line],
+                    key=lambda peak: peak.rt,
+                )
+                if shape_idx < len(editable):
+                    p = editable[shape_idx]
+            if p is None:
+                raise PreventUpdate
+
+            time_arr, signal_arr = _get_chrom(active_file)
+            if time_arr is None:
+                raise PreventUpdate
+
+            res, q1, q2 = _area_with_constraints(time_arr, signal_arr, calc_p0, calc_p1)
+            if not res:
+                raise PreventUpdate
+
+            p.area = res['area']
+            p.height = res['height']
+            p.rt = res['apex_x']
+            p.poly_x = res['poly_x']
+            p.poly_y = res['poly_y']
+            p.p_line = [display_p0, display_p1]
+            p.q1 = q1
+            p.q2 = q2
+            p.rt_start = min(x0, x1)
+            p.rt_end = max(x0, x1)
+            p.width = p.rt_end - p.rt_start
+            if p.source == 'detected':
+                p.source = 'manual'
+            log.debug(f"Edit-dragged peak idx={shape_idx}: RT={res['apex_x']:.3f}")
+
+            selected_for_rebuild = None if mode == 'edit' else p.peak_id
+            fig_patch = _patch_figure_with_peaks(
+                data_manager, active_file, current_figure, time_arr, signal_arr, selected_for_rebuild
+            )
+            return fig_patch, (peak_counter or 0) + 1, (clear_counter or 0) + 1, p.peak_id if mode != 'edit' else None
+
+        raise PreventUpdate
+
+    # ── Normal mode: click a filled peak to select/highlight it ───────
+
+    @app.callback(
+        [Output('selected-peak-idx', 'data', allow_duplicate=True),
+         Output('main-plot', 'figure', allow_duplicate=True)],
+        Input('plot-peak-click-store', 'data'),
+        [State('active-file', 'data'),
+         State('main-plot', 'figure')],
+        prevent_initial_call=True,
+    )
+    def select_peak_from_browser_hit_test(hit_data, active_file, current_figure):
+        """Select a peak from the browser-side pointer hit test before Plotly starts drawing."""
+        if not hit_data or not active_file:
+            raise PreventUpdate
+
+        peak_id = hit_data.get('peakId') if isinstance(hit_data, dict) else None
+        if not peak_id:
             raise PreventUpdate
 
         time_arr, signal_arr = _get_chrom(active_file)
         if time_arr is None:
             raise PreventUpdate
 
-        # Apply easy integration
-        if easy_mode and 'easy' in easy_mode:
-            line = [(line[0][0], 0), (line[1][0], 0)]
-
-        res, q1, q2 = _area_with_constraints(time_arr, signal_arr, *line)
-        if not res:
-            raise PreventUpdate
-
-        if mode == 'draw':
-            data_manager.peak_service.add_baseline_peak(
-                file_id=active_file,
-                area=res['area'],
-                height=res['height'],
-                apex_x=res['apex_x'],
-                poly_x=res['poly_x'],
-                poly_y=res['poly_y'],
-                p_line=list(line),
-                q1=q1,
-                q2=q2,
-            )
-            log.debug(f"Added manual peak: RT={res['apex_x']:.3f}, area={res['area']:.1f}")
-        else:
-            # Edit mode — update existing peak by peak_id
-            all_peaks = data_manager.peak_service.get_peaks(active_file)
-            editable = sorted(
-                [p for p in all_peaks if p.source in ('manual', 'detected')],
-                key=lambda p: p.rt,
-            )
-            if 0 <= idx < len(editable):
-                p = editable[idx]
-                p.area = res['area']
-                p.height = res['height']
-                p.rt = res['apex_x']
-                p.poly_x = res['poly_x']
-                p.poly_y = res['poly_y']
-                p.p_line = list(line)
-                p.q1 = q1
-                p.q2 = q2
-                p.rt_start = min(line[0][0], line[1][0])
-                p.rt_end = max(line[0][0], line[1][0])
-                p.width = p.rt_end - p.rt_start
-                # Once edited, a detected peak becomes manual
-                if p.source == 'detected':
-                    p.source = 'manual'
-
-        fig = _rebuild_figure_with_peaks(
-            data_manager, active_file, current_figure, time_arr, signal_arr
+        fig_patch = _patch_figure_with_peaks(
+            data_manager, active_file, current_figure, time_arr, signal_arr, peak_id
         )
-        # Clear the drawn shape and p-line-store after committing
-        return fig, [], (counter or 0) + 1, (peak_counter or 0) + 1
-
-    # ── Select peak by click ─────────────────────────────────────────
+        return peak_id, fig_patch
 
     @app.callback(
         [Output('selected-peak-idx', 'data', allow_duplicate=True),
-         Output('p-line-visible', 'data', allow_duplicate=True)],
+         Output('main-plot', 'figure', allow_duplicate=True)],
         Input('main-plot', 'clickData'),
-        [State('baseline-mode', 'data'),
-         State('active-file', 'data')],
+        [State('active-file', 'data'),
+         State('main-plot', 'figure'),
+         State('selected-peak-idx', 'data'),
+         State('baseline-mode', 'data')],
         prevent_initial_call=True,
     )
-    def select_peak_by_click(click, mode, active_file):
-        if mode != 'edit' or not click or not active_file:
+    def select_peak_by_click(click_data, active_file, current_figure, selected_peak_id, mode):
+        """Select peaks from any mode; the invisible catcher deselects."""
+        import plotly.graph_objects as go
+
+        if not click_data or not active_file:
             raise PreventUpdate
-        x_click = click['points'][0]['x']
-        # Select from all editable peaks (manual + detected), not just manual
-        all_peaks = data_manager.peak_service.get_peaks(active_file)
-        editable = sorted(
-            [p for p in all_peaks if p.source in ('manual', 'detected')],
-            key=lambda p: p.rt,
+
+        points = click_data.get('points') or []
+        if not points:
+            raise PreventUpdate
+
+        customdata = points[0].get('customdata')
+        kind = None
+        if isinstance(customdata, (list, tuple)):
+            peak_id = customdata[0]
+            kind = customdata[1] if len(customdata) > 1 else None
+        else:
+            peak_id = customdata
+        if not peak_id:
+            raise PreventUpdate
+
+        next_selected = None if peak_id == '__deselect__' else peak_id
+        time_arr, signal_arr = _get_chrom(active_file)
+        if time_arr is None:
+            raise PreventUpdate
+
+        fig_patch = _patch_figure_with_peaks(
+            data_manager, active_file, current_figure, time_arr, signal_arr, next_selected
         )
-        if not editable:
+        return next_selected, fig_patch
+
+    @app.callback(
+        [Output('selected-peak-idx', 'data', allow_duplicate=True),
+         Output('main-plot', 'figure', allow_duplicate=True)],
+        Input('plot-empty-click-trigger', 'n_clicks'),
+        [State('active-file', 'data'),
+         State('main-plot', 'figure'),
+         State('selected-peak-idx', 'data'),
+         State('baseline-mode', 'data')],
+        prevent_initial_call=True,
+    )
+    def deselect_peak_from_empty_plot_click(n_clicks, active_file, current_figure, selected_peak_id, mode):
+        """Deselect the current peak when the browser detects a blank plot click."""
+        import plotly.graph_objects as go
+
+        if not n_clicks or not active_file or not selected_peak_id:
             raise PreventUpdate
-        idx = min(range(len(editable)), key=lambda i: abs(editable[i].rt - x_click))
-        return idx, True
+
+        time_arr, signal_arr = _get_chrom(active_file)
+        if time_arr is None:
+            raise PreventUpdate
+
+        fig_patch = _patch_figure_with_peaks(
+            data_manager, active_file, current_figure, time_arr, signal_arr, None
+        )
+        return None, fig_patch
+
+    # ── Client-side cleanup for Plotly's transient draw shape ─────────
+
+    app.clientside_callback(
+        """
+        function(trigger) {
+            if (!trigger) {
+                return window.dash_clientside.no_update;
+            }
+            window.setTimeout(function() {
+                if (window.GeckoPlotterManualIntegration) {
+                    window.GeckoPlotterManualIntegration.installEmptyClickHandler();
+                    window.GeckoPlotterManualIntegration.clearTransientShapes('main-plot');
+                }
+            }, 80);
+            return '';
+        }
+        """,
+        Output('clear-transient-shapes-output', 'children'),
+        Input('clear-shapes-trigger', 'data'),
+        prevent_initial_call=True,
+    )
+
+    app.clientside_callback(
+        """
+        function(selectedPeakId) {
+            window.setTimeout(function() {
+                if (window.GeckoPlotterManualIntegration) {
+                    window.GeckoPlotterManualIntegration.installEmptyClickHandler();
+                    window.GeckoPlotterManualIntegration.syncSelectedShape('main-plot', selectedPeakId);
+                }
+            }, 80);
+            return '';
+        }
+        """,
+        Output('selected-shapes-sync-output', 'children'),
+        Input('selected-peak-idx', 'data'),
+        prevent_initial_call=True,
+    )
 
     # ── Clear all manual peaks ────────────────────────────────────────
 
     @app.callback(
         [Output('main-plot', 'figure', allow_duplicate=True),
-         Output('clear-shapes-trigger', 'data', allow_duplicate=True),
          Output('selected-peak-idx', 'data', allow_duplicate=True),
-         Output('p-line-store', 'data', allow_duplicate=True),
          Output('peak-change-trigger', 'data', allow_duplicate=True)],
         Input('baseline-clear-btn', 'n_clicks'),
-        [State('clear-shapes-trigger', 'data'),
-         State('active-file', 'data'),
+        [State('active-file', 'data'),
          State('main-plot', 'figure'),
-         State('peak-change-trigger', 'data')],
+         State('peak-change-trigger', 'data'),
+         State('selected-peak-idx', 'data')],
         prevent_initial_call=True,
     )
-    def clear_manual_peaks(n_clicks, counter, active_file, current_figure, peak_counter):
+    def clear_manual_peaks(n_clicks, active_file, current_figure, peak_counter, selected_peak_id):
         if not n_clicks:
             raise PreventUpdate
         if active_file:
-            data_manager.peak_service.clear_manual_peaks(active_file)
+            if selected_peak_id:
+                data_manager.peak_service.remove_peak(active_file, selected_peak_id)
+            else:
+                data_manager.peak_service.clear_manual_peaks(active_file)
             time_arr, signal_arr = _get_chrom(active_file)
             if time_arr is not None:
-                fig = _rebuild_figure_with_peaks(
+                fig_patch = _patch_figure_with_peaks(
                     data_manager, active_file, current_figure, time_arr, signal_arr
                 )
-                return fig, (counter or 0) + 1, None, [], (peak_counter or 0) + 1
-        return current_figure, (counter or 0) + 1, None, [], (peak_counter or 0) + 1
-
-    # ── Update dragmode based on baseline-mode ────────────────────────
-
-    @app.callback(
-        Output('main-plot', 'figure', allow_duplicate=True),
-        Input('baseline-mode', 'data'),
-        State('main-plot', 'figure'),
-        prevent_initial_call=True,
-    )
-    def update_dragmode(mode, current_figure):
-        if current_figure is None:
-            raise PreventUpdate
-        import plotly.graph_objects as go
-        fig = go.Figure(current_figure)
-        drag_map = {
-            'draw': 'drawline',
-            'edit': 'select',
-            'navigate': 'pan',
-        }
-        fig.update_layout(dragmode=drag_map.get(mode, 'pan'))
-        # Clear any existing shapes when switching modes
-        if mode == 'navigate':
-            fig.update_layout(shapes=[])
-        return fig
+                return fig_patch, None, (peak_counter or 0) + 1
+        return current_figure, None, (peak_counter or 0) + 1
 
     # ── Peak count indicator in toolbox ───────────────────────────────
 
     @app.callback(
         Output('manual-peak-table-container', 'children'),
-        [Input('main-plot', 'figure')],
+        [Input('peak-change-trigger', 'data')],
         State('active-file', 'data'),
         prevent_initial_call=True,
     )
@@ -446,10 +609,120 @@ def register_baseline_callbacks(app: dash.Dash, data_manager) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Edit-mode helpers
+# ---------------------------------------------------------------------------
+
+def _add_edit_handles(data_manager, file_id, fig):
+    """Add editable line shapes for each editable peak's baseline."""
+    all_peaks = data_manager.peak_service.get_peaks(file_id)
+    editable = sorted(
+        [p for p in all_peaks if p.source in ('manual', 'detected') and p.p_line and len(p.p_line) == 2],
+        key=lambda p: p.rt,
+    )
+    for p in editable:
+        fig.add_shape(
+            type='line',
+            x0=p.p_line[0][0], y0=p.p_line[0][1],
+            x1=p.p_line[1][0], y1=p.p_line[1][1],
+            name=f'baseline:{p.peak_id}',
+            line=dict(color='rgba(100,100,100,0.7)', width=2, dash='dot'),
+            editable=True,
+        )
+
+
+def _add_selected_baseline_handle(fig, peak):
+    """Show the selected peak's baseline plus visible p-point markers."""
+    import plotly.graph_objects as go
+
+    if not peak.p_line or len(peak.p_line) != 2:
+        return
+
+    line_color = peak.color or '#E69F00'
+    p0, p1 = peak.p_line
+    fig.add_shape(
+        type='line',
+        x0=p0[0], y0=p0[1],
+        x1=p1[0], y1=p1[1],
+        name=f'baseline:{peak.peak_id}',
+        line=dict(color=line_color, width=2, dash='dot'),
+        editable=True,
+    )
+    fig.add_trace(go.Scatter(
+        x=[p0[0], p1[0]],
+        y=[p0[1], p1[1]],
+        mode='markers',
+        marker=dict(
+            size=9,
+            color='#ffffff',
+            line=dict(color=line_color, width=2),
+            symbol='circle',
+        ),
+        customdata=[[peak.peak_id, 'p-point'], [peak.peak_id, 'p-point']],
+        hoverinfo='skip',
+        showlegend=False,
+        meta='peak_overlay',
+    ))
+
+
+# ---------------------------------------------------------------------------
 # Figure builder with peak overlays
 # ---------------------------------------------------------------------------
 
-def _rebuild_figure_with_peaks(data_manager, file_id, current_figure, time_arr, signal_arr):
+def _rgba(hex_color, alpha):
+    """Convert #RRGGBB to rgba(...) while accepting existing rgba values."""
+    if isinstance(hex_color, str) and hex_color.startswith('#') and len(hex_color) == 7:
+        r = int(hex_color[1:3], 16)
+        g = int(hex_color[3:5], 16)
+        b = int(hex_color[5:7], 16)
+        return f'rgba({r}, {g}, {b}, {alpha})'
+    return hex_color
+
+
+def _add_deselect_catcher(fig, time_arr, signal_arr):
+    """Add a near-transparent plot-area trace that clicks to deselect."""
+    import plotly.graph_objects as go
+
+    x_vals = np.asarray(time_arr, dtype=float)
+    y_vals = np.asarray(signal_arr, dtype=float)
+    finite_x = x_vals[np.isfinite(x_vals)]
+    finite_y = y_vals[np.isfinite(y_vals)]
+    if finite_x.size < 2 or finite_y.size < 2:
+        return
+
+    x0, x1 = float(np.nanmin(finite_x)), float(np.nanmax(finite_x))
+    y0, y1 = float(np.nanmin(finite_y)), float(np.nanmax(finite_y))
+    y_pad = max((y1 - y0) * 0.08, 1e-9)
+    y0 -= y_pad
+    y1 += y_pad
+
+    fig.add_trace(go.Scatter(
+        x=[x0, x1, x1, x0, x0],
+        y=[y0, y0, y1, y1, y0],
+        fill='toself',
+        fillcolor='rgba(255,255,255,0.001)',
+        mode='lines',
+        line=dict(width=0, color='rgba(255,255,255,0)'),
+        customdata=[['__deselect__', 'catcher']] * 5,
+        hoverinfo='skip',
+        showlegend=False,
+        meta='peak_overlay',
+    ))
+
+
+def _patch_figure_with_peaks(data_manager, file_id, current_figure, time_arr, signal_arr, selected_peak_id=None):
+    """Patch only peak overlays and editable shapes, leaving plot layout untouched."""
+    fig = _rebuild_figure_with_peaks(
+        data_manager, file_id, current_figure, time_arr, signal_arr, selected_peak_id
+    )
+    fig_json = fig.to_plotly_json()
+
+    patch = Patch()
+    patch['data'] = fig_json.get('data', [])
+    patch['layout']['shapes'] = fig_json.get('layout', {}).get('shapes', [])
+    return patch
+
+
+def _rebuild_figure_with_peaks(data_manager, file_id, current_figure, time_arr, signal_arr, selected_peak_id=None):
     """Rebuild the current figure, adding all peak overlays."""
     import plotly.graph_objects as go
 
@@ -457,77 +730,65 @@ def _rebuild_figure_with_peaks(data_manager, file_id, current_figure, time_arr, 
 
     # Remove old peak traces (identified by meta tag)
     fig.data = [t for t in fig.data if not (hasattr(t, 'meta') and t.meta == 'peak_overlay')]
-    # Clear old shapes (p-lines drawn by user)
-    fig.update_layout(shapes=[])
+    # Clear drawn/editable shapes before adding the selected peak's baseline.
+    fig.layout.shapes = ()
+    fig.update_layout(uirevision='main-plot')
 
     all_peaks = data_manager.peak_service.get_peaks(file_id)
 
-    for peak in all_peaks:
+    FILL_COLORS = [
+        'rgba(180, 120, 220, 0.30)',
+        'rgba(100, 180, 120, 0.30)',
+        'rgba(80, 160, 220, 0.30)',
+        'rgba(220, 160, 80, 0.30)',
+        'rgba(220, 100, 120, 0.30)',
+        'rgba(120, 200, 200, 0.30)',
+    ]
+
+    for i, peak in enumerate(all_peaks):
+        is_selected = peak.peak_id == selected_peak_id
+        fill_color = _rgba(peak.color, 0.58 if is_selected else 0.30) if peak.color else FILL_COLORS[i % len(FILL_COLORS)]
+        line_color = peak.color if is_selected else 'rgba(0,0,0,0)'
+
+        has_custom_label = bool(peak.label) if hasattr(peak, 'label') else False
+
         if peak.poly_x and peak.poly_y:
-            # Filled polygon for peaks with baseline data (manual or detected with poly)
-            fill_color = 'rgba(0, 150, 200, 0.25)' if peak.source == 'manual' else 'rgba(230, 159, 0, 0.25)'
-            marker_color = '#005F8C' if peak.source == 'manual' else '#E69F00'
+            poly_x = list(peak.poly_x)
+            poly_y = list(peak.poly_y)
             fig.add_trace(go.Scatter(
-                x=peak.poly_x,
-                y=peak.poly_y,
-                fill='toself',
-                fillcolor=fill_color,
-                line=dict(width=0),
+                x=poly_x, y=poly_y,
+                fill='toself', fillcolor=fill_color,
+                mode='lines',
+                line=dict(color=line_color, width=2 if is_selected else 0),
+                customdata=[peak.peak_id] * len(poly_x),
                 hoverinfo='skip',
-                showlegend=False,
-                meta='peak_overlay',
+                showlegend=False, meta='peak_overlay',
             ))
-            # Apex marker with area label
-            fig.add_trace(go.Scatter(
-                x=[peak.rt],
-                y=[peak.height],
-                mode='markers+text',
-                marker=dict(size=8, symbol='diamond', color=marker_color),
-                text=[f'{peak.area:.0f}'],
-                textposition='top center',
-                textfont=dict(size=9, color=marker_color),
-                hovertemplate=f'{peak.name} ({peak.source})<br>RT: {peak.rt:.3f} min<br>Area: {peak.area:.1f}<extra></extra>',
-                showlegend=False,
-                meta='peak_overlay',
-            ))
-            # P-line (baseline) for manual peaks
-            if peak.p_line and len(peak.p_line) == 2:
+            if has_custom_label:
                 fig.add_trace(go.Scatter(
-                    x=[peak.p_line[0][0], peak.p_line[1][0]],
-                    y=[peak.p_line[0][1], peak.p_line[1][1]],
-                    mode='lines+markers',
-                    line=dict(color=marker_color, width=2, dash='dot'),
-                    marker=dict(size=6, color=marker_color, symbol='circle-open'),
+                    x=[peak.rt],
+                    y=[peak.height],
+                    mode='text',
+                    text=[peak.label],
+                    textposition='top center',
+                    textfont=dict(size=9, color='#333'),
                     hoverinfo='skip',
                     showlegend=False,
-                    meta='peak_overlay',
+                        meta='peak_overlay',
                 ))
+            if is_selected:
+                _add_selected_baseline_handle(fig, peak)
 
-        elif peak.source == 'imported':
-            # Triangle markers for imported peaks (no polygon data)
+        elif has_custom_label:
             marker_y = _y_curve(time_arr, signal_arr, peak.rt)
             fig.add_trace(go.Scatter(
                 x=[peak.rt],
                 y=[marker_y],
-                mode='markers',
-                marker=dict(size=10, symbol='triangle-up', color='red'),
-                hovertemplate=f'{peak.name} (imported)<br>RT: {peak.rt:.3f} min<br>Area: {peak.area:.1f}<extra></extra>',
-                showlegend=False,
-                meta='peak_overlay',
-            ))
-
-        elif peak.source == 'detected' and not peak.poly_x:
-            # Diamond markers for detected peaks without polygon data
-            marker_y = _y_curve(time_arr, signal_arr, peak.rt)
-            fig.add_trace(go.Scatter(
-                x=[peak.rt],
-                y=[marker_y],
-                mode='markers+text',
-                marker=dict(size=8, symbol='diamond', color='#E69F00'),
-                text=[f'{peak.area:.0f}'],
+                mode='text',
+                text=[peak.label],
                 textposition='top center',
-                textfont=dict(size=9, color='#E69F00'),
-                hovertemplate=f'{peak.name} (detected)<br>RT: {peak.rt:.3f} min<br>Area: {peak.area:.1f}<extra></extra>',
+                textfont=dict(size=9, color='#333'),
+                hovertemplate=f'{peak.name} ({peak.source})<br>RT: {peak.rt:.3f} min<br>Area: {peak.area:.1f}<extra></extra>',
                 showlegend=False,
                 meta='peak_overlay',
             ))

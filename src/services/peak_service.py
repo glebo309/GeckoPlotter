@@ -47,6 +47,7 @@ class Peak:
     calibration_id: Optional[str] = None
     concentration: Optional[float] = None
     source: str = 'detected'  # 'imported' | 'manual' | 'detected'
+    label: str = ''  # User-assigned compound/label shown above peak on plot
     # Manual baseline integration fields (p-line)
     poly_x: Optional[List[float]] = None  # Filled polygon x-coords
     poly_y: Optional[List[float]] = None  # Filled polygon y-coords
@@ -384,9 +385,14 @@ class PeakService:
         """
         existing = self._peaks.get(file_id, [])
 
-        # Check for duplicate editable peak (same apex within 0.05 min)
+        line_x_min = min(p_line[0][0], p_line[1][0])
+        line_x_max = max(p_line[0][0], p_line[1][0])
         for p in existing:
-            if p.source in ('manual', 'detected') and abs(p.rt - apex_x) < 0.05:
+            if p.source not in ('manual', 'detected'):
+                continue
+            p_width = p.rt_end - p.rt_start
+            overlap = max(0, min(line_x_max, p.rt_end) - max(line_x_min, p.rt_start))
+            if (p_width > 0 and overlap / p_width > 0.5) or abs(p.rt - apex_x) < 0.05:
                 p.area = area
                 p.height = height
                 p.rt = apex_x

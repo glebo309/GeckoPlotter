@@ -83,10 +83,76 @@ def prepare_table_data(file_data, file_id=None, visible_wells=None):
     return table_data
 
 
-def _overlay_peaks_on_figure(dm, active_file_id, figure):
+def _rgba(hex_color, alpha):
+    """Convert #RRGGBB to rgba(...) while accepting existing rgba values."""
+    if isinstance(hex_color, str) and hex_color.startswith('#') and len(hex_color) == 7:
+        r = int(hex_color[1:3], 16)
+        g = int(hex_color[3:5], 16)
+        b = int(hex_color[5:7], 16)
+        return f'rgba({r}, {g}, {b}, {alpha})'
+    return hex_color
+
+
+def _add_deselect_catcher(fig, dm, active_file_id):
+    """Add a near-transparent plot-area trace that clicks to deselect."""
+    import plotly.graph_objects as go
+
+    file_data = dm.get_data_by_id(active_file_id)
+    if file_data is None:
+        bundle = dm.get_bundle_by_id(active_file_id)
+        if bundle and bundle.main_file:
+            file_data = dm.get_data_by_id(bundle.main_file.get('id'))
+    if not file_data or file_data.get('data') is None:
+        return
+
+    df = file_data['data']
+    time_col = signal_col = None
+    for col in df.columns:
+        cl = col.lower()
+        if 'time' in cl:
+            time_col = col
+        elif any(k in cl for k in ('value', 'intensity', 'mau', 'absorbance', 'signal')):
+            signal_col = col
+    if time_col is None or signal_col is None:
+        return
+
+    try:
+        x_vals = df[time_col].to_numpy(dtype=float)
+        y_vals = df[signal_col].to_numpy(dtype=float)
+    except Exception:
+        return
+
+    finite_x = x_vals[np.isfinite(x_vals)]
+    finite_y = y_vals[np.isfinite(y_vals)]
+    if finite_x.size < 2 or finite_y.size < 2:
+        return
+
+    x0, x1 = float(np.nanmin(finite_x)), float(np.nanmax(finite_x))
+    y0, y1 = float(np.nanmin(finite_y)), float(np.nanmax(finite_y))
+    y_pad = max((y1 - y0) * 0.08, 1e-9)
+    y0 -= y_pad
+    y1 += y_pad
+
+    fig.add_trace(go.Scatter(
+        x=[x0, x1, x1, x0, x0],
+        y=[y0, y0, y1, y1, y0],
+        fill='toself',
+        fillcolor='rgba(255,255,255,0.001)',
+        mode='lines',
+        line=dict(width=0, color='rgba(255,255,255,0)'),
+        customdata=[['__deselect__', 'catcher']] * 5,
+        hoverinfo='skip',
+        showlegend=False,
+        meta='peak_overlay',
+    ))
+
+
+def _overlay_peaks_on_figure(dm, active_file_id, figure, selected_peak_id=None):
     """Overlay manual/imported/detected peak markers on the raw figure."""
     import plotly.graph_objects as go
     fig = go.Figure(figure) if isinstance(figure, dict) else figure
+    fig.layout.shapes = ()
+    fig.update_layout(uirevision='main-plot')
 
     all_peaks = dm.peak_service.get_peaks(active_file_id)
     if not all_peaks:
@@ -119,49 +185,78 @@ def _overlay_peaks_on_figure(dm, active_file_id, figure):
         except Exception:
             return fallback
 
-    for peak in all_peaks:
-        if peak.source == 'manual' and peak.poly_x and peak.poly_y:
+    FILL_COLORS = [
+        'rgba(180, 120, 220, 0.30)',
+        'rgba(100, 180, 120, 0.30)',
+        'rgba(80, 160, 220, 0.30)',
+        'rgba(220, 160, 80, 0.30)',
+        'rgba(220, 100, 120, 0.30)',
+        'rgba(120, 200, 200, 0.30)',
+    ]
+
+    for i, peak in enumerate(all_peaks):
+        is_selected = peak.peak_id == selected_peak_id
+        fill_color = _rgba(peak.color, 0.58 if is_selected else 0.30) if peak.color else FILL_COLORS[i % len(FILL_COLORS)]
+        line_color = peak.color if is_selected else 'rgba(0,0,0,0)'
+
+        has_custom_label = bool(peak.label) if hasattr(peak, 'label') else False
+
+        if peak.poly_x and peak.poly_y:
+            poly_x = list(peak.poly_x)
+            poly_y = list(peak.poly_y)
             fig.add_trace(go.Scatter(
-                x=peak.poly_x, y=peak.poly_y,
-                fill='toself', fillcolor='rgba(0, 150, 200, 0.25)',
-                line=dict(width=0), hoverinfo='skip',
-                name=f'{peak.name} (area={peak.area:.1f})',
+                x=poly_x, y=poly_y,
+                fill='toself', fillcolor=fill_color,
+                mode='lines',
+                line=dict(color=line_color, width=2 if is_selected else 0),
+                customdata=[peak.peak_id] * len(poly_x),
+                hoverinfo='skip',
                 showlegend=False, meta='peak_overlay',
             ))
-            fig.add_trace(go.Scatter(
-                x=[peak.rt], y=[peak.height],
-                mode='markers+text',
-                marker=dict(size=8, symbol='diamond', color='#005F8C'),
-                text=[f'{peak.area:.0f}'], textposition='top center',
-                textfont=dict(size=9, color='#005F8C'),
-                hovertemplate=f'{peak.name}<br>RT: {peak.rt:.3f}<br>Area: {peak.area:.1f}<extra></extra>',
-                showlegend=False, meta='peak_overlay',
-            ))
-            if peak.p_line and len(peak.p_line) == 2:
+            if has_custom_label:
                 fig.add_trace(go.Scatter(
-                    x=[peak.p_line[0][0], peak.p_line[1][0]],
-                    y=[peak.p_line[0][1], peak.p_line[1][1]],
-                    mode='lines+markers',
-                    line=dict(color='#005F8C', width=2, dash='dot'),
-                    marker=dict(size=6, color='#005F8C', symbol='circle-open'),
-                    hoverinfo='skip', showlegend=False, meta='peak_overlay',
+                    x=[peak.rt], y=[peak.height],
+                    mode='text',
+                    text=[peak.label],
+                    textposition='top center',
+                    textfont=dict(size=9, color='#333'),
+                    hoverinfo='skip',
+                    showlegend=False, meta='peak_overlay',
                 ))
-        elif peak.source == 'imported':
+            if is_selected and peak.p_line and len(peak.p_line) == 2:
+                p0, p1 = peak.p_line
+                line_color = peak.color or '#E69F00'
+                fig.add_shape(
+                    type='line',
+                    x0=p0[0], y0=p0[1],
+                    x1=p1[0], y1=p1[1],
+                    name=f'baseline:{peak.peak_id}',
+                    line=dict(color=line_color, width=2, dash='dot'),
+                    editable=True,
+                )
+                fig.add_trace(go.Scatter(
+                    x=[p0[0], p1[0]],
+                    y=[p0[1], p1[1]],
+                    mode='markers',
+                    marker=dict(
+                        size=9,
+                        color='#ffffff',
+                        line=dict(color=line_color, width=2),
+                        symbol='circle',
+                    ),
+                    customdata=[[peak.peak_id, 'p-point'], [peak.peak_id, 'p-point']],
+                    hoverinfo='skip',
+                    showlegend=False,
+                    meta='peak_overlay',
+                ))
+        elif has_custom_label:
+            marker_y = _marker_y(peak.rt, peak.height)
             fig.add_trace(go.Scatter(
-                x=[peak.rt], y=[_marker_y(peak.rt, peak.height)],
-                mode='markers',
-                marker=dict(size=10, symbol='triangle-up', color='red'),
-                hovertemplate=f'{peak.name}<br>RT: {peak.rt:.3f}<br>Area: {peak.area:.1f}<extra></extra>',
-                showlegend=False, meta='peak_overlay',
-            ))
-        elif peak.source == 'detected':
-            fig.add_trace(go.Scatter(
-                x=[peak.rt], y=[_marker_y(peak.rt, peak.height)],
-                mode='markers+text',
-                marker=dict(size=8, symbol='diamond', color='#E69F00'),
-                text=[f'{peak.area:.0f}'],
+                x=[peak.rt], y=[marker_y],
+                mode='text',
+                text=[peak.label],
                 textposition='top center',
-                textfont=dict(size=9, color='#E69F00'),
+                textfont=dict(size=9, color='#333'),
                 hovertemplate=f'{peak.name}<br>RT: {peak.rt:.3f}<br>Area: {peak.area:.1f}<extra></extra>',
                 showlegend=False, meta='peak_overlay',
             ))
@@ -169,8 +264,8 @@ def _overlay_peaks_on_figure(dm, active_file_id, figure):
     return fig
 
 
-def _classify_file_type(metadata, fdata):
-    """Map a file's type to a display group for overlay grouping."""
+def _get_source_category(metadata, fdata):
+    """Return the instrument/source category for a file."""
     ft = metadata.get('file_type') or fdata.get('record', {}).get('type', '')
     if ft in ('chromatogram', 'text'):
         return 'chromatogram'
@@ -180,9 +275,40 @@ def _classify_file_type(metadata, fdata):
         return 'lcms_ms'
     if ft in ('lcms_vwd_cdf', 'lcms_uv_a', 'lcms_uv_b'):
         return 'lcms_uv'
-    if ft in ('generic_csv', 'table', 'csv'):
-        return 'table'
-    return 'other'
+    return 'generic'
+
+
+def _get_x_axis_name(metadata, fdata):
+    """Return the X-axis column name for a file."""
+    if metadata.get('auto_x'):
+        return metadata['auto_x']
+
+    ft = metadata.get('file_type') or fdata.get('record', {}).get('type', '')
+    if ft in ('chromatogram', 'text'):
+        return 'Time (min)'
+    if ft == 'uvvis_csv':
+        return 'Wavelength'
+    if ft in ('lcms_cdf', 'lcms_ms_positive', 'lcms_ms_negative'):
+        return 'm/z'
+    if ft in ('lcms_vwd_cdf', 'lcms_uv_a', 'lcms_uv_b'):
+        return 'Time (min)'
+
+    data = fdata.get('data')
+    if data is not None and hasattr(data, 'columns') and len(data.columns) > 0:
+        return data.columns[0]
+
+    return 'unknown'
+
+
+def _get_overlay_group(metadata, fdata):
+    """Return composite key (source_category, x_axis) for overlay grouping.
+
+    Files overlay when they share both the same source type AND the same
+    X-axis name.  This prevents e.g. a chromatogram (Time vs mAU) from
+    mixing with a generic CSV that also has a Time column.
+    """
+    return (_get_source_category(metadata, fdata),
+            _get_x_axis_name(metadata, fdata))
 
 
 def _get_active_file_group(dm, active_file_id):
@@ -198,7 +324,7 @@ def _get_active_file_group(dm, active_file_id):
     if not fdata:
         return None
     metadata = fdata.get('metadata', {})
-    return _classify_file_type(metadata, fdata)
+    return _get_overlay_group(metadata, fdata)
 
 
 def _collect_visible_files(dm, active_file_id=None, loaded_files=None):
@@ -240,20 +366,31 @@ def _collect_visible_files(dm, active_file_id=None, loaded_files=None):
     from collections import defaultdict
     groups = defaultdict(list)
 
+    # First pass: collect all candidate files and their groups
+    candidates = []
+    print(f"🔍 _collect_visible_files: active={active_file_id}, valid_ids={valid_ids}, bundled_main_ids={bundled_main_ids}, bundle_ids={bundle_ids}")
     for fid, fdata in dm.loaded_data.items():
-        # Skip stale data not in the current loaded-files list
         if valid_ids is not None and fid not in valid_ids:
+            print(f"  ❌ {fid}: not in valid_ids")
             continue
         if fid in bundled_main_ids and fid not in bundle_ids:
+            print(f"  ❌ {fid}: bundled main (raw dupe)")
             continue
         if fdata.get('type') == 'lcms_bundle':
+            print(f"  ❌ {fid}: lcms_bundle type")
             continue
-
         metadata = fdata.get('metadata', {})
-        file_type = metadata.get('file_type') or fdata.get('record', {}).get('type', '')
-        group = _classify_file_type(metadata, fdata)
+        group = _get_overlay_group(metadata, fdata)
+        print(f"  ✅ {fid}: group={group}, name={fdata.get('record', {}).get('name', '?')}")
+        candidates.append((fid, fdata, metadata, group))
 
-        # Only include files in the same group as the active file
+    # If active file was deleted/invalid, fall back to the first candidate's group
+    if not target_group and candidates:
+        target_group = candidates[0][3]
+
+    for fid, fdata, metadata, group in candidates:
+        file_type = metadata.get('file_type') or fdata.get('record', {}).get('type', '')
+
         if target_group and group != target_group:
             continue
 
@@ -322,7 +459,8 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
         import json
         try:
             # Parse the component ID from the prop_id
-            component_str = triggered_id.split('.')[0]
+            # Use rsplit to handle IDs containing periods (e.g. "lys - 2.5 mM")
+            component_str = triggered_id.rsplit('.', 1)[0]
             component_id = json.loads(component_str)
             file_id = component_id['index']
             
@@ -344,7 +482,11 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
             log.debug(f"Error parsing callback trigger: {e}")
             return dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update
 
-        log.debug(f"📊 File clicked: {file_id} (tab={active_tab})")
+        print(f"📊 File clicked: {file_id} (tab={active_tab})")
+
+        # Don't redraw if the same file is already active
+        if file_id == active_file:
+            return dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update
 
         # On shared tabs, only update active-file and metadata — don't touch
         # main-plot or pub-data-store (those hold shared analysis data).
@@ -352,25 +494,27 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
 
         # Find the file data - check if it's a bundle first
         file_data = data_manager.get_data_by_id(file_id)
-        
+
         if file_data:
-            log.debug(f"✅ Found direct file data for: {file_id}")
+            print(f"✅ Found direct file data for: {file_id}")
         else:
-            log.debug(f"🔍 No direct data found, checking if it's a bundle...")
-            
+            print(f"🔍 No direct data found for '{file_id}', checking if it's a bundle...")
+            print(f"   loaded_data keys: {list(data_manager.loaded_data.keys())}")
+
             # Check if this is a bundle
             bundle = data_manager.get_bundle_by_id(file_id)
             if bundle and bundle.main_file:
                 # Use the main file's data for the bundle
                 main_file_id = bundle.main_file.get('id')
                 file_data = data_manager.get_data_by_id(main_file_id)
-                
+
                 if file_data:
-                    log.debug(f"✅ Using main file data for bundle: {bundle.base_name}")
+                    print(f"✅ Using main file data for bundle: {bundle.base_name}")
                 else:
-                    log.debug(f"❌ No data found for main file: {main_file_id}")
+                    print(f"❌ No data found for main file: {main_file_id}")
             else:
-                log.debug(f"❌ No bundle found for ID: {file_id}")
+                print(f"❌ No bundle found for ID: {file_id}")
+                print(f"   bundle_manager bundles: {list(data_manager.bundle_manager.bundles.keys())}")
 
         # Check if this is a well selection (file_id contains |)
         if not file_data and '|' in file_id:
@@ -558,10 +702,11 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
         [State('active-file', 'data'),
          State('loaded-files', 'data'),
          State('pub-plot-figure', 'data'),
-         State('current-plot-settings', 'data')],
+         State('current-plot-settings', 'data'),
+         State('selected-peak-idx', 'data')],
         prevent_initial_call=True
     )
-    def handle_view_mode_change(view_mode, plot_trigger, active_file, loaded_files, pub_plot_figure, plot_settings):
+    def handle_view_mode_change(view_mode, plot_trigger, active_file, loaded_files, pub_plot_figure, plot_settings, selected_peak_id):
         """Handle view mode toggle between Raw Data and Analysis Plot."""
         import plotly.graph_objects as go
         from services.plot_settings_service import PlotSettingsService, DEFAULT_PLOT_SETTINGS
@@ -573,7 +718,7 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
         if not ctx.triggered:
             return dash.no_update
 
-        trigger_id = ctx.triggered[0]['prop_id'].split('.')[0]
+        trigger_id = ctx.triggered[0]['prop_id'].rsplit('.', 1)[0]
 
         # If publication plot was updated, only show it if user is in analysis mode.
         if trigger_id == 'pub-plot-trigger':
@@ -608,7 +753,7 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
             figure = plot_manager.create_multi_file_plot(visible_files, layout_mode)
 
             # Overlay peaks (manual baseline + imported + detected)
-            figure = _overlay_peaks_on_figure(data_manager, active_file, figure)
+            figure = _overlay_peaks_on_figure(data_manager, active_file, figure, selected_peak_id)
 
             # Apply current plot settings
             if plot_settings:
@@ -625,24 +770,42 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
     # ------------------------------------------------------------------
     # Re-render raw plot when settings change (while in raw mode)
     # ------------------------------------------------------------------
+    _last_raw_settings = [None]
+
     @app.callback(
         Output('main-plot', 'figure', allow_duplicate=True),
         [Input('current-plot-settings', 'data'),
          Input('peak-change-trigger', 'data')],
         [State('view-mode', 'data'),
          State('active-file', 'data'),
-         State('loaded-files', 'data')],
+         State('loaded-files', 'data'),
+         State('selected-peak-idx', 'data')],
         prevent_initial_call=True,
     )
-    def apply_settings_to_raw_plot(plot_settings, peak_change, view_mode, active_file, loaded_files):
-        """Re-render raw plot when settings change, but only in raw mode."""
+    def apply_settings_to_raw_plot(plot_settings, peak_change, view_mode, active_file, loaded_files, selected_peak_id):
+        """Re-render raw plot when settings change, but only in raw mode.
+
+        Skips redraw when triggered by peak-change-trigger (baseline callback
+        already returned updated figure) or when settings haven't changed
+        (e.g. tab switch that re-hydrates the same values).
+        """
         import plotly.graph_objects as go
         from services.plot_settings_service import PlotSettingsService, DEFAULT_PLOT_SETTINGS
 
         if (view_mode or 'raw') != 'raw' or not active_file:
             return dash.no_update
 
+        ctx = dash.callback_context
+        trigger_id = ctx.triggered[0]['prop_id'].rsplit('.', 1)[0] if ctx.triggered else ''
+        if trigger_id == 'peak-change-trigger':
+            return dash.no_update
+
         s = {**DEFAULT_PLOT_SETTINGS, **(plot_settings or {})}
+
+        if s == _last_raw_settings[0]:
+            return dash.no_update
+        _last_raw_settings[0] = s
+
         layout_mode = s.get('layout_mode', 'overlay')
 
         visible_files = _collect_visible_files(data_manager, active_file, loaded_files)
@@ -652,7 +815,7 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
         fig = plot_manager.create_multi_file_plot(visible_files, layout_mode)
 
         # Overlay peaks
-        fig = _overlay_peaks_on_figure(data_manager, active_file, fig)
+        fig = _overlay_peaks_on_figure(data_manager, active_file, fig, selected_peak_id)
 
         try:
             fig_obj = go.Figure(fig) if isinstance(fig, dict) else fig
