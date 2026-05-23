@@ -18,6 +18,7 @@ from components.data_table_editor import create_data_table_editor
 from components.publication_plot import create_publication_plot
 from callbacks.peak_overlay import overlay_peaks_on_figure, patch_figure_with_peaks, rgba, FILL_COLORS
 from callbacks.baseline_callbacks import get_chromatogram_arrays
+from src.ingestion.types import PlotHint, SourceCategory
 
 log = logging.getLogger('geckoplotter.viz')
 if not log.handlers:
@@ -28,60 +29,30 @@ if not log.handlers:
 
 
 def prepare_table_data(file_data, file_id=None, visible_wells=None):
-    """
-    Prepare data for the table editor, following table_playground.py logic:
-    - For generic CSV: add _row_id column
-    - For UV-Vis: extract only the plotted well data (Wavelength + selected well)
-    - For chromatograms: use time + intensity
-    """
+    """Prepare data for the table editor using StandardizedResult column info."""
     if file_data is None or file_data.get('data') is None:
         return None
-    
+
+    sr = file_data.get('standardized')
     data = file_data['data']
-    file_type = file_data.get('metadata', {}).get('file_type') or file_data.get('type')
-    
-    log.debug(f"🔍 prepare_table_data: file_type={file_type}, visible_wells={visible_wells}, file_id={file_id}")
-    
-    # For UV-Vis data: extract only the well data (no metadata)
-    if file_type == 'uvvis_csv':
-        # If it's a well selection (file_id contains |)
-        if file_id and '|' in file_id:
-            _, well_name = file_id.split('|', 1)
-            if 'Wavelength' in data.columns and well_name in data.columns:
-                # Extract just Wavelength and the selected well
-                table_data = data[['Wavelength', well_name]].copy()
-                table_data = table_data.dropna()
-                log.debug(f"✅ Extracted UV-Vis well data: Wavelength + {well_name} ({len(table_data)} rows)")
-            else:
-                table_data = data.copy()
-                log.debug(f"⚠️ Could not extract well {well_name}, using full data")
-        # If multiple wells are visible, show all visible wells
-        elif visible_wells and len(visible_wells) > 0:
-            cols = ['Wavelength'] + [w for w in visible_wells if w in data.columns]
-            table_data = data[cols].copy()
-            table_data = table_data.dropna()
-            log.debug(f"✅ Extracted UV-Vis data for {len(visible_wells)} wells: {visible_wells} ({len(table_data)} rows)")
+
+    if visible_wells is not None and sr is not None and sr.x_columns:
+        x_col = sr.x_columns[0]
+        cols = [x_col] + [w for w in visible_wells if w in data.columns]
+        table_data = data[cols].copy().dropna()
+    elif file_id and '|' in file_id and sr is not None and sr.x_columns:
+        x_col = sr.x_columns[0]
+        _, item_name = file_id.split('|', 1)
+        if x_col in data.columns and item_name in data.columns:
+            table_data = data[[x_col, item_name]].copy().dropna()
         else:
-            # Show all well data (Wavelength + all wells)
-            # The UV-Vis reader already filtered out metadata - data only contains Wavelength + wells
             table_data = data.copy()
-            log.debug(f"✅ Using full UV-Vis well data: Wavelength + {len(data.columns)-1} wells ({len(table_data)} rows)")
-    # For generic CSV: just use the data as-is
-    elif file_type == 'generic_csv':
-        table_data = data.copy()
-        log.debug(f"✅ Using generic CSV data: {len(table_data)} rows × {len(table_data.columns)} columns")
-        log.debug(f"   Columns: {list(table_data.columns)[:10]}")  # Show first 10 columns
-        log.debug(f"   First row: {table_data.iloc[0].to_dict() if len(table_data) > 0 else 'empty'}")
-    # For chromatograms: use time + intensity
     else:
         table_data = data.copy()
-        log.debug(f"✅ Using chromatogram data: {len(table_data)} rows")
-    
-    # Add _row_id if not present (like table_playground.py does)
+
     if '_row_id' not in table_data.columns:
         table_data.insert(0, '_row_id', range(len(table_data)))
-        log.debug(f"✅ Added _row_id column")
-    
+
     return table_data
 
 
@@ -90,46 +61,37 @@ def prepare_table_data(file_data, file_id=None, visible_wells=None):
 # and FILL_COLORS have been extracted to callbacks/peak_overlay.py
 
 
+def _has_meaningful_raw_plot(file_data):
+    """Return True if the file has a good raw plot (don't auto-switch to analysis)."""
+    sr = file_data.get('standardized')
+    if sr is None:
+        return False
+    return bool(sr.x_columns and sr.y_columns)
+
+
 def _get_source_category(metadata, fdata):
-    """Return the instrument/source category for a file."""
-    ft = metadata.get('file_type') or fdata.get('record', {}).get('type', '')
-    if ft in ('chromatogram', 'text'):
-        return 'chromatogram'
-    if ft == 'uvvis_csv':
-        return 'uvvis'
-    if ft in ('lcms_cdf', 'lcms_ms_positive', 'lcms_ms_negative'):
-        return 'lcms_ms'
-    if ft == 'lcms_bundle':
+    """Return the source category from StandardizedResult."""
+    sr = fdata.get('standardized')
+    if sr is not None:
+        return sr.source_category.value
+    if fdata.get('type') == 'lcms_bundle':
         bundle_data = fdata.get('bundle_data') or {}
         if bundle_data.get('ms_positive') or bundle_data.get('ms_negative'):
             return 'lcms_ms'
-        if bundle_data.get('vwd_a') or bundle_data.get('vwd_b'):
-            return 'lcms_uv'
-        return 'lcms_uv'
-    if ft in ('lcms_vwd_cdf', 'lcms_uv_a', 'lcms_uv_b'):
         return 'lcms_uv'
     return 'generic'
 
 
 def _get_x_axis_name(metadata, fdata):
-    """Return the X-axis column name for a file."""
+    """Return the X-axis column name from StandardizedResult."""
+    sr = fdata.get('standardized')
+    if sr is not None and sr.x_columns:
+        return sr.x_columns[0]
     if metadata.get('auto_x'):
         return metadata['auto_x']
-
-    ft = metadata.get('file_type') or fdata.get('record', {}).get('type', '')
-    if ft in ('chromatogram', 'text'):
-        return 'Time (min)'
-    if ft == 'uvvis_csv':
-        return 'Wavelength'
-    if ft in ('lcms_cdf', 'lcms_ms_positive', 'lcms_ms_negative'):
-        return 'm/z'
-    if ft in ('lcms_vwd_cdf', 'lcms_uv_a', 'lcms_uv_b', 'lcms_bundle'):
-        return 'Time (min)'
-
     data = fdata.get('data')
     if data is not None and hasattr(data, 'columns') and len(data.columns) > 0:
         return data.columns[0]
-
     return 'unknown'
 
 
@@ -286,20 +248,20 @@ def _collect_visible_files(dm, active_file_id=None, loaded_files=None):
         target_group = candidates[0][3]
 
     for fid, fdata, metadata, group in candidates:
-        file_type = metadata.get('file_type') or fdata.get('record', {}).get('type', '')
-
         if target_group and group != target_group:
             continue
 
-        if file_type == 'uvvis_csv':
-            filled_wells = metadata.get('filled_wells', [])
+        sr = fdata.get('standardized')
+        if sr is not None and sr.plot_hint == PlotHint.MULTI_Y and sr.x_columns:
+            filled_wells = metadata.get('filled_wells', sr.y_columns)
             vis_wells = []
             for well in filled_wells:
                 well_id = f"{fid}|{well}"
                 if vis_state.get(well_id, True):
                     vis_wells.append(well)
             if vis_wells:
-                sub_df = fdata['data'][['Wavelength'] + vis_wells].copy()
+                x_col = sr.x_columns[0]
+                sub_df = fdata['data'][[x_col] + [w for w in vis_wells if w in fdata['data'].columns]].copy()
                 sub_data = {**fdata, 'data': sub_df}
                 name = fdata.get('record', {}).get('name', fid)
                 groups[group].append((name, sub_data))
@@ -315,13 +277,6 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
     """Register visualization-related callbacks."""
 
     plot_manager = PlotManager()
-
-    # File types that have a dedicated raw-data plot and should NOT auto-switch
-    KNOWN_RAW_TYPES = {
-        'chromatogram', 'text', 'uvvis_csv',
-        'lcms_cdf', 'lcms_ms_positive', 'lcms_ms_negative',
-        'lcms_vwd_cdf', 'lcms_uv_a', 'lcms_uv_b', 'lcms_bundle',
-    }
 
     @app.callback(
         [Output('main-plot', 'figure', allow_duplicate=True),
@@ -423,12 +378,7 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
             
             if file_data:
                 log.debug(f"✅ Using well {well_name} from file {parent_file_id}")
-                # Modify the plot manager call to handle well selection
-                figure = plot_manager.create_uvvis_plot(
-                    file_data['data'], 
-                    file_data['metadata'], 
-                    selected_columns=[well_name]
-                )
+                figure = plot_manager.get_plot_for_file(file_data)
                 data_table = create_data_table(file_data)
                 # Load data into table editor for publication plotting - extract only the plotted well
                 table_data = prepare_table_data(file_data, file_id=file_id, visible_wells=[well_name])
@@ -474,18 +424,14 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
             log.debug(f"✅ File metadata table created")
 
         # Create the plot
+        sr = file_data.get('standardized')
         metadata = file_data.get('metadata', {})
-        file_type = metadata.get('file_type') or file_data.get('type')
-        
-        # Initialize visible_wells for UV-Vis data
+
         visible_wells = None
 
-        if file_type == 'uvvis_csv':
-            # For UV-Vis files, check visibility state
-            filled_wells = file_data.get('metadata', {}).get('filled_wells', [])
+        if sr is not None and sr.plot_hint == PlotHint.MULTI_Y and sr.x_columns:
+            filled_wells = metadata.get('filled_wells', sr.y_columns)
             visible_wells = []
-            
-            # Check which wells are visible
             for well in filled_wells:
                 well_id = f"{file_id}|{well}"
                 is_visible = True
@@ -493,45 +439,42 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
                     is_visible = data_manager.visibility_state.get(well_id, True)
                 if is_visible:
                     visible_wells.append(well)
-            
-            if visible_wells:
-                figure = plot_manager.create_uvvis_plot(
-                    file_data['data'], 
-                    file_data['metadata'], 
-                    selected_columns=visible_wells
-                )
-                log.debug(f"🎨 Plotted UV-Vis with {len(visible_wells)} visible wells: {visible_wells}")
-                log.debug(f"📊 Will extract table data for wells: {visible_wells}")
-            else:
-                # All wells hidden, show empty plot
-                figure = plot_manager.create_empty_plot("All wells hidden")
-                log.debug("🚫 All UV-Vis wells hidden, showing empty plot")
-        elif file_type in {'lcms_cdf', 'lcms_bundle'} or (bundle and getattr(bundle, 'bundle_type', '') == 'lcms'):
-            # LCMS bundle or component selection
-            component_metadata = metadata
-            component_data = file_data.get('data')
 
-            # If user clicked bundle parent, default to positive TIC if available
-            if file_type == 'lcms_bundle' or bundle:
+            if visible_wells:
+                from src.ingestion.types import StandardizedResult
+                filtered_data = sr.data[[sr.x_columns[0]] + [w for w in visible_wells if w in sr.data.columns]].copy()
+                figure = plot_manager.create_standardized_plot(
+                    StandardizedResult(
+                        data=filtered_data,
+                        column_roles={c: r for c, r in sr.column_roles.items() if c in filtered_data.columns},
+                        identity=sr.identity,
+                        plot_hint=sr.plot_hint,
+                        source_category=sr.source_category,
+                        sample_name=sr.sample_name,
+                        metadata=sr.metadata,
+                    )
+                )
+            else:
+                figure = plot_manager.create_empty_plot("All wells hidden")
+
+        elif sr is not None and sr.source_category in (SourceCategory.LCMS_MS, SourceCategory.LCMS_UV):
+            bundle = data_manager.get_bundle_by_id(file_id)
+            if not bundle and '|' in file_id:
+                parent_id = file_id.split('|', 1)[0]
+                bundle = data_manager.get_bundle_by_id(parent_id)
+
+            if bundle:
                 lcms_bundle = (
                     data_manager.get_lcms_bundle_by_id(file_id)
                     or data_manager.lcms_bundles.get(bundle.base_name if bundle else file_id)
                 )
-                preferred_component = None
+                preferred = None
                 if lcms_bundle:
-                    preferred_component = lcms_bundle.get('ms_positive') or lcms_bundle.get('ms_negative') or lcms_bundle.get('vwd_a') or lcms_bundle.get('vwd_b')
-                if preferred_component:
-                    component_data = preferred_component['data']
-                    component_metadata = preferred_component['metadata']
+                    preferred = lcms_bundle.get('ms_positive') or lcms_bundle.get('ms_negative') or lcms_bundle.get('vwd_a') or lcms_bundle.get('vwd_b')
+                if preferred and preferred.get('standardized'):
+                    figure = plot_manager.create_standardized_plot(preferred['standardized'])
                 else:
-                    log.debug("⚠️ No LCMS components found for bundle, showing placeholder")
-
-            # Decide plot type based on metadata
-            component_type = metadata.get('component_type') or file_type
-            if component_type in {'ms_positive', 'ms_negative', 'lcms_ms_positive', 'lcms_ms_negative', 'lcms_cdf'}:
-                figure = plot_manager.create_lcms_tic_plot(component_data, component_metadata)
-            elif component_type in {'vwd_a', 'vwd_b', 'lcms_uv_a', 'lcms_uv_b', 'lcms_vwd_cdf'}:
-                figure = plot_manager.create_lcms_uv_plot(component_data, component_metadata)
+                    figure = plot_manager.get_plot_for_file(file_data)
             else:
                 figure = plot_manager.get_plot_for_file(file_data)
         else:
@@ -540,7 +483,7 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
         log.debug(f"🎉 Plot created successfully!")
 
         # Create table editor for publication plotting - use smart data extraction
-        table_data = prepare_table_data(file_data, file_id=file_id, visible_wells=visible_wells if file_type == 'uvvis_csv' else None)
+        table_data = prepare_table_data(file_data, file_id=file_id, visible_wells=visible_wells)
         table_editor = create_data_table_editor(table_data, table_id='pub-table')
         # On shared tabs, don't overwrite pub-data-store with per-file data
         # — it holds the shared table data that the plot needs.
@@ -578,21 +521,9 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
         # On shared tabs, don't change view mode.
         if on_shared_tab:
             new_view_mode = dash.no_update
-        elif file_type not in KNOWN_RAW_TYPES:
-            sr = file_data.get('standardized')
-            has_auto_axes = False
-            if sr is not None:
-                has_auto_axes = bool(sr.x_columns and sr.y_columns)
-            else:
-                has_auto_axes = bool(
-                    metadata.get('auto_x') and metadata.get('auto_y')
-                )
-            if has_auto_axes:
-                new_view_mode = 'raw'
-                log.debug(f"📊 Showing raw plot for generic CSV with auto-detected axes")
-            else:
-                new_view_mode = 'analysis'
-                log.debug(f"🔀 Auto-switching to analysis mode for file type: {file_type}")
+        elif not _has_meaningful_raw_plot(file_data):
+            new_view_mode = 'analysis'
+            log.debug(f"🔀 Auto-switching to analysis mode (no meaningful raw plot)")
         else:
             new_view_mode = dash.no_update
 
