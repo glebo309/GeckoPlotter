@@ -13,11 +13,6 @@ import copy
 from datetime import datetime
 from typing import Dict, Any, List, Optional
 
-from services.readers.chromatogram_reader import ChromatogramReader
-from services.readers.uvvis_csv_reader import UVVISCSVReader
-from services.readers.generic_csv_reader import GenericCSVReader
-from services.readers.lcms_cdf_reader import LCMSCDFReader
-from services.readers.lcms_vwd_cdf_reader import LCMSVWDCDFReader
 from .bundle_manager import BundleManager
 from .peak_service import PeakService
 from .calibration_service import CalibrationService
@@ -61,14 +56,12 @@ def guess_file_type(filename: str) -> str:
     return "unknown"
 
 
-def _build_preview(content: bytes, file_type: str) -> str:
-    if file_type in {"text", "uvvis_csv", "csv", "chromatogram", "structured", "generic_csv"}:
-        try:
-            text = content.decode("utf-8", errors="replace")
-        except UnicodeDecodeError:
-            return "Binary content"
+def _build_preview(content: bytes) -> str:
+    try:
+        text = content.decode("utf-8", errors="replace")
         return text[:200] + ("..." if len(text) > 200 else "")
-    return f"Binary content ({file_type})"
+    except Exception:
+        return "Binary content"
 
 def _pretty_size(num_bytes: int) -> str:
     step = 1024.0
@@ -108,7 +101,7 @@ def create_file_records(
                 if last_modified
                 else ""
             ),
-            "preview": _build_preview(payload, file_type),
+            "preview": _build_preview(payload),
             "encoded": contents,
         }
         records.append(record)
@@ -176,15 +169,6 @@ class DataManager:
 
         # Maps runtime file_id → filename for persistence lookups
         self._id_to_filename: Dict[str, str] = {}
-
-        # Initialize readers
-        self.readers = {
-            'chromatogram': ChromatogramReader,
-            'uvvis_csv': UVVISCSVReader,
-            'generic_csv': GenericCSVReader,
-            'lcms_cdf': LCMSCDFReader,
-            'lcms_vwd_cdf': LCMSVWDCDFReader,
-        }
 
         # ── Domain services ──────────────────────────────────────────
         # These are the canonical owners of scientific state.
@@ -399,166 +383,79 @@ class DataManager:
             self.delete_publication_memory(file_id)
 
     def load_file_data(self, file_record: Dict[str, Any]) -> Optional[Dict[str, Any]]:
-        """Load actual data from a file record using appropriate reader."""
+        """Load actual data from a file record via the ingestion pipeline."""
         try:
-            # Create temporary file
             content_bytes = _decode_content(file_record['encoded'])
             temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=f"_{file_record['name']}")
             temp_file.write(content_bytes)
             temp_file.close()
-
-            # Track temp file for cleanup
             self.temp_files.append(temp_file.name)
 
-            standardized = ingest_file(temp_file.name, file_record['name'])
+            sr = ingest_file(temp_file.name, file_record['name'])
+            if sr is None:
+                log.error(f"Pipeline could not parse {file_record['name']}")
+                return None
 
-            # Use the pipeline's detection to pick the legacy reader.
-            # The pipeline already did content-based sniffing — trust it
-            # instead of repeating brittle keyword checks.
-            file_type = self._file_type_from_pipeline(standardized, file_record['name'], temp_file.name)
-
-            if file_type:
-                file_record['type'] = file_type
-
-            # Register the file_id ↔ filename mapping so persistent state
-            # can be looked up by filename across sessions.
             self.register_file_id(file_record['id'], file_record['name'])
-
             file_id = file_record['id']
-            reader_ok = False
-            data = None
-            metadata = {}
-            reader = None
 
-            if file_type and file_type in self.readers:
-                reader = self.readers[file_type]()
-                try:
-                    reader_ok = reader.load_file(temp_file.name)
-                except Exception as e:
-                    log.warning(f"Reader {file_type} failed for {file_record['name']}: {e}")
+            data = sr.data
+            metadata = dict(sr.metadata)
+            metadata['file_name'] = file_record['name']
+            if sr.sample_name:
+                metadata['sample_name'] = sr.sample_name
+            if sr.x_columns:
+                metadata['auto_x'] = sr.x_columns[0]
+            if sr.y_columns:
+                metadata['auto_y'] = sr.y_columns
 
-                if reader_ok:
-                    data = reader.get_data()
-                    metadata = reader.get_metadata()
-                    if standardized and standardized.x_columns:
-                        metadata['auto_x'] = standardized.x_columns[0]
-                    if standardized and standardized.y_columns:
-                        metadata['auto_y'] = standardized.y_columns
+            from src.ingestion.types import SourceCategory
 
-            # If the dedicated reader failed but the ingestion pipeline
-            # produced a StandardizedResult, use that instead.  This is
-            # the critical fallback that ensures *any* parseable CSV is
-            # always visible in the Data Overview and plottable.
-            if not reader_ok and standardized is not None:
-                data = standardized.data
-                metadata = {
-                    'file_type': 'generic_csv',
-                    'file_name': file_record['name'],
-                    'rows': len(standardized.data),
-                    'columns': len(standardized.data.columns),
-                    'column_names': list(standardized.data.columns),
-                }
-                if standardized.sample_name:
-                    metadata['sample_name'] = standardized.sample_name
-                if standardized.x_columns:
-                    metadata['auto_x'] = standardized.x_columns[0]
-                if standardized.y_columns:
-                    metadata['auto_y'] = standardized.y_columns
-                metadata.update(standardized.metadata)
-                file_type = 'generic_csv'
-                file_record['type'] = file_type
-                log.debug(f"Reader failed, falling back to ingestion pipeline for {file_record['name']}")
+            # LCMS bundling
+            if sr.source_category in (SourceCategory.LCMS_MS, SourceCategory.LCMS_UV):
+                base_name = self.extract_lcms_base_name(file_record['name'])
+                self._init_lcms_bundle(base_name)
+                bundle = self.lcms_bundles[base_name]
+                if file_id not in bundle['files']:
+                    bundle['files'].append(file_id)
 
-            if data is not None:
-                if file_type in {'lcms_cdf', 'lcms_vwd_cdf'}:
-                    base_name = self.extract_lcms_base_name(file_record['name'])
-                    self._init_lcms_bundle(base_name)
-                    bundle = self.lcms_bundles[base_name]
-                    if file_id not in bundle['files']:
-                        bundle['files'].append(file_id)
-
-                    component_entry = {
-                        'id': file_id,
-                        'record': file_record,
-                        'data': data,
-                        'metadata': metadata,
-                        'reader': reader,
-                        'type': file_type,
-                    }
-
-                    if standardized is not None:
-                        component_entry['standardized'] = standardized
-
-                    if file_type == 'lcms_cdf':
-                        mode = metadata.get('ionization_mode', 'unknown')
-                        key = 'ms_positive' if mode == 'positive' else 'ms_negative' if mode == 'negative' else None
-                    else:
-                        channel = metadata.get('detector_channel', 'Unknown')
-                        key = 'vwd_a' if channel == 'A' else 'vwd_b' if channel == 'B' else None
-
-                    if key:
-                        bundle[key] = component_entry
-
-                    self.loaded_data[file_id] = component_entry
-                    self._update_lcms_bundle_metadata(base_name)
-
-                    log.debug(f"Loaded {file_record['name']} as {file_type} (LCMS bundle {base_name})")
-                    return component_entry
-
-                # Non-LCMS storage
                 entry = {
+                    'id': file_id,
                     'record': file_record,
                     'data': data,
                     'metadata': metadata,
-                    'reader': reader,
-                    'type': file_type
+                    'standardized': sr,
                 }
-                if standardized is not None:
-                    entry['standardized'] = standardized
+
+                if sr.source_category == SourceCategory.LCMS_MS:
+                    mode = metadata.get('ionization_mode', 'unknown')
+                    key = 'ms_positive' if mode == 'positive' else 'ms_negative' if mode == 'negative' else None
+                else:
+                    channel = metadata.get('detector_channel', 'Unknown')
+                    key = 'vwd_a' if channel == 'A' else 'vwd_b' if channel == 'B' else None
+
+                if key:
+                    bundle[key] = entry
 
                 self.loaded_data[file_id] = entry
+                self._update_lcms_bundle_metadata(base_name)
+                log.debug(f"Loaded {file_record['name']} as {sr.identity.detected_format} (LCMS bundle {base_name})")
+                return entry
 
-                log.debug(f"Loaded {file_record['name']} as {file_type}")
-                return self.loaded_data[file_id]
-
-            log.error(f"Could not load {file_record['name']} - no reader succeeded and no pipeline result")
-            return None
+            # Standard (non-LCMS) storage
+            entry = {
+                'record': file_record,
+                'data': data,
+                'metadata': metadata,
+                'standardized': sr,
+            }
+            self.loaded_data[file_id] = entry
+            log.debug(f"Loaded {file_record['name']} as {sr.identity.detected_format}")
+            return entry
 
         except Exception as e:
             log.error(f"Error loading {file_record['name']}: {str(e)}")
             return None
-
-    # ------------------------------------------------------------------
-    # Pipeline → legacy reader mapping
-    # ------------------------------------------------------------------
-    _PIPELINE_TO_READER = {
-        'chromeleon_txt': 'chromatogram',
-        'plate_reader_csv': 'uvvis_csv',
-        'lcms_cdf': 'lcms_cdf',
-        'lcms_vwd_cdf': 'lcms_vwd_cdf',
-    }
-
-    def _file_type_from_pipeline(
-        self, standardized, filename: str, file_path: str
-    ) -> Optional[str]:
-        """Map the ingestion pipeline's detected format to a legacy reader key.
-
-        For CSVs and TXTs the pipeline already did real content sniffing, so
-        we trust its result.  Only fall back to the old extension-based
-        ``detect_file_type`` for formats the pipeline doesn't cover (e.g.
-        CDF binary files that need netCDF4).
-        """
-        if standardized is not None:
-            fmt = standardized.identity.detected_format
-            mapped = self._PIPELINE_TO_READER.get(fmt)
-            if mapped:
-                return mapped
-            # Any other pipeline format (cary_kinetics, heuristic, …)
-            # is tabular data the generic reader can handle.
-            return 'generic_csv'
-
-        # Pipeline returned None — use old extension-based detection
-        return self.detect_file_type(filename, file_path)
 
     # ------------------------------------------------------------------
     # LC-MS bundle helpers
@@ -577,46 +474,6 @@ class DataManager:
 
     def remove_lcms_bundle(self, base_name: str) -> Optional[Dict[str, Any]]:
         return self.lcms_bundles.pop(base_name, None)
-
-    def detect_file_type(self, filename: str, file_path: Optional[str] = None) -> Optional[str]:
-        """Determine which reader to use based on filename and content."""
-        filename_lower = filename.lower()
-
-        if filename_lower.endswith('.txt'):
-            if file_path:
-                try:
-                    with open(file_path, 'r', encoding='utf-8') as f:
-                        head = f.read(2048)
-                    if 'Raw Data:' in head and ('Time (min)' in head or 'Value (mAU)' in head):
-                        return 'chromatogram'
-                except Exception:
-                    pass
-            return 'chromatogram'
-
-        if filename_lower.endswith('.csv'):
-            # Check file content to distinguish UV-Vis from generic CSV
-            if file_path:
-                try:
-                    with open(file_path, 'r', encoding='utf-8') as f:
-                        # Read first 50 lines to check for "Wavelength" header (plate readers have lots of metadata)
-                        for i, line in enumerate(f):
-                            if i > 50:  # Check first 50 lines for plate reader files
-                                break
-                            if 'Wavelength' in line:
-                                log.debug(f"Found 'Wavelength' in line {i} - detected as UV-Vis CSV")
-                                return 'uvvis_csv'
-                        log.warning(f"No 'Wavelength' found in first 50 lines - treating as generic CSV")
-                except Exception as e:
-                    log.error(f"Error checking CSV content: {e}")
-            # Default to generic CSV for simple tabular data
-            return 'generic_csv'
-        
-        if filename_lower.endswith('.cdf'):
-            if any(tag in filename_lower for tag in ['vwd', 'uvw', 'uv-']):
-                return 'lcms_vwd_cdf'
-            return 'lcms_cdf'
-
-        return None
 
     @staticmethod
     def extract_lcms_base_name(filename: str) -> str:
