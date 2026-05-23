@@ -613,17 +613,16 @@ class DataManager:
             
             bundle_id = None
             
-            # Check actual detected type from loaded data (more reliable than record type)
-            actual_type = file_type
-            if file_id in self.loaded_data:
-                actual_type = (self.loaded_data[file_id].get('metadata', {}).get('file_type')
-                              or self.loaded_data[file_id].get('type')
-                              or file_type)
+            # Use StandardizedResult for routing decisions
+            loaded_entry = self.loaded_data.get(file_id, {})
+            sr = loaded_entry.get('standardized')
+            loaded_meta = loaded_entry.get('metadata', {})
+
+            from src.ingestion.types import SourceCategory, PlotHint
 
             # Try Chromeleon bundle first (for HPLC chromatogram files)
-            # Content-based: use parsed metadata (injection name) rather than filename
-            if actual_type == 'chromatogram':
-                loaded_meta = self.loaded_data.get(file_id, {}).get('metadata', {})
+            is_chromatogram = (sr is not None and sr.source_category == SourceCategory.CHROMATOGRAM)
+            if is_chromatogram:
                 log.debug(f"Trying to create Chromeleon bundle for: {file_name} (injection={loaded_meta.get('injection')})")
                 bundle_id = self.bundle_manager.try_create_chromeleon_bundle(file_record, metadata=loaded_meta)
                 if bundle_id:
@@ -631,11 +630,10 @@ class DataManager:
                     bundled_file_ids.add(file_id)
                 else:
                     log.error(f"Failed to create Chromeleon bundle for: {file_name}")
-            
-            # UV-Vis files get wells as children (like old system)
-            elif file_type == 'uvvis_csv' and file_id in self.loaded_data:
-                file_data = self.loaded_data[file_id]
-                filled_wells = file_data.get('metadata', {}).get('filled_wells', [])
+
+            # Multi-well files get wells as children
+            elif sr is not None and sr.plot_hint == PlotHint.MULTI_Y:
+                filled_wells = loaded_meta.get('filled_wells', [])
                 
                 log.debug(f"UV-Vis file {file_name}: {len(filled_wells)} wells found: {filled_wells[:5]}")
                 
@@ -706,12 +704,13 @@ class DataManager:
                 continue
 
             if file_id not in bundled_file_ids:
-                if file_type in {'lcms_cdf', 'lcms_vwd_cdf'}:
+                ind_entry = self.loaded_data.get(file_id, {})
+                ind_sr = ind_entry.get('standardized')
+                if ind_sr is not None and ind_sr.source_category in (SourceCategory.LCMS_MS, SourceCategory.LCMS_UV):
                     log.debug(f"LCMS component {file_name} not in bundle yet, showing individually")
-                    # fall through to add individually (helps debugging)
                 log.debug(f"Adding individual file: {file_name} (ID: {file_id})")
-                # For UV-Vis files, add wells as children (like old system)
-                if file_type == 'uvvis_csv' and file_id in self.loaded_data:
+                # Multi-well files get wells as children
+                if ind_sr is not None and ind_sr.plot_hint == PlotHint.MULTI_Y and file_id in self.loaded_data:
                     file_data = self.loaded_data[file_id]
                     filled_wells = file_data.get('metadata', {}).get('filled_wells', [])
                     
