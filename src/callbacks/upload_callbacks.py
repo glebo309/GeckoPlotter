@@ -293,94 +293,80 @@ def render_bundle_item_selected(bundle_item: dict, is_selected: bool = False, da
                 )
             ], style={'gridArea': 'expand', 'display': 'flex', 'alignItems': 'center'}),
             
-            # File content (clickable for selection)
+            # Bundle content (clickable for selection)
             html.Div([
-                html.Span(bundle_icon, style={'marginRight': '8px'}),
-                html.Div([
-                    html.Div(bundle_item.get('name'), style={'fontWeight': 'bold'}),
-                    html.Div(bundle_item.get('size_display', ''), style={'fontSize': '12px', 'color': '#666'}),
-                ], style={'flex': '1'})
-            ], 
+                html.Span(bundle_icon, style={'marginRight': '6px', 'fontSize': '11px', 'flexShrink': '0'}),
+                html.Span(bundle_item.get('name'), style={
+                    'fontWeight': '600', 'overflow': 'hidden', 'textOverflow': 'ellipsis',
+                    'whiteSpace': 'nowrap', 'flex': '1',
+                }),
+                html.Span(bundle_item.get('size_display', ''), style={
+                    'fontSize': '10px', 'color': '#999', 'marginLeft': '6px', 'flexShrink': '0',
+                }),
+            ],
             className='file-tree-item',
-            id={'type': 'file-tree-item', 'index': bundle_id}, 
+            id={'type': 'file-tree-item', 'index': bundle_id},
             n_clicks=0,
             style={
                 'gridArea': 'content',
                 'display': 'flex',
                 'alignItems': 'center',
                 'cursor': 'pointer',
-                'padding': '4px 8px',
-                'borderRadius': '4px',
+                'padding': '1px 6px',
+                'borderRadius': '3px',
                 'backgroundColor': bg_color,
-                'border': f'1px solid {border_color}',
-                'transition': 'all 0.2s',
-                'flex': '1'
+                'borderLeft': f'2px solid {"#ff6b35" if is_selected else "transparent"}',
+                'transition': 'all 0.15s',
+                'flex': '1',
+                'lineHeight': '1.4',
             }),
-            
+
             # Control buttons
             html.Div([
                 html.Button(
-                    # Default visibility state for bundle
                     '👁',
                     id={'type': 'visibility-btn', 'index': bundle_id},
-                    title='Toggle visibility (affects all children)',
+                    title='Toggle visibility',
+                    className='tree-action-btn',
                     style={
-                        'background': 'none',
-                        'border': 'none',
-                        'cursor': 'pointer',
-                        'padding': '0 4px',
-                        'fontSize': '14px',
-                        'opacity': '1.0',
-                        'width': '24px',
-                        'height': '24px',
-                        'display': 'flex',
-                        'alignItems': 'center',
-                        'justifyContent': 'center',
-                        'borderRadius': '3px'
+                        'background': 'none', 'border': 'none', 'cursor': 'pointer',
+                        'padding': '0', 'fontSize': '11px', 'opacity': '0.6',
+                        'width': '18px', 'height': '18px',
+                        'display': 'flex', 'alignItems': 'center', 'justifyContent': 'center',
                     }
                 ),
                 html.Button(
                     '🗑',
                     id={'type': 'delete-btn', 'index': bundle_id},
                     title='Delete bundle',
+                    className='tree-action-btn',
                     style={
-                        'background': 'none',
-                        'border': 'none',
-                        'cursor': 'pointer',
-                        'padding': '0 4px',
-                        'fontSize': '14px',
-                        'color': '#dc3545',
-                        'width': '24px',
-                        'height': '24px',
-                        'display': 'flex',
-                        'alignItems': 'center',
-                        'justifyContent': 'center',
-                        'borderRadius': '3px'
+                        'background': 'none', 'border': 'none', 'cursor': 'pointer',
+                        'padding': '0', 'fontSize': '11px', 'opacity': '0.4',
+                        'width': '18px', 'height': '18px',
+                        'display': 'flex', 'alignItems': 'center', 'justifyContent': 'center',
                     }
                 ),
-            ], style={
-                'gridArea': 'buttons',
-                'display': 'flex',
-                'gap': '2px',
-                'alignItems': 'center'
+            ], className='tree-action-group', style={
+                'gridArea': 'buttons', 'display': 'flex', 'gap': '0', 'alignItems': 'center'
             })
         ], style={
             'display': 'grid',
             'gridTemplateColumns': 'auto 1fr auto',
             'gridTemplateAreas': '"expand content buttons"',
             'alignItems': 'center',
-            'gap': '4px',
-            'padding': '4px',
-            'margin': '2px 0',
-            'borderRadius': '4px',
+            'gap': '2px',
+            'padding': '2px',
+            'margin': '1px 0',
+            'borderRadius': '3px',
             'transition': 'all 0.2s'
         }),
-        
+
         # Children (initially collapsed)
         html.Div([
-            render_individual_file_item(child, is_child=True, data_manager=data_manager) 
+            render_individual_file_item(child, is_child=True, data_manager=data_manager)
             for child in bundle_item.get('children', [])
-        ], style={'marginLeft': '20px', 'display': children_display}, 
+        ], style={'marginLeft': '16px', 'display': children_display},
           id={'type': 'bundle-children', 'index': bundle_id})
     ], className='bundle-item')
 
@@ -519,10 +505,10 @@ def render_individual_file_item_selected(item: dict, is_selected: bool = False, 
                     'gridTemplateColumns': 'auto 1fr auto',
                     'gridTemplateAreas': '"expand content buttons"',
                     'alignItems': 'center',
-                    'gap': '4px',
-                    'padding': '4px',
+                    'gap': '2px',
+                    'padding': '2px',
                     'margin': '1px 0',
-                    'borderRadius': '4px',
+                    'borderRadius': '3px',
                     'transition': 'all 0.2s'
                 })
             ])
@@ -566,90 +552,74 @@ def render_individual_file_item_selected(item: dict, is_selected: bool = False, 
             
             # File content (clickable for selection)
             html.Div([
-                html.Span(icon, style={'marginRight': '8px'}),
-                html.Div([
-                    html.Div(item.get('name'), style={'fontWeight': '500'}),
-                    html.Div(
-                        f"{item.get('type', 'unknown').capitalize()} · {item.get('size_display')}",
-                        style={'fontSize': '12px', 'color': '#666'},
-                    ),
-                ], style={'flex': '1'})
-            ], 
+                html.Span(icon, style={'marginRight': '6px', 'fontSize': '11px', 'flexShrink': '0'}),
+                html.Span(item.get('name'), style={
+                    'overflow': 'hidden', 'textOverflow': 'ellipsis', 'whiteSpace': 'nowrap', 'flex': '1',
+                    'fontWeight': '500' if is_selected else '400',
+                }),
+                html.Span(item.get('size_display', ''), style={
+                    'fontSize': '10px', 'color': '#999', 'marginLeft': '6px', 'flexShrink': '0',
+                }),
+            ],
             className='file-tree-item',
-            id={'type': 'file-tree-item', 'index': file_id}, 
+            id={'type': 'file-tree-item', 'index': file_id},
             n_clicks=0,
+            title=f"{item.get('type', 'unknown').capitalize()} · {item.get('size_display', '')}",
             style={
                 'gridArea': 'content',
                 'display': 'flex',
                 'alignItems': 'center',
                 'cursor': 'pointer',
-                'padding': '4px 8px',
-                'borderRadius': '4px',
+                'padding': '1px 6px',
+                'borderRadius': '3px',
                 'backgroundColor': bg_color,
-                'border': f'1px solid {border_color}',
-                'transition': 'all 0.2s',
-                'flex': '1'
+                'borderLeft': f'2px solid {"#ff6b35" if is_selected else "transparent"}',
+                'transition': 'all 0.15s',
+                'flex': '1',
+                'lineHeight': '1.4',
             }),
             
-            # Control buttons (only for non-child items)
+            # Control buttons
             html.Div([
                 html.Button(
-                    # Default visibility state
                     '👁',
                     id={'type': 'visibility-btn', 'index': file_id},
                     title='Toggle visibility',
+                    className='tree-action-btn',
                     style={
-                        'background': 'none',
-                        'border': 'none',
-                        'cursor': 'pointer',
-                        'padding': '0 4px',
-                        'fontSize': '14px',
-                        'opacity': '1.0',
-                        'width': '24px',
-                        'height': '24px',
-                        'display': 'flex',
-                        'alignItems': 'center',
-                        'justifyContent': 'center',
-                        'borderRadius': '3px'
+                        'background': 'none', 'border': 'none', 'cursor': 'pointer',
+                        'padding': '0', 'fontSize': '11px', 'opacity': '0.6',
+                        'width': '18px', 'height': '18px',
+                        'display': 'flex', 'alignItems': 'center', 'justifyContent': 'center',
                     }
                 ),
                 html.Button(
                     '🗑',
                     id={'type': 'delete-btn', 'index': file_id},
                     title='Delete file',
+                    className='tree-action-btn',
                     style={
-                        'background': 'none',
-                        'border': 'none',
-                        'cursor': 'pointer',
-                        'padding': '0 4px',
-                        'fontSize': '14px',
-                        'color': '#dc3545',
-                        'width': '24px',
-                        'height': '24px',
-                        'display': 'flex',
-                        'alignItems': 'center',
-                        'justifyContent': 'center',
-                        'borderRadius': '3px'
+                        'background': 'none', 'border': 'none', 'cursor': 'pointer',
+                        'padding': '0', 'fontSize': '11px', 'opacity': '0.4',
+                        'width': '18px', 'height': '18px',
+                        'display': 'flex', 'alignItems': 'center', 'justifyContent': 'center',
                     }
                 ),
-            ], style={
-                'gridArea': 'buttons',
-                'display': 'flex',
-                'gap': '2px',
-                'alignItems': 'center'
-            })  # Show buttons for all items including children
+            ], className='tree-action-group', style={
+                'gridArea': 'buttons', 'display': 'flex', 'gap': '0', 'alignItems': 'center',
+            })
         ], style={
             'display': 'grid',
             'gridTemplateColumns': 'auto 1fr auto',
             'gridTemplateAreas': '"expand content buttons"',
             'alignItems': 'center',
-            'padding': '4px',
+            'padding': '2px',
             'margin': '1px 0',
-            'borderRadius': '4px',
+            'borderRadius': '3px',
             'transition': 'all 0.2s'
         })
     ])
-    
+
     # Return main item with children (initially collapsed)
     if children:
         # Check if this file should be expanded based on stored collapse state

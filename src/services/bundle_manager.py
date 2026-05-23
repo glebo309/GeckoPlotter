@@ -32,9 +32,10 @@ class BundleManager:
             'main': r'^(.+)_UV_VIS_\d+\.txt$',
             'auxiliary': [
                 r'^(.+)_SST\.txt$',
-                r'^(.+)_Chromatogram\.txt$', 
+                r'^(.+)_Chromatogram\.txt$',
                 r'^(.+)_Integration\.txt$',
-                r'^(.+)_Peak Analysis\.txt$'
+                r'^(.+)_Peak Analysis\.txt$',
+                r'^(.+)_Summary\.txt$',
             ]
         }
         
@@ -45,36 +46,45 @@ class BundleManager:
             'vwd_b': r'^(.+)_VWD_B\.cdf$'
         }
 
-    def extract_base_name(self, filename: str, file_type: str) -> Optional[str]:
-        """Extract base name from filename based on file type."""
-        
+    def extract_base_name(self, filename: str, file_type: str, metadata: Optional[Dict[str, Any]] = None) -> Optional[str]:
+        """Extract base name from metadata (preferred) or filename pattern.
+
+        For Chromeleon files, the 'injection' key in parsed metadata is the
+        canonical sample name and the most robust bundle key.  Falls back to
+        filename regex only when metadata is unavailable.
+        """
+        if metadata:
+            injection = metadata.get('injection')
+            if injection:
+                return injection.strip()
+
         # Remove 'temp_' prefix if present
         clean_name = filename.replace('temp_', '')
-        
+
         if file_type in ['chromatogram', 'text']:
             # Check for Chromeleon main file pattern
             match = re.match(self.chromeleon_patterns['main'], clean_name)
             if match:
                 return match.group(1).strip()
-            
+
             # Check for auxiliary file patterns
             for pattern in self.chromeleon_patterns['auxiliary']:
                 match = re.match(pattern, clean_name)
                 if match:
                     return match.group(1).strip()
-        
+
         elif file_type == 'lcms_cdf':
             # Check LC-MS patterns
             for pattern_type, pattern in self.lcms_patterns.items():
                 match = re.match(pattern, clean_name)
                 if match:
                     return match.group(1).strip()
-        
+
         return None
 
-    def should_bundle(self, filename: str, file_type: str) -> bool:
+    def should_bundle(self, filename: str, file_type: str, metadata: Optional[Dict[str, Any]] = None) -> bool:
         """Check if a file should be bundled."""
-        return self.extract_base_name(filename, file_type) is not None
+        return self.extract_base_name(filename, file_type, metadata=metadata) is not None
 
     def add_file_to_bundle(self, file_record: Dict[str, Any]) -> Optional[str]:
         """Add a file to appropriate bundle. Returns bundle_id if bundled."""
@@ -226,20 +236,31 @@ class BundleManager:
         }
         return icons.get(bundle_type, '📁')
 
-    def try_create_chromeleon_bundle(self, file_record: Dict[str, Any]) -> Optional[str]:
-        """Try to create a Chromeleon bundle from a file record."""
+    def try_create_chromeleon_bundle(self, file_record: Dict[str, Any], metadata: Optional[Dict[str, Any]] = None) -> Optional[str]:
+        """Try to create a Chromeleon bundle from a file record.
+
+        Uses the 'injection' key from the chromatogram reader's parsed
+        metadata as the bundle name when available, falling back to filename
+        regex only when metadata is absent.
+        """
         filename = file_record.get('name', '')
         file_type = file_record.get('type', '')
-        
-        # Check if this is a Chromeleon main file (UV_VIS pattern)
-        main_match = re.match(self.chromeleon_patterns['main'], filename)
-        if not main_match:
+
+        base_name = self.extract_base_name(filename, file_type, metadata=metadata)
+        if not base_name:
             return None
-        
-        base_name = main_match.group(1)
+
         bundle_id = f"{base_name}_chromeleon"
-        
-        # Create the bundle with empty auxiliary files initially
+
+        if bundle_id in self.bundles:
+            existing = self.bundles[bundle_id]
+            file_id = file_record.get('id')
+            if file_id != existing.main_file.get('id'):
+                already_aux = any(a.get('id') == file_id for a in existing.auxiliary_files)
+                if not already_aux:
+                    existing.auxiliary_files.append(file_record)
+            return bundle_id
+
         bundle = FileBundle(
             base_name=base_name,
             bundle_type='chromeleon',
@@ -247,10 +268,10 @@ class BundleManager:
             auxiliary_files=[],
             bundle_id=bundle_id
         )
-        
+
         self.bundles[bundle_id] = bundle
         print(f"📦 Created Chromeleon bundle: {bundle_id}")
-        
+
         return bundle_id
 
     def add_auxiliary_file_to_bundle(self, bundle_id: str, aux_file: Dict[str, Any]) -> bool:
@@ -263,11 +284,18 @@ class BundleManager:
         print(f"📎 Added auxiliary file {aux_file.get('name')} to bundle {bundle_id}")
         return True
 
-    def find_chromeleon_bundle_for_file(self, file_record: Dict[str, Any]) -> Optional[str]:
+    def find_chromeleon_bundle_for_file(self, file_record: Dict[str, Any], metadata: Optional[Dict[str, Any]] = None) -> Optional[str]:
         """Find if this file belongs to an existing Chromeleon bundle."""
         filename = file_record.get('name', '')
-        
-        # Check if this matches any auxiliary pattern
+        file_type = file_record.get('type', '')
+
+        base_name = self.extract_base_name(filename, file_type, metadata=metadata)
+        if base_name:
+            bundle_id = f"{base_name}_chromeleon"
+            if bundle_id in self.bundles:
+                return bundle_id
+
+        # Fallback: check auxiliary filename patterns against existing bundles
         for pattern in self.chromeleon_patterns['auxiliary']:
             match = re.match(pattern, filename)
             if match:
@@ -275,7 +303,7 @@ class BundleManager:
                 bundle_id = f"{base_name}_chromeleon"
                 if bundle_id in self.bundles:
                     return bundle_id
-        
+
         return None
 
     def create_uvvis_bundle(self, file_record: Dict[str, Any]) -> Optional[str]:

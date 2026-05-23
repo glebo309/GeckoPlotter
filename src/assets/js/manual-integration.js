@@ -118,21 +118,11 @@
     }
 
     function peakIdAtEvent(gd, event) {
-        if (!gd || !gd._fullLayout || !gd.data || !event) return null;
-        var plotArea = gd.querySelector('.nsewdrag');
-        if (!plotArea) return null;
-        var bounds = plotArea.getBoundingClientRect();
-        if (
-            event.clientX < bounds.left ||
-            event.clientX > bounds.right ||
-            event.clientY < bounds.top ||
-            event.clientY > bounds.bottom
-        ) {
-            return null;
-        }
-
-        var x = axisPixelToData(gd._fullLayout.xaxis, event.clientX - bounds.left, bounds.width, false);
-        var y = axisPixelToData(gd._fullLayout.yaxis, event.clientY - bounds.top, bounds.height, true);
+        if (!gd || !gd.data) return null;
+        var sp = subplotAtEvent(gd, event);
+        if (!sp) return null;
+        var x = axisPixelToData(sp.xaxis, event.clientX - sp.bounds.left, sp.bounds.width, false);
+        var y = axisPixelToData(sp.yaxis, event.clientY - sp.bounds.top, sp.bounds.height, true);
         if (x === null || y === null || !isFinite(Number(x)) || !isFinite(Number(y))) return null;
 
         for (var i = gd.data.length - 1; i >= 0; i--) {
@@ -148,6 +138,15 @@
         return null;
     }
 
+    function publishAction(type, payload) {
+        var dashClientside = window.dash_clientside ||
+            (window.parent && window.parent !== window ? window.parent.dash_clientside : null);
+        if (!dashClientside || typeof dashClientside.set_props !== 'function') return;
+        dashClientside.set_props('interaction-action-store', {
+            data: { type: type, payload: payload || {}, ts: Date.now() }
+        });
+    }
+
     function publishPeakClick(peakId) {
         var dashClientside = window.dash_clientside ||
             (window.parent && window.parent !== window ? window.parent.dash_clientside : null);
@@ -157,6 +156,7 @@
         dashClientside.set_props('plot-peak-click-store', {
             data: { peakId: peakId, ts: Date.now() }
         });
+        publishAction('select', { peakId: peakId });
         return true;
     }
 
@@ -166,16 +166,17 @@
         if (!line || !dashClientside || typeof dashClientside.set_props !== 'function') {
             return false;
         }
-        dashClientside.set_props('manual-draw-line-store', {
-            data: {
-                x0: line.x0,
-                y0: line.y0,
-                x1: line.x1,
-                y1: line.y1,
-                momentary: !!line.momentary,
-                ts: Date.now()
-            }
-        });
+        var lineData = {
+            x0: line.x0,
+            y0: line.y0,
+            x1: line.x1,
+            y1: line.y1,
+            subplot: line.subplot || 'xy',
+            momentary: !!line.momentary,
+            ts: Date.now()
+        };
+        dashClientside.set_props('manual-draw-line-store', { data: lineData });
+        publishAction('draw', { x0: line.x0, y0: line.y0, x1: line.x1, y1: line.y1, subplot: lineData.subplot });
         return true;
     }
 
@@ -188,6 +189,7 @@
             }
         });
         window.Plotly.relayout(gd, reset);
+        publishAction('reset-axes', {});
     }
 
     function clearEmptyClickTimer(gd) {
@@ -198,25 +200,16 @@
     }
 
     function isInsidePlotArea(gd, event) {
-        if (!gd || !event) return false;
-        var plotArea = gd.querySelector('.nsewdrag');
-        if (!plotArea) return false;
-        var bounds = plotArea.getBoundingClientRect();
-        return event.clientX >= bounds.left &&
-            event.clientX <= bounds.right &&
-            event.clientY >= bounds.top &&
-            event.clientY <= bounds.bottom;
+        return subplotAtEvent(gd, event) !== null;
     }
 
     function dataPointAtEvent(gd, event) {
-        if (!gd || !gd._fullLayout || !event) return null;
-        var plotArea = gd.querySelector('.nsewdrag');
-        if (!plotArea) return null;
-        var bounds = plotArea.getBoundingClientRect();
-        var x = axisPixelToData(gd._fullLayout.xaxis, event.clientX - bounds.left, bounds.width, false);
-        var y = axisPixelToData(gd._fullLayout.yaxis, event.clientY - bounds.top, bounds.height, true);
+        var sp = subplotAtEvent(gd, event);
+        if (!sp) return null;
+        var x = axisPixelToData(sp.xaxis, event.clientX - sp.bounds.left, sp.bounds.width, false);
+        var y = axisPixelToData(sp.yaxis, event.clientY - sp.bounds.top, sp.bounds.height, true);
         if (x === null || y === null || !isFinite(Number(x)) || !isFinite(Number(y))) return null;
-        return { x: Number(x), y: Number(y) };
+        return { x: Number(x), y: Number(y), subplot: sp.key };
     }
 
     function axisRange(axis) {
@@ -225,6 +218,55 @@
         var end = Number(axis.range[1]);
         if (!isFinite(start) || !isFinite(end)) return null;
         return [start, end];
+    }
+
+    function subplotAtEvent(gd, event) {
+        if (!gd || !gd._fullLayout || !event) return null;
+
+        // Collect all .nsewdrag rects and match the one under the pointer
+        var allDrags = gd.querySelectorAll('.nsewdrag');
+        var hitDrag = null;
+        var hitBounds = null;
+        for (var d = 0; d < allDrags.length; d++) {
+            var b = allDrags[d].getBoundingClientRect();
+            if (event.clientX >= b.left && event.clientX <= b.right &&
+                event.clientY >= b.top && event.clientY <= b.bottom) {
+                hitDrag = allDrags[d];
+                hitBounds = b;
+                break;
+            }
+        }
+        if (!hitDrag) return null;
+
+        // Try to find which subplot owns this drag rect
+        var plots = gd._fullLayout._plots;
+        if (plots) {
+            for (var key in plots) {
+                if (!plots.hasOwnProperty(key)) continue;
+                var subplot = plots[key];
+                // plotgroup may be a D3 selection or DOM node
+                var groupNode = subplot.plotgroup;
+                if (groupNode && typeof groupNode.node === 'function') groupNode = groupNode.node();
+                if (groupNode && groupNode.contains && groupNode.contains(hitDrag)) {
+                    return {
+                        key: key,
+                        xaxis: subplot.xaxis,
+                        yaxis: subplot.yaxis,
+                        plotArea: hitDrag,
+                        bounds: hitBounds
+                    };
+                }
+            }
+        }
+
+        // Fallback: single-subplot layout
+        return {
+            key: 'xy',
+            xaxis: gd._fullLayout.xaxis,
+            yaxis: gd._fullLayout.yaxis,
+            plotArea: hitDrag,
+            bounds: hitBounds
+        };
     }
 
     function isPanModifier(event) {
@@ -262,6 +304,7 @@
         if (trigger) {
             trigger.click();
         }
+        publishAction('deselect', {});
     }
 
     function stopPlotlyGesture(event) {
@@ -429,6 +472,7 @@
                 y0: drawing.startData.y,
                 x1: endData.x,
                 y1: endData.y,
+                subplot: drawing.startData.subplot,
                 momentary: drawing.momentary
             });
         };
@@ -440,22 +484,16 @@
     }
 
     function beginModifierPan(gd, event) {
-        if (
-            !gd ||
-            !window.Plotly ||
-            !isPanModifier(event) ||
-            event.button !== 0 ||
-            !isInsidePlotArea(gd, event)
-        ) {
-            return false;
-        }
+        if (!gd || !window.Plotly || !isPanModifier(event) || event.button !== 0) return false;
 
-        var startData = dataPointAtEvent(gd, event);
-        var xRange = axisRange(gd._fullLayout && gd._fullLayout.xaxis);
-        var yRange = axisRange(gd._fullLayout && gd._fullLayout.yaxis);
-        var plotArea = gd.querySelector('.nsewdrag');
-        var bounds = plotArea ? plotArea.getBoundingClientRect() : null;
-        if (!startData || !bounds || (!xRange && !yRange)) return false;
+        var sp = subplotAtEvent(gd, event);
+        if (!sp) return false;
+
+        var xAxisKey = (sp.xaxis && sp.xaxis._name) || 'xaxis';
+        var yAxisKey = (sp.yaxis && sp.yaxis._name) || 'yaxis';
+        var xRange = axisRange(sp.xaxis);
+        var yRange = axisRange(sp.yaxis);
+        if (!xRange && !yRange) return false;
 
         stopPlotlyGesture(event);
         clearEmptyClickTimer(gd);
@@ -464,8 +502,10 @@
             startClientY: event.clientY,
             xRange: xRange,
             yRange: yRange,
-            plotWidth: bounds.width,
-            plotHeight: bounds.height,
+            xAxisKey: xAxisKey,
+            yAxisKey: yAxisKey,
+            plotWidth: sp.bounds.width,
+            plotHeight: sp.bounds.height,
             lastEvent: event,
             raf: null
         };
@@ -474,17 +514,16 @@
             var pan = gd.__geckoManualIntegrationPanning;
             if (!pan || !pan.lastEvent) return;
             pan.raf = null;
-
             var update = {};
             if (pan.xRange && pan.plotWidth) {
                 var dxPixels = pan.lastEvent.clientX - pan.startClientX;
                 var dx = dxPixels * (pan.xRange[1] - pan.xRange[0]) / pan.plotWidth;
-                update['xaxis.range'] = [pan.xRange[0] - dx, pan.xRange[1] - dx];
+                update[pan.xAxisKey + '.range'] = [pan.xRange[0] - dx, pan.xRange[1] - dx];
             }
             if (pan.yRange && pan.plotHeight) {
                 var dyPixels = pan.lastEvent.clientY - pan.startClientY;
                 var dy = dyPixels * (pan.yRange[1] - pan.yRange[0]) / pan.plotHeight;
-                update['yaxis.range'] = [pan.yRange[0] + dy, pan.yRange[1] + dy];
+                update[pan.yAxisKey + '.range'] = [pan.yRange[0] + dy, pan.yRange[1] + dy];
             }
             if (Object.keys(update).length) {
                 window.Plotly.relayout(gd, update);

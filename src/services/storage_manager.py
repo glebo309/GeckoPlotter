@@ -409,10 +409,11 @@ class DataManager:
 
             standardized = ingest_file(temp_file.name, file_record['name'])
 
-            # Detect file type (pass temp file path for content-based detection)
-            file_type = self.detect_file_type(file_record['name'], temp_file.name)
+            # Use the pipeline's detection to pick the legacy reader.
+            # The pipeline already did content-based sniffing — trust it
+            # instead of repeating brittle keyword checks.
+            file_type = self._file_type_from_pipeline(standardized, file_record['name'], temp_file.name)
 
-            # Update the record type to match content-based detection
             if file_type:
                 file_record['type'] = file_type
 
@@ -420,75 +421,141 @@ class DataManager:
             # can be looked up by filename across sessions.
             self.register_file_id(file_record['id'], file_record['name'])
 
-            if file_type and file_type in self.readers:
-                # Create reader instance
-                reader = self.readers[file_type]()
+            file_id = file_record['id']
+            reader_ok = False
+            data = None
+            metadata = {}
+            reader = None
 
-                # Load the file
-                if reader.load_file(temp_file.name):
-                    # Get data and metadata
+            if file_type and file_type in self.readers:
+                reader = self.readers[file_type]()
+                try:
+                    reader_ok = reader.load_file(temp_file.name)
+                except Exception as e:
+                    print(f"⚠️ Reader {file_type} failed for {file_record['name']}: {e}")
+
+                if reader_ok:
                     data = reader.get_data()
                     metadata = reader.get_metadata()
+                    if standardized and standardized.x_columns:
+                        metadata['auto_x'] = standardized.x_columns[0]
+                    if standardized and standardized.y_columns:
+                        metadata['auto_y'] = standardized.y_columns
 
-                    file_id = file_record['id']
+            # If the dedicated reader failed but the ingestion pipeline
+            # produced a StandardizedResult, use that instead.  This is
+            # the critical fallback that ensures *any* parseable CSV is
+            # always visible in the Data Overview and plottable.
+            if not reader_ok and standardized is not None:
+                data = standardized.data
+                metadata = {
+                    'file_type': 'generic_csv',
+                    'file_name': file_record['name'],
+                    'rows': len(standardized.data),
+                    'columns': len(standardized.data.columns),
+                    'column_names': list(standardized.data.columns),
+                }
+                if standardized.sample_name:
+                    metadata['sample_name'] = standardized.sample_name
+                if standardized.x_columns:
+                    metadata['auto_x'] = standardized.x_columns[0]
+                if standardized.y_columns:
+                    metadata['auto_y'] = standardized.y_columns
+                metadata.update(standardized.metadata)
+                file_type = 'generic_csv'
+                file_record['type'] = file_type
+                print(f"🔄 Reader failed, falling back to ingestion pipeline for {file_record['name']}")
 
-                    if file_type in {'lcms_cdf', 'lcms_vwd_cdf'}:
-                        base_name = self.extract_lcms_base_name(file_record['name'])
-                        self._init_lcms_bundle(base_name)
-                        bundle = self.lcms_bundles[base_name]
-                        if file_id not in bundle['files']:
-                            bundle['files'].append(file_id)
+            if data is not None:
+                if file_type in {'lcms_cdf', 'lcms_vwd_cdf'}:
+                    base_name = self.extract_lcms_base_name(file_record['name'])
+                    self._init_lcms_bundle(base_name)
+                    bundle = self.lcms_bundles[base_name]
+                    if file_id not in bundle['files']:
+                        bundle['files'].append(file_id)
 
-                        component_entry = {
-                            'id': file_id,
-                            'record': file_record,
-                            'data': data,
-                            'metadata': metadata,
-                            'reader': reader,
-                            'type': file_type,
-                        }
-
-                        if standardized is not None:
-                            component_entry['standardized'] = standardized
-
-                        if file_type == 'lcms_cdf':
-                            mode = metadata.get('ionization_mode', 'unknown')
-                            key = 'ms_positive' if mode == 'positive' else 'ms_negative' if mode == 'negative' else None
-                        else:
-                            channel = metadata.get('detector_channel', 'Unknown')
-                            key = 'vwd_a' if channel == 'A' else 'vwd_b' if channel == 'B' else None
-
-                        if key:
-                            bundle[key] = component_entry
-
-                        self.loaded_data[file_id] = component_entry
-                        self._update_lcms_bundle_metadata(base_name)
-
-                        print(f"✅ Loaded {file_record['name']} as {file_type} (LCMS bundle {base_name})")
-                        return component_entry
-
-                    # Non-LCMS storage
-                    entry = {
+                    component_entry = {
+                        'id': file_id,
                         'record': file_record,
                         'data': data,
                         'metadata': metadata,
                         'reader': reader,
-                        'type': file_type
+                        'type': file_type,
                     }
+
                     if standardized is not None:
-                        entry['standardized'] = standardized
+                        component_entry['standardized'] = standardized
 
-                    self.loaded_data[file_id] = entry
+                    if file_type == 'lcms_cdf':
+                        mode = metadata.get('ionization_mode', 'unknown')
+                        key = 'ms_positive' if mode == 'positive' else 'ms_negative' if mode == 'negative' else None
+                    else:
+                        channel = metadata.get('detector_channel', 'Unknown')
+                        key = 'vwd_a' if channel == 'A' else 'vwd_b' if channel == 'B' else None
 
-                    print(f"✅ Loaded {file_record['name']} as {file_type}")
-                    return self.loaded_data[file_id]
+                    if key:
+                        bundle[key] = component_entry
 
-            print(f"❌ Could not load {file_record['name']} - unknown type or no reader")
+                    self.loaded_data[file_id] = component_entry
+                    self._update_lcms_bundle_metadata(base_name)
+
+                    print(f"✅ Loaded {file_record['name']} as {file_type} (LCMS bundle {base_name})")
+                    return component_entry
+
+                # Non-LCMS storage
+                entry = {
+                    'record': file_record,
+                    'data': data,
+                    'metadata': metadata,
+                    'reader': reader,
+                    'type': file_type
+                }
+                if standardized is not None:
+                    entry['standardized'] = standardized
+
+                self.loaded_data[file_id] = entry
+
+                print(f"✅ Loaded {file_record['name']} as {file_type}")
+                return self.loaded_data[file_id]
+
+            print(f"❌ Could not load {file_record['name']} - no reader succeeded and no pipeline result")
             return None
 
         except Exception as e:
             print(f"❌ Error loading {file_record['name']}: {str(e)}")
             return None
+
+    # ------------------------------------------------------------------
+    # Pipeline → legacy reader mapping
+    # ------------------------------------------------------------------
+    _PIPELINE_TO_READER = {
+        'chromeleon_txt': 'chromatogram',
+        'plate_reader_csv': 'uvvis_csv',
+        'lcms_cdf': 'lcms_cdf',
+        'lcms_vwd_cdf': 'lcms_vwd_cdf',
+    }
+
+    def _file_type_from_pipeline(
+        self, standardized, filename: str, file_path: str
+    ) -> Optional[str]:
+        """Map the ingestion pipeline's detected format to a legacy reader key.
+
+        For CSVs and TXTs the pipeline already did real content sniffing, so
+        we trust its result.  Only fall back to the old extension-based
+        ``detect_file_type`` for formats the pipeline doesn't cover (e.g.
+        CDF binary files that need netCDF4).
+        """
+        if standardized is not None:
+            fmt = standardized.identity.detected_format
+            mapped = self._PIPELINE_TO_READER.get(fmt)
+            if mapped:
+                return mapped
+            # Any other pipeline format (cary_kinetics, heuristic, …)
+            # is tabular data the generic reader can handle.
+            return 'generic_csv'
+
+        # Pipeline returned None — use old extension-based detection
+        return self.detect_file_type(filename, file_path)
 
     # ------------------------------------------------------------------
     # LC-MS bundle helpers
@@ -693,13 +760,15 @@ class DataManager:
                               or self.loaded_data[file_id].get('type')
                               or file_type)
 
-            # Try Chromeleon bundle first (for HPLC main files)
-            if actual_type == 'chromatogram' or file_name.endswith('_UV_VIS_1.txt'):
-                print(f"🧬 Trying to create Chromeleon bundle for: {file_name}")
-                bundle_id = self.bundle_manager.try_create_chromeleon_bundle(file_record)
+            # Try Chromeleon bundle first (for HPLC chromatogram files)
+            # Content-based: use parsed metadata (injection name) rather than filename
+            if actual_type == 'chromatogram':
+                loaded_meta = self.loaded_data.get(file_id, {}).get('metadata', {})
+                print(f"🧬 Trying to create Chromeleon bundle for: {file_name} (injection={loaded_meta.get('injection')})")
+                bundle_id = self.bundle_manager.try_create_chromeleon_bundle(file_record, metadata=loaded_meta)
                 if bundle_id:
                     print(f"📦 Created Chromeleon bundle: {bundle_id}")
-                    bundled_file_ids.add(file_id)  # Mark main file as bundled
+                    bundled_file_ids.add(file_id)
                 else:
                     print(f"❌ Failed to create Chromeleon bundle for: {file_name}")
             
@@ -727,18 +796,16 @@ class DataManager:
             if file_id in bundled_file_ids:
                 continue
             
-            # Check if this is an auxiliary file for an existing Chromeleon bundle
-            if file_type == 'text':
-                print(f"🔍 Checking if {file_name} is auxiliary file for existing bundle...")
-                existing_bundle_id = self.bundle_manager.find_chromeleon_bundle_for_file(file_record)
-                if existing_bundle_id:
-                    # Add this file as auxiliary to the existing bundle
-                    self.bundle_manager.add_auxiliary_file_to_bundle(existing_bundle_id, file_record)
-                    bundled_file_ids.add(file_id)  # Mark as bundled so it doesn't appear individually
-                    print(f"📎 Added {file_name} to bundle {existing_bundle_id}")
-                    continue
-                else:
-                    print(f"❌ No existing bundle found for auxiliary file: {file_name}")
+            # Check if this is an auxiliary file for an existing Chromeleon bundle.
+            # Auxiliary files (SST, Integration, Peak Analysis) may be detected
+            # as generic_csv rather than chromatogram, so check all text-like types.
+            loaded_meta = self.loaded_data.get(file_id, {}).get('metadata', {})
+            existing_bundle_id = self.bundle_manager.find_chromeleon_bundle_for_file(file_record, metadata=loaded_meta)
+            if existing_bundle_id:
+                self.bundle_manager.add_auxiliary_file_to_bundle(existing_bundle_id, file_record)
+                bundled_file_ids.add(file_id)
+                print(f"📎 Added {file_name} to bundle {existing_bundle_id}")
+                continue
         
         # STEP 2: Get all bundle tree items and mark ALL their children as bundled
         bundle_items = self.bundle_manager.get_bundle_tree_items()

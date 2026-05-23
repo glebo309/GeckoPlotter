@@ -16,6 +16,8 @@ from services.plot_manager import PlotManager
 from services.storage_manager import DataManager
 from components.data_table_editor import create_data_table_editor
 from components.publication_plot import create_publication_plot
+from callbacks.peak_overlay import overlay_peaks_on_figure, patch_figure_with_peaks, rgba, FILL_COLORS
+from callbacks.baseline_callbacks import get_chromatogram_arrays
 
 log = logging.getLogger('geckoplotter.viz')
 if not log.handlers:
@@ -83,208 +85,9 @@ def prepare_table_data(file_data, file_id=None, visible_wells=None):
     return table_data
 
 
-def _rgba(hex_color, alpha):
-    """Convert #RRGGBB to rgba(...) while accepting existing rgba values."""
-    if isinstance(hex_color, str) and hex_color.startswith('#') and len(hex_color) == 7:
-        r = int(hex_color[1:3], 16)
-        g = int(hex_color[3:5], 16)
-        b = int(hex_color[5:7], 16)
-        return f'rgba({r}, {g}, {b}, {alpha})'
-    return hex_color
 
-
-def _add_deselect_catcher(fig, dm, active_file_id):
-    """Add a near-transparent plot-area trace that clicks to deselect."""
-    import plotly.graph_objects as go
-
-    file_data = dm.get_data_by_id(active_file_id)
-    if file_data is None:
-        bundle = dm.get_bundle_by_id(active_file_id)
-        if bundle and bundle.main_file:
-            file_data = dm.get_data_by_id(bundle.main_file.get('id'))
-    if not file_data or file_data.get('data') is None:
-        return
-
-    df = file_data['data']
-    time_col = signal_col = None
-    for col in df.columns:
-        cl = col.lower()
-        if 'time' in cl:
-            time_col = col
-        elif any(k in cl for k in ('value', 'intensity', 'mau', 'absorbance', 'signal')):
-            signal_col = col
-    if time_col is None or signal_col is None:
-        return
-
-    try:
-        x_vals = df[time_col].to_numpy(dtype=float)
-        y_vals = df[signal_col].to_numpy(dtype=float)
-    except Exception:
-        return
-
-    finite_x = x_vals[np.isfinite(x_vals)]
-    finite_y = y_vals[np.isfinite(y_vals)]
-    if finite_x.size < 2 or finite_y.size < 2:
-        return
-
-    x0, x1 = float(np.nanmin(finite_x)), float(np.nanmax(finite_x))
-    y0, y1 = float(np.nanmin(finite_y)), float(np.nanmax(finite_y))
-    y_pad = max((y1 - y0) * 0.08, 1e-9)
-    y0 -= y_pad
-    y1 += y_pad
-
-    fig.add_trace(go.Scatter(
-        x=[x0, x1, x1, x0, x0],
-        y=[y0, y0, y1, y1, y0],
-        fill='toself',
-        fillcolor='rgba(255,255,255,0.001)',
-        mode='lines',
-        line=dict(width=0, color='rgba(255,255,255,0)'),
-        customdata=[['__deselect__', 'catcher']] * 5,
-        hoverinfo='skip',
-        showlegend=False,
-        meta='peak_overlay',
-    ))
-
-
-def _overlay_peaks_on_figure(dm, active_file_id, figure, selected_peak_id=None):
-    """Overlay manual/imported/detected peak markers on the raw figure."""
-    import plotly.graph_objects as go
-    fig = go.Figure(figure) if isinstance(figure, dict) else figure
-    fig.data = [t for t in fig.data if not (hasattr(t, 'meta') and t.meta == 'peak_overlay')]
-    fig.layout.shapes = ()
-    fig.update_layout(uirevision='main-plot')
-
-    all_peaks = dm.peak_service.get_peaks(active_file_id)
-    if not all_peaks:
-        return fig
-
-    def _marker_y(rt: float, fallback: float) -> float:
-        file_data = dm.get_data_by_id(active_file_id)
-        if file_data is None:
-            bundle = dm.get_bundle_by_id(active_file_id)
-            if bundle and bundle.main_file:
-                file_data = dm.get_data_by_id(bundle.main_file.get('id'))
-        if not file_data or file_data.get('data') is None:
-            return fallback
-
-        df = file_data['data']
-        time_col = signal_col = None
-        for col in df.columns:
-            cl = col.lower()
-            if 'time' in cl:
-                time_col = col
-            elif any(k in cl for k in ('value', 'intensity', 'mau', 'absorbance', 'signal')):
-                signal_col = col
-        if time_col is None or signal_col is None:
-            return fallback
-
-        try:
-            x = df[time_col].to_numpy(dtype=float)
-            y = df[signal_col].to_numpy(dtype=float)
-            return float(np.interp(rt, x, y))
-        except Exception:
-            return fallback
-
-    FILL_COLORS = [
-        'rgba(180, 120, 220, 0.30)',
-        'rgba(100, 180, 120, 0.30)',
-        'rgba(80, 160, 220, 0.30)',
-        'rgba(220, 160, 80, 0.30)',
-        'rgba(220, 100, 120, 0.30)',
-        'rgba(120, 200, 200, 0.30)',
-    ]
-
-    for i, peak in enumerate(all_peaks):
-        is_selected = peak.peak_id == selected_peak_id
-        fill_color = _rgba(peak.color, 0.58 if is_selected else 0.30) if peak.color else FILL_COLORS[i % len(FILL_COLORS)]
-        line_color = peak.color if is_selected else 'rgba(0,0,0,0)'
-
-        has_custom_label = bool(peak.label) if hasattr(peak, 'label') else False
-
-        if peak.poly_x and peak.poly_y:
-            poly_x = list(peak.poly_x)
-            poly_y = list(peak.poly_y)
-            fig.add_trace(go.Scatter(
-                x=poly_x, y=poly_y,
-                fill='toself', fillcolor=fill_color,
-                mode='lines',
-                line=dict(color=line_color, width=2 if is_selected else 0),
-                customdata=[peak.peak_id] * len(poly_x),
-                hoverinfo='skip',
-                showlegend=False, meta='peak_overlay',
-            ))
-            if has_custom_label:
-                fig.add_trace(go.Scatter(
-                    x=[peak.rt], y=[peak.height],
-                    mode='text',
-                    text=[peak.label],
-                    textposition='top center',
-                    textfont=dict(size=9, color='#333'),
-                    hoverinfo='skip',
-                    showlegend=False, meta='peak_overlay',
-                ))
-            if is_selected and peak.p_line and len(peak.p_line) == 2:
-                p0, p1 = peak.p_line
-                line_color = peak.color or '#E69F00'
-                fig.add_shape(
-                    type='line',
-                    x0=p0[0], y0=p0[1],
-                    x1=p1[0], y1=p1[1],
-                    name=f'baseline:{peak.peak_id}',
-                    line=dict(color=line_color, width=2, dash='dot'),
-                    editable=True,
-                )
-                fig.add_trace(go.Scatter(
-                    x=[p0[0], p1[0]],
-                    y=[p0[1], p1[1]],
-                    mode='markers',
-                    marker=dict(
-                        size=9,
-                        color='#ffffff',
-                        line=dict(color=line_color, width=2),
-                        symbol='circle',
-                    ),
-                    customdata=[[peak.peak_id, 'p-point'], [peak.peak_id, 'p-point']],
-                    hoverinfo='skip',
-                    showlegend=False,
-                    meta='peak_overlay',
-                ))
-        elif has_custom_label:
-            marker_y = _marker_y(peak.rt, peak.height)
-            fig.add_trace(go.Scatter(
-                x=[peak.rt], y=[marker_y],
-                mode='text',
-                text=[peak.label],
-                textposition='top center',
-                textfont=dict(size=9, color='#333'),
-                hovertemplate=f'{peak.name}<br>RT: {peak.rt:.3f}<br>Area: {peak.area:.1f}<extra></extra>',
-                showlegend=False, meta='peak_overlay',
-            ))
-
-    return fig
-
-
-def _peak_overlay_patch(dm, active_file_id, previous_file_id=None, previous_selected_peak_id=None, selected_peak_id=None):
-    """Patch only peak overlays, leaving existing chromatogram traces and view intact."""
-    import plotly.graph_objects as go
-
-    previous_json = {}
-    if previous_file_id:
-        previous_fig = _overlay_peaks_on_figure(dm, previous_file_id, go.Figure(), previous_selected_peak_id)
-        previous_json = previous_fig.to_plotly_json()
-
-    overlay_fig = _overlay_peaks_on_figure(dm, active_file_id, go.Figure(), selected_peak_id)
-    overlay_json = overlay_fig.to_plotly_json()
-
-    patch = Patch()
-    for trace in previous_json.get('data', []):
-        patch['data'].remove(trace)
-    for trace in overlay_json.get('data', []):
-        patch['data'].append(trace)
-    patch['layout']['shapes'] = overlay_json.get('layout', {}).get('shapes', [])
-    patch['layout']['uirevision'] = 'main-plot'
-    return patch
+# _rgba, _add_deselect_catcher, _overlay_peaks_on_figure, _peak_overlay_patch,
+# and FILL_COLORS have been extracted to callbacks/peak_overlay.py
 
 
 def _get_source_category(metadata, fdata):
@@ -398,18 +201,26 @@ def _apply_preserved_hplc_view(dm, figure, previous_file_id, next_file_id, relay
 
 
 def _apply_current_hplc_view(dm, figure, active_file_id, relayout_data):
-    """Apply the current HPLC retention-time window to a freshly rendered figure."""
-    active_group = _get_active_file_group(dm, active_file_id)
-    if not _is_hplc_view_group(active_group):
-        return figure
-
-    x_range = _axis_range_from_relayout(relayout_data, 'xaxis')
-    if not x_range:
-        return figure
-
+    """Apply the current HPLC viewport (X + Y ranges) to a freshly rendered figure."""
     import plotly.graph_objects as go
     fig = go.Figure(figure) if isinstance(figure, dict) else figure
-    fig.update_layout(xaxis=dict(range=x_range, autorange=False))
+    fig.update_layout(uirevision='main-plot')
+
+    active_group = _get_active_file_group(dm, active_file_id)
+    if not _is_hplc_view_group(active_group):
+        return fig
+
+    x_range = _axis_range_from_relayout(relayout_data, 'xaxis')
+    y_range = _axis_range_from_relayout(relayout_data, 'yaxis')
+    if not x_range and not y_range:
+        return fig
+
+    layout_update = {}
+    if x_range:
+        layout_update['xaxis'] = dict(range=x_range, autorange=False)
+    if y_range:
+        layout_update['yaxis'] = dict(range=y_range, autorange=False)
+    fig.update_layout(**layout_update)
     return fig
 
 
@@ -644,17 +455,6 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
                 data_manager.initialise_publication_memory(file_id, get_empty_selections())
             return dash.no_update if on_shared_tab else error_fig, file_id, None, error_table, empty_table_editor, dash.no_update if on_shared_tab else None, dash.no_update
 
-        previous_group = _get_active_file_group(data_manager, active_file)
-        next_group = _get_active_file_group(data_manager, file_id)
-        if (
-            not on_shared_tab
-            and (view_mode or 'raw') == 'raw'
-            and previous_group == next_group
-            and _is_hplc_view_group(next_group)
-        ):
-            figure_patch = _peak_overlay_patch(data_manager, file_id, active_file, selected_peak_id, None)
-            return figure_patch, file_id, None, dash.no_update, dash.no_update, dash.no_update, dash.no_update
-
         log.debug(f"✅ Found file data, creating plot...")
 
         # Determine bundle context (Chromeleon, LCMS, etc.)
@@ -798,6 +598,10 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
 
         if not on_shared_tab:
             figure = _apply_preserved_hplc_view(data_manager, figure, active_file, file_id, relayout_data)
+            import plotly.graph_objects as go
+            fig_obj = go.Figure(figure) if isinstance(figure, dict) else figure
+            fig_obj.update_layout(uirevision='main-plot')
+            figure = fig_obj
 
         return dash.no_update if on_shared_tab else figure, file_id, None, data_table, table_editor, pub_data, new_view_mode
 
@@ -860,7 +664,11 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
             figure = plot_manager.create_multi_file_plot(visible_files, layout_mode)
 
             # Overlay peaks (manual baseline + imported + detected)
-            figure = _overlay_peaks_on_figure(data_manager, active_file, figure, selected_peak_id)
+            _ov_time, _ov_signal = get_chromatogram_arrays(data_manager, active_file)
+            if _ov_time is not None:
+                figure = overlay_peaks_on_figure(
+                    data_manager.peak_service.get_peaks(active_file), figure, _ov_time, _ov_signal, selected_peak_id
+                )
 
             # Apply current plot settings
             if plot_settings:
@@ -923,7 +731,11 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
         fig = plot_manager.create_multi_file_plot(visible_files, layout_mode)
 
         # Overlay peaks
-        fig = _overlay_peaks_on_figure(data_manager, active_file, fig, selected_peak_id)
+        _ov_time, _ov_signal = get_chromatogram_arrays(data_manager, active_file)
+        if _ov_time is not None:
+            fig = overlay_peaks_on_figure(
+                data_manager.peak_service.get_peaks(active_file), fig, _ov_time, _ov_signal, selected_peak_id
+            )
 
         try:
             fig_obj = go.Figure(fig) if isinstance(fig, dict) else fig

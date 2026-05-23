@@ -124,13 +124,12 @@ app.layout = html.Div(
         dcc.Dropdown(id='peak-group-selector', style={'display': 'none'}),  # Placeholder for dynamically created dropdown
         # Baseline integration stores (p-line drawing)
         dcc.Store(id='baseline-mode', data='navigate'),  # 'draw' | 'edit' | 'navigate'
-        dcc.Store(id='p-line-store', data=[]),  # Temporary line being drawn [(x0,y0),(x1,y1)]
         dcc.Store(id='selected-peak-idx', data=None),  # Index of peak being edited
-        dcc.Store(id='p-line-visible', data=False),  # Show/hide the p-line
         dcc.Store(id='clear-shapes-trigger', data=0),  # Counter to trigger shape clearing
         dcc.Store(id='peak-change-trigger', data=0),  # Counter to refresh tables/overlays after peak edits
         dcc.Store(id='plot-peak-click-store', data=None),  # Browser-side peak hit-test selection
         dcc.Store(id='manual-draw-line-store', data=None),  # Browser-side custom integration line
+        dcc.Store(id='interaction-action-store', data=None),  # Last action for future undo/redo
         html.Button(id='plot-empty-click-trigger', n_clicks=0, style={'display': 'none'}),
         html.Div(id='clear-transient-shapes-output', style={'display': 'none'}),
         html.Div(id='selected-shapes-sync-output', style={'display': 'none'}),

@@ -126,12 +126,11 @@ def register_tab_callbacks(app: dash.Dash, data_manager) -> None:
         [Output('cross-sample-table', 'data', allow_duplicate=True),
          Output('cross-sample-table', 'columns', allow_duplicate=True),
          Output('cross-sample-table-store', 'data', allow_duplicate=True)],
-        [Input('peak-group-selector', 'value'),
-         Input('peak-change-trigger', 'data')],
+        [Input('peak-group-selector', 'value')],
         [State('loaded-files', 'data')],
         prevent_initial_call=True
     )
-    def update_selected_peak_group(selected_group_idx, peak_change, loaded_files):
+    def update_selected_peak_group(selected_group_idx, loaded_files):
         """Update cross-sample-table data when peak group selection changes."""
 
         if selected_group_idx is None or not loaded_files:

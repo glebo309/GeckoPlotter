@@ -31,6 +31,18 @@ def register_file_tree_callbacks(app: dash.Dash, data_manager: DataManager) -> N
         new_display = 'none' if current_display == 'block' else 'block'
         new_icon = '▶' if new_display == 'none' else '▼'
 
+        ctx = callback_context
+        if ctx.triggered:
+            try:
+                import json
+                component_id = json.loads(ctx.triggered[0]['prop_id'].rsplit('.', 1)[0])
+                bundle_id = component_id['index']
+                if not hasattr(data_manager, 'collapse_state'):
+                    data_manager.collapse_state = {}
+                data_manager.collapse_state[bundle_id] = 'expanded' if new_display == 'block' else 'collapsed'
+            except Exception:
+                pass
+
         return new_icon, {**current_style, 'display': new_display}
 
     @app.callback(
@@ -47,7 +59,7 @@ def register_file_tree_callbacks(app: dash.Dash, data_manager: DataManager) -> N
             return dash.no_update
         try:
             import json
-            component_id = json.loads(ctx.triggered[0]['prop_id'].split('.')[0])
+            component_id = json.loads(ctx.triggered[0]['prop_id'].rsplit('.', 1)[0])
             return component_id['index']
         except Exception:
             return dash.no_update
@@ -97,7 +109,7 @@ def register_file_tree_callbacks(app: dash.Dash, data_manager: DataManager) -> N
         triggered_id = ctx.triggered[0]['prop_id']
         try:
             import json
-            component_id = json.loads(triggered_id.split('.')[0])
+            component_id = json.loads(triggered_id.rsplit('.', 1)[0])
             file_id = component_id['index']
         except:
             return (dash.no_update,) * 8
@@ -460,7 +472,7 @@ def register_file_tree_callbacks(app: dash.Dash, data_manager: DataManager) -> N
             
         try:
             import json
-            component_id = json.loads(ctx.triggered[0]['prop_id'].split('.')[0])
+            component_id = json.loads(ctx.triggered[0]['prop_id'].rsplit('.', 1)[0])
             clicked_file_id = component_id['index']
         except Exception as e:
             print(f"❌ Error parsing callback trigger: {e}")
@@ -600,8 +612,12 @@ def register_file_tree_callbacks(app: dash.Dash, data_manager: DataManager) -> N
         fig = plot_manager.create_multi_file_plot(visible_files, layout_mode)
 
         # Overlay peaks
-        from callbacks.viz_callbacks import _overlay_peaks_on_figure
-        fig = _overlay_peaks_on_figure(data_manager, active_file, fig)
+        from callbacks.peak_overlay import overlay_peaks_on_figure
+        from callbacks.baseline_callbacks import get_chromatogram_arrays
+        time_arr, signal_arr = get_chromatogram_arrays(data_manager, active_file)
+        if time_arr is not None:
+            all_peaks = data_manager.peak_service.get_peaks(active_file)
+            fig = overlay_peaks_on_figure(all_peaks, fig, time_arr, signal_arr)
 
         # Apply plot settings
         try:

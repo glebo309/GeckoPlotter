@@ -483,7 +483,7 @@ def register_publication_callbacks(app: dash.Dash, data_manager) -> None:
         if not ctx.triggered:
             return dash.no_update
         
-        triggered = ctx.triggered[0]['prop_id'].split('.')[0]
+        triggered = ctx.triggered[0]['prop_id'].rsplit('.', 1)[0]
         if triggered == 'add-y1-series':
             count = min(count + 1, 10)
         elif triggered == 'remove-y1-series':
@@ -514,7 +514,7 @@ def register_publication_callbacks(app: dash.Dash, data_manager) -> None:
         if not ctx.triggered or not selections:
             return dash.no_update
         
-        triggered = ctx.triggered[0]['prop_id'].split('.')[0]
+        triggered = ctx.triggered[0]['prop_id'].rsplit('.', 1)[0]
         
         if triggered == 'clear-x':
             selections['x']['data'] = {'row_ids': [], 'column_id': None}
@@ -579,7 +579,7 @@ def register_publication_callbacks(app: dash.Dash, data_manager) -> None:
         # Get triggered ID
         trig = getattr(ctx, "triggered_id", None)
         if trig is None:
-            trig_str = ctx.triggered[0]['prop_id'].split('.')[0]
+            trig_str = ctx.triggered[0]['prop_id'].rsplit('.', 1)[0]
             try:
                 trig = json.loads(trig_str)
             except Exception:

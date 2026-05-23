@@ -219,7 +219,6 @@ def create_axis_mapper_layout():
         dcc.Store(id='pub-selections', data=get_empty_selections()),
         dcc.Store(id='active-selector', data=None),
         dcc.Store(id='y1-series-count', data=1),
-        dcc.Store(id='plot-export-data'),
     ])
 
 
