@@ -329,7 +329,7 @@ class PlotManager:
     def _create_overlay_plot(self, files: list) -> go.Figure:
         fig = go.Figure()
         for idx, (name, file_data) in enumerate(files):
-            self._add_traces_for_file(fig, name, file_data, color_offset=idx)
+            self._add_traces(fig, name, file_data, color_offset=idx)
         fig.update_layout(
             template='plotly_white',
             autosize=True,
@@ -366,7 +366,7 @@ class PlotManager:
             legend_group = f'group{row_idx}'
             for i, (name, fdata) in enumerate(files):
                 sub = go.Figure()
-                self._add_traces_for_file(sub, name, fdata, color_offset=i)
+                self._add_traces(sub, name, fdata, color_offset=i)
                 for trace in sub.data:
                     trace.showlegend = True
                     trace.legendgroup = legend_group
@@ -410,7 +410,7 @@ class PlotManager:
             row = i + 1
             legend_group = f'group{row}'
             sub_fig = go.Figure()
-            self._add_traces_for_file(sub_fig, name, file_data, color_offset=i)
+            self._add_traces(sub_fig, name, file_data, color_offset=i)
             for trace in sub_fig.data:
                 trace.showlegend = True
                 trace.legendgroup = legend_group
@@ -439,66 +439,37 @@ class PlotManager:
 
     # -- helper: add traces from one file to a figure -----------------------
 
-    def _add_traces_for_file(self, fig, name, file_data, color_offset=0):
-        """Add traces from *file_data* to *fig*, labelling with *name*."""
-        data = file_data.get('data')
-        metadata = file_data.get('metadata', {})
-        file_type = metadata.get('file_type') or file_data.get('record', {}).get('type', '')
-
-        if data is None or (hasattr(data, 'empty') and data.empty):
+    def _add_traces(self, fig, name, file_data, color_offset=0):
+        """Add traces from file_data to fig using StandardizedResult."""
+        sr = file_data.get('standardized')
+        if sr is None:
             return
 
-        color = self.default_colors[color_offset % len(self.default_colors)]
+        df = sr.data
+        x_cols = sr.x_columns
+        y_cols = sr.y_columns
 
-        if file_type in ('chromatogram', 'text'):
-            if 'Time (min)' in data.columns and 'Value (mAU)' in data.columns:
-                fig.add_trace(go.Scatter(
-                    x=data['Time (min)'], y=data['Value (mAU)'],
-                    mode='lines', name=name,
-                    line=dict(color=color, width=2),
-                ))
-        elif file_type == 'uvvis_csv':
-            if 'Wavelength' in data.columns:
-                cols = [c for c in data.columns if c != 'Wavelength']
-                for j, col in enumerate(cols):
-                    c = self.default_colors[(color_offset + j) % len(self.default_colors)]
-                    fig.add_trace(go.Scatter(
-                        x=data['Wavelength'], y=data[col],
-                        mode='lines', name=f"{name} — {col}",
-                        line=dict(color=c, width=2),
-                    ))
-        elif file_type in ('lcms_cdf', 'lcms_ms_positive', 'lcms_ms_negative'):
-            if 'Time (min)' in data.columns and 'Intensity' in data.columns:
-                fig.add_trace(go.Scatter(
-                    x=data['Time (min)'], y=data['Intensity'],
-                    mode='lines', name=name,
-                    line=dict(color=color, width=2),
-                ))
-        elif file_type in ('lcms_vwd_cdf', 'lcms_uv_a', 'lcms_uv_b'):
-            if 'Time (min)' in data.columns and 'Intensity (mAU)' in data.columns:
-                fig.add_trace(go.Scatter(
-                    x=data['Time (min)'], y=data['Intensity (mAU)'],
-                    mode='lines', name=name,
-                    line=dict(color=color, width=2),
-                ))
-        else:
-            # Generic numeric data — use auto-detected axes if available
-            auto_x = metadata.get('auto_x')
-            auto_y = metadata.get('auto_y', [])
-            numeric_cols = [c for c in data.columns
-                           if c != '_row_id' and pd.api.types.is_numeric_dtype(data[c])]
-            x_col = auto_x if auto_x and auto_x in data.columns else (numeric_cols[0] if len(numeric_cols) >= 2 else None)
-            y_cols = [c for c in auto_y if c in data.columns and c != x_col]
-            if not y_cols and x_col:
-                y_cols = [c for c in numeric_cols if c != x_col][:4]
-            if x_col and y_cols:
-                for j, y_col in enumerate(y_cols):
-                    c = self.default_colors[(color_offset + j) % len(self.default_colors)]
-                    fig.add_trace(go.Scatter(
-                        x=data[x_col], y=data[y_col],
-                        mode='lines', name=f"{name} — {y_col}",
-                        line=dict(color=c, width=2),
-                    ))
+        if not x_cols or not y_cols:
+            return
+
+        x_col = x_cols[0]
+        if x_col not in df.columns:
+            return
+
+        x_vals = df[x_col]
+
+        for j, y_col in enumerate(y_cols):
+            if y_col not in df.columns:
+                continue
+            color = self.default_colors[(color_offset + j) % len(self.default_colors)]
+            label = f"{name} — {y_col}" if len(y_cols) > 1 else name
+            fig.add_trace(go.Scatter(
+                x=x_vals,
+                y=pd.to_numeric(df[y_col], errors="coerce"),
+                mode="lines",
+                name=label,
+                line=dict(color=color, width=2),
+            ))
 
     # -- hidden / empty state -----------------------------------------------
 
@@ -613,38 +584,11 @@ class PlotManager:
         return fig
 
     def get_plot_for_file(self, file_data: Dict[str, Any]) -> go.Figure:
-        """Get appropriate plot for a file based on its type."""
+        """Get plot for a file. StandardizedResult is the only path."""
         try:
             sr = file_data.get('standardized')
             if sr is not None:
                 return self.create_standardized_plot(sr)
-
-            metadata = file_data.get('metadata', {})
-            file_type = (metadata.get('file_type')
-                         or file_data.get('type')
-                         or file_data.get('record', {}).get('type', 'unknown'))
-            data = file_data.get('data')
-            
-            if data is None or data.empty:
-                return self._create_error_plot("No data available")
-
-            if file_type == 'chromatogram' or file_type == 'text':
-                return self.create_chromatogram_plot(data, metadata)
-            elif file_type == 'uvvis_csv':
-                return self.create_uvvis_plot(data, metadata)
-            elif file_type in {'table', 'generic_csv', 'csv'}:
-                # Generic CSV/table: try UV-Vis if Wavelength column exists,
-                # otherwise show a simple table preview plot
-                if 'Wavelength' in data.columns:
-                    return self.create_uvvis_plot(data, metadata)
-                else:
-                    return self.create_generic_table_plot(data, metadata)
-            elif file_type in {'lcms_cdf', 'lcms_ms_positive', 'lcms_ms_negative'}:
-                return self.create_lcms_tic_plot(data, metadata)
-            elif file_type in {'lcms_vwd_cdf', 'lcms_uv_a', 'lcms_uv_b'}:
-                return self.create_lcms_uv_plot(data, metadata)
-            else:
-                return self._create_error_plot(f"Unsupported file type: {file_type}")
-
+            return self._create_error_plot("No standardized data available")
         except Exception as e:
-            return self._create_error_plot(f"Error processing file: {str(e)}")
+            return self._create_error_plot(f"Plot error: {str(e)}")
