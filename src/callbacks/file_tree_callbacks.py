@@ -17,6 +17,18 @@ from services.storage_manager import DataManager
 log = logging.getLogger(__name__)
 
 
+def _is_multi_well(file_data):
+    """Check if file has individually-selectable Y columns (wells/channels)."""
+    if file_data is None:
+        return False
+    sr = file_data.get('standardized')
+    if sr is not None:
+        from src.ingestion.types import PlotHint
+        return sr.plot_hint == PlotHint.MULTI_Y
+    metadata = file_data.get('metadata', {})
+    return bool(metadata.get('filled_wells'))
+
+
 def register_file_tree_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
     """Register file tree interaction callbacks."""
     @app.callback(
@@ -130,7 +142,7 @@ def register_file_tree_callbacks(app: dash.Dash, data_manager: DataManager) -> N
             
             # Get parent file data
             parent_file_data = data_manager.get_data_by_id(parent_file_id)
-            if parent_file_data and parent_file_data.get('metadata', {}).get('file_type') == 'uvvis_csv':
+            if _is_multi_well(parent_file_data):
                 # Remove the well from filled_wells list
                 filled_wells = parent_file_data.get('metadata', {}).get('filled_wells', [])
                 if well_name in filled_wells:
@@ -167,7 +179,7 @@ def register_file_tree_callbacks(app: dash.Dash, data_manager: DataManager) -> N
                     log.warning(f"Well {well_name} not found in parent file")
                     updated_files = current_files.copy()
             else:
-                log.error(f"Parent file not found or not UV-Vis: {parent_file_id}")
+                log.error(f"Parent file not found or not multi-well: {parent_file_id}")
                 updated_files = current_files.copy()
         
         # Check if this is a bundle deletion
@@ -365,8 +377,8 @@ def register_file_tree_callbacks(app: dash.Dash, data_manager: DataManager) -> N
                     file_data = data_manager.get_data_by_id(main_file_id)
                     log.debug(f"File data exists: {file_data is not None}")
                     
-                    if file_data and file_data.get('metadata', {}).get('file_type') == 'uvvis_csv':
-                        log.debug("Processing UV-Vis file for plot update")
+                    if _is_multi_well(file_data):
+                        log.debug("Processing multi-well file for plot update")
                         # For UV-Vis, create plot with remaining wells
                         visible_wells = []
                         filled_wells = file_data.get('metadata', {}).get('filled_wells', [])
@@ -387,11 +399,7 @@ def register_file_tree_callbacks(app: dash.Dash, data_manager: DataManager) -> N
                         log.debug(f"Visible wells: {visible_wells}")
                         
                         if visible_wells:
-                            updated_plot = plot_manager.create_uvvis_plot(
-                                file_data['data'], 
-                                file_data['metadata'], 
-                                selected_columns=visible_wells
-                            )
+                            updated_plot = plot_manager.get_plot_for_file(file_data)
                             log.debug(f"Auto-updated plot after deletion with {len(visible_wells)} wells: {visible_wells}")
                         else:
                             # No visible wells, show empty plot
@@ -530,7 +538,7 @@ def register_file_tree_callbacks(app: dash.Dash, data_manager: DataManager) -> N
             else:
                 # UV-Vis file - get well IDs
                 file_data = data_manager.get_data_by_id(clicked_file_id)
-                if file_data and file_data.get('metadata', {}).get('file_type') == 'uvvis_csv':
+                if _is_multi_well(file_data):
                     filled_wells = file_data.get('metadata', {}).get('filled_wells', [])
                     if len(filled_wells) > 0:
                         is_parent_click = True
