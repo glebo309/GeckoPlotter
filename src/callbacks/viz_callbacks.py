@@ -74,11 +74,6 @@ def _get_source_category(metadata, fdata):
     sr = fdata.get('standardized')
     if sr is not None:
         return sr.source_category.value
-    if fdata.get('type') == 'lcms_bundle':
-        bundle_data = fdata.get('bundle_data') or {}
-        if bundle_data.get('ms_positive') or bundle_data.get('ms_negative'):
-            return 'lcms_ms'
-        return 'lcms_uv'
     return 'generic'
 
 
@@ -235,8 +230,8 @@ def _collect_visible_files(dm, active_file_id=None, loaded_files=None):
         if fid in bundled_main_ids and fid not in bundle_ids:
             log.error(f"{fid}: bundled main (raw dupe)")
             continue
-        if fdata.get('type') == 'lcms_bundle':
-            log.error(f"{fid}: lcms_bundle type")
+        if fdata.get('standardized') is None:
+            log.debug(f"{fid}: no standardized data, skipping")
             continue
         metadata = fdata.get('metadata', {})
         group = _get_overlay_group(metadata, fdata)
