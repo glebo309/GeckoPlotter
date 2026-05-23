@@ -13,13 +13,6 @@ log = logging.getLogger(__name__)
 def register_upload_callbacks(app: dash.Dash, data_manager) -> None:
     """Register upload-related callbacks."""
     
-    # File types that have a dedicated raw-data plot
-    KNOWN_RAW_TYPES = {
-        'chromatogram', 'text', 'uvvis_csv',
-        'lcms_cdf', 'lcms_ms_positive', 'lcms_ms_negative',
-        'lcms_vwd_cdf', 'lcms_uv_a', 'lcms_uv_b', 'lcms_bundle',
-    }
-
     @app.callback(
         [Output('loaded-files', 'data', allow_duplicate=True),
          Output('file-tree', 'children', allow_duplicate=True),
@@ -138,29 +131,15 @@ def register_upload_callbacks(app: dash.Dash, data_manager) -> None:
             if success_count > 0:
                 log.debug(f"Successfully uploaded {success_count} files!")
 
-            # Auto-switch to analysis mode for generic/unknown file types
-            # Exception: generic CSVs with auto-detected axes have a good raw plot
+            # Auto-switch view mode based on whether the file has plottable data
             auto_view_mode = dash.no_update
             if file_data and auto_active_file and auto_active_file != dash.no_update:
-                ft = (file_data.get('metadata', {}).get('file_type')
-                      or file_data.get('type')
-                      or file_data.get('record', {}).get('type', ''))
-                if ft not in KNOWN_RAW_TYPES:
-                    sr = file_data.get('standardized')
-                    has_auto_axes = False
-                    if sr is not None:
-                        has_auto_axes = bool(sr.x_columns and sr.y_columns)
-                    else:
-                        has_auto_axes = bool(
-                            file_data.get('metadata', {}).get('auto_x')
-                            and file_data.get('metadata', {}).get('auto_y')
-                        )
-                    if has_auto_axes:
-                        auto_view_mode = 'raw'
-                        log.debug(f"Showing raw plot for uploaded generic CSV with auto-detected axes")
-                    else:
-                        auto_view_mode = 'analysis'
-                        log.debug(f"Auto-switching to analysis mode for uploaded file type: {ft}")
+                from callbacks.viz_callbacks import _has_meaningful_raw_plot
+                if _has_meaningful_raw_plot(file_data):
+                    auto_view_mode = 'raw'
+                else:
+                    auto_view_mode = 'analysis'
+                    log.debug("Auto-switching to analysis mode (no plottable raw data)")
 
             return merged_files, tree_items, auto_plot, auto_active_file, auto_table, table_editor, pub_data, auto_view_mode
 
@@ -398,8 +377,7 @@ def render_individual_file_item_selected(item: dict, is_selected: bool = False, 
 
     icon = TYPE_ICONS.get(item.get('type'), TYPE_ICONS.get('unknown', '❓'))
     file_id = item.get('id')
-    file_type = item.get('type')
-    
+
     # Selection highlighting colors
     bg_color = '#fff5f0' if is_selected else '#ffffff'
     border_color = '#ff6b35' if is_selected else '#e0e0e0'
