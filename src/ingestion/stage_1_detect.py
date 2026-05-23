@@ -8,6 +8,7 @@ _KNOWN_EXTENSIONS = {
     "csv", "tsv", "txt", "log",
     "json", "xml",
     "cdf", "cdfx",
+    "xlsx", "xls",
     "png", "jpg", "jpeg", "svg",
 }
 

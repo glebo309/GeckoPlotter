@@ -764,14 +764,11 @@ app.layout = html.Div(
                                                         'height': '100%',
                                                         'overflowY': 'auto'
                                                     }, children=[
-                                                        html.Div(id='mode-indicator', style={
-                                                            'padding': '6px 10px', 'fontSize': '11px', 'textAlign': 'center',
-                                                            'backgroundColor': '#FFF8E1', 'marginBottom': '8px', 'borderRadius': '4px',
-                                                            'minHeight': '20px',
-                                                        }),
+                                                        html.Div(id='mode-indicator', style={'display': 'none'}),
                                                         html.Div(id='table-editor-container', children=[
-                                                            # Empty pub-table must exist at startup so callbacks
-                                                            # that reference it don't crash before a file is loaded.
+                                                            # Empty pub-table and sheet store must exist at startup
+                                                            # so callbacks referencing them don't crash.
+                                                            dcc.Store(id='active-sheet-name', data=None),
                                                             html.Div([
                                                                 dash_table.DataTable(
                                                                     id='pub-table',

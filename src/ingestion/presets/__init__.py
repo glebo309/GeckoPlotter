@@ -9,6 +9,7 @@ def load_all_presets() -> List[FormatPreset]:
     from .plate_reader_csv import PlateReaderCSVPreset
     from .lcms_cdf import LCMSCDFPreset
     from .lcms_vwd_cdf import LCMSVWDCDFPreset
+    from .excel_xlsx import ExcelPreset
 
     return [
         CaryKineticsPreset(),
@@ -16,4 +17,5 @@ def load_all_presets() -> List[FormatPreset]:
         PlateReaderCSVPreset(),
         LCMSCDFPreset(),
         LCMSVWDCDFPreset(),
+        ExcelPreset(),
     ]

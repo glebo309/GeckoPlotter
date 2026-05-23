@@ -5,14 +5,15 @@ Interactive table with cell selection for publication plotting
 
 import logging
 
-from dash import dash_table, html
+from dash import dash_table, html, dcc
 import pandas as pd
 
 
 
 log = logging.getLogger(__name__)
 
-def create_data_table_editor(df=None, table_id='pub-table', default_selected_columns=None):
+def create_data_table_editor(df=None, table_id='pub-table', default_selected_columns=None,
+                             sheet_names=None, active_sheet=None):
     """Create an editable data table with cell selection capabilities.
 
     Args:
@@ -23,6 +24,7 @@ def create_data_table_editor(df=None, table_id='pub-table', default_selected_col
         # Empty state — includes a hidden empty DataTable so callbacks
         # referencing 'pub-table' never hit a nonexistent component.
         return html.Div([
+            dcc.Store(id='active-sheet-name', data=None),
             html.Div(
                 [
                     html.Span('📊', className='empty-state__icon'),
@@ -70,8 +72,43 @@ def create_data_table_editor(df=None, table_id='pub-table', default_selected_col
         valid_ids = {c['id'] for c in columns}
         sel_cols = [c for c in default_selected_columns if c in valid_ids]
 
+    # Sheet tabs for multi-sheet Excel files
+    sheet_tabs = []
+    if sheet_names and len(sheet_names) > 1:
+        tabs = []
+        for sname in sheet_names:
+            is_active = sname == active_sheet
+            tabs.append(html.Button(
+                sname,
+                id={'type': 'sheet-tab', 'index': sname},
+                n_clicks=0,
+                style={
+                    'padding': '4px 12px',
+                    'fontSize': '11px',
+                    'border': 'none',
+                    'borderBottom': '2px solid #FF5722' if is_active else '2px solid transparent',
+                    'backgroundColor': '#37474F' if is_active else '#263238',
+                    'color': '#fff' if is_active else '#90A4AE',
+                    'cursor': 'pointer',
+                    'fontWeight': '600' if is_active else '400',
+                    'marginRight': '2px',
+                    'borderRadius': '4px 4px 0 0',
+                },
+            ))
+        sheet_tabs = [html.Div(tabs, style={
+            'display': 'flex',
+            'backgroundColor': '#263238',
+            'padding': '4px 4px 0',
+            'borderRadius': '4px 4px 0 0',
+            'overflowX': 'auto',
+        })]
+
+    # Store active sheet name for the callback
+    active_sheet_store = dcc.Store(id='active-sheet-name', data=active_sheet)
+
     # Return just the table - buttons are now in the toolbox (axis_mapper.py)
-    return html.Div([
+    return html.Div(sheet_tabs + [
+        active_sheet_store,
         dash_table.DataTable(
             id=table_id,
             columns=columns,

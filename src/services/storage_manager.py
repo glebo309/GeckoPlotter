@@ -449,6 +449,11 @@ class DataManager:
                 'metadata': metadata,
                 'standardized': sr,
             }
+
+            # Excel multi-sheet: store sheet DataFrames for tab switching
+            if 'sheets' in metadata:
+                entry['sheets'] = metadata.pop('sheets')
+
             self.loaded_data[file_id] = entry
             log.debug(f"Loaded {file_record['name']} as {sr.identity.detected_format}")
             return entry
@@ -754,7 +759,7 @@ class DataManager:
 
                 record_meta = entry.get('metadata', {})
                 record_info = entry.get('record', {})
-                comp_type = entry.get('type')
+                comp_type = record_info.get('type') or entry.get('type', 'unknown')
                 component_label = record_info.get('name', 'LC-MS Component')
                 icon = '🧪'
                 bundle_component_type = 'component'

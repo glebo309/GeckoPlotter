@@ -117,12 +117,6 @@ def _get_active_file_group(dm, active_file_id):
     return _get_overlay_group(metadata, fdata)
 
 
-def _is_hplc_view_group(group):
-    """Return True for chromatogram-like groups where x-range can be reused."""
-    if isinstance(group, tuple) and group:
-        return group[0] in ('chromatogram', 'lcms_ms', 'lcms_uv')
-    return group in ('chromatogram', 'lcms_ms', 'lcms_uv')
-
 
 def _axis_range_from_relayout(relayout_data, axis_name='xaxis'):
     """Extract a user-controlled axis range from Plotly relayoutData."""
@@ -147,25 +141,41 @@ def _axis_range_from_relayout(relayout_data, axis_name='xaxis'):
     return None
 
 
-def _apply_preserved_hplc_view(dm, figure, previous_file_id, next_file_id, relayout_data):
-    """Carry the current viewport across compatible HPLC bundle switches."""
-    previous_group = _get_active_file_group(dm, previous_file_id)
-    next_group = _get_active_file_group(dm, next_file_id)
-    if not (_is_hplc_view_group(previous_group) and _is_hplc_view_group(next_group)):
-        return figure
-
-    return _apply_current_hplc_view(dm, figure, next_file_id, relayout_data)
-
-
-def _apply_current_hplc_view(dm, figure, active_file_id, relayout_data):
-    """Apply the current HPLC viewport (X + Y ranges) to a freshly rendered figure."""
+def _restore_zoom(figure, relayout_data):
+    """Re-apply the user's current zoom to a freshly built figure."""
     import plotly.graph_objects as go
     fig = go.Figure(figure) if isinstance(figure, dict) else figure
     fig.update_layout(uirevision='main-plot')
 
-    active_group = _get_active_file_group(dm, active_file_id)
-    if not _is_hplc_view_group(active_group):
+    x_range = _axis_range_from_relayout(relayout_data, 'xaxis')
+    y_range = _axis_range_from_relayout(relayout_data, 'yaxis')
+    if not x_range and not y_range:
         return fig
+
+    layout_update = {}
+    if x_range:
+        layout_update['xaxis'] = dict(range=x_range, autorange=False)
+    if y_range:
+        layout_update['yaxis'] = dict(range=y_range, autorange=False)
+    fig.update_layout(**layout_update)
+    return fig
+
+
+def _apply_preserved_view(dm, figure, previous_file_id, next_file_id, relayout_data):
+    """Carry the current viewport across file switches within the same group.
+
+    Files in the same overlay group (same source category + X axis) share
+    comparable axis scales, so preserving zoom makes sense. Switching to
+    a different group (e.g. spectrum → kinetics) resets to autorange.
+    """
+    previous_group = _get_active_file_group(dm, previous_file_id)
+    next_group = _get_active_file_group(dm, next_file_id)
+    if previous_group != next_group or not previous_group:
+        return figure
+
+    import plotly.graph_objects as go
+    fig = go.Figure(figure) if isinstance(figure, dict) else figure
+    fig.update_layout(uirevision='main-plot')
 
     x_range = _axis_range_from_relayout(relayout_data, 'xaxis')
     y_range = _axis_range_from_relayout(relayout_data, 'yaxis')
@@ -387,18 +397,27 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
                 return dash.no_update if on_shared_tab else figure, file_id, None, data_table, table_editor, pub_data, dash.no_update
 
         if not file_data:
-            log.debug(f"❌ File data not found for ID: {file_id}")
-            error_fig = plot_manager.create_empty_plot("File data not found")
-            error_table = build_message_state(
-                title="File data not available",
-                subtitle="Try re-uploading the file or check if it was removed from the explorer.",
-                icon="⚠️",
-                variant="error"
-            )
-            empty_table_editor = create_data_table_editor(None, table_id='pub-table')
-            if data_manager.get_publication_memory(file_id) is None:
-                data_manager.initialise_publication_memory(file_id, get_empty_selections())
-            return dash.no_update if on_shared_tab else error_fig, file_id, None, error_table, empty_table_editor, dash.no_update if on_shared_tab else None, dash.no_update
+            log.warning(f"File data not found for ID: {file_id}")
+            try:
+                error_fig = plot_manager.create_empty_plot("File data not found")
+                error_table = build_message_state(
+                    title="File data not available",
+                    subtitle="This file format could not be parsed. Try exporting as CSV.",
+                    icon="⚠️",
+                    variant="error"
+                )
+                empty_table_editor = create_data_table_editor(None, table_id='pub-table')
+                if data_manager.get_publication_memory(file_id) is None:
+                    data_manager.initialise_publication_memory(file_id, get_empty_selections())
+                return (
+                    dash.no_update if on_shared_tab else error_fig,
+                    file_id, None, error_table, empty_table_editor,
+                    dash.no_update if on_shared_tab else None,
+                    dash.no_update,
+                )
+            except Exception as e:
+                log.exception(f"Error building error state for {file_id}")
+                return (dash.no_update,) * 7
 
         log.debug(f"✅ Found file data, creating plot...")
 
@@ -418,10 +437,9 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
             data_table = create_data_table(file_data)
             log.debug(f"✅ File metadata table created")
 
-        # Create the plot
+        # Determine visible wells for table editor (multi-well files)
         sr = file_data.get('standardized')
         metadata = file_data.get('metadata', {})
-
         visible_wells = None
 
         if sr is not None and sr.plot_hint == PlotHint.MULTI_Y and sr.x_columns:
@@ -435,51 +453,14 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
                 if is_visible:
                     visible_wells.append(well)
 
-            if visible_wells:
-                from src.ingestion.types import StandardizedResult
-                filtered_data = sr.data[[sr.x_columns[0]] + [w for w in visible_wells if w in sr.data.columns]].copy()
-                figure = plot_manager.create_standardized_plot(
-                    StandardizedResult(
-                        data=filtered_data,
-                        column_roles={c: r for c, r in sr.column_roles.items() if c in filtered_data.columns},
-                        identity=sr.identity,
-                        plot_hint=sr.plot_hint,
-                        source_category=sr.source_category,
-                        sample_name=sr.sample_name,
-                        metadata=sr.metadata,
-                    )
-                )
-            else:
-                figure = plot_manager.create_empty_plot("All wells hidden")
-
-        elif sr is not None and sr.source_category in (SourceCategory.LCMS_MS, SourceCategory.LCMS_UV):
-            bundle = data_manager.get_bundle_by_id(file_id)
-            if not bundle and '|' in file_id:
-                parent_id = file_id.split('|', 1)[0]
-                bundle = data_manager.get_bundle_by_id(parent_id)
-
-            if bundle:
-                lcms_bundle = (
-                    data_manager.get_lcms_bundle_by_id(file_id)
-                    or data_manager.lcms_bundles.get(bundle.base_name if bundle else file_id)
-                )
-                preferred = None
-                if lcms_bundle:
-                    preferred = lcms_bundle.get('ms_positive') or lcms_bundle.get('ms_negative') or lcms_bundle.get('vwd_a') or lcms_bundle.get('vwd_b')
-                if preferred and preferred.get('standardized'):
-                    figure = plot_manager.create_standardized_plot(preferred['standardized'])
-                else:
-                    figure = plot_manager.get_plot_for_file(file_data)
-            else:
-                figure = plot_manager.get_plot_for_file(file_data)
-        else:
-            figure = plot_manager.get_plot_for_file(file_data)
-
-        log.debug(f"🎉 Plot created successfully!")
-
         # Create table editor for publication plotting - use smart data extraction
         table_data = prepare_table_data(file_data, file_id=file_id, visible_wells=visible_wells)
-        table_editor = create_data_table_editor(table_data, table_id='pub-table')
+        sheet_names = file_data.get('metadata', {}).get('sheet_names')
+        active_sheet = file_data.get('metadata', {}).get('active_sheet')
+        table_editor = create_data_table_editor(
+            table_data, table_id='pub-table',
+            sheet_names=sheet_names, active_sheet=active_sheet,
+        )
         # On shared tabs, don't overwrite pub-data-store with per-file data
         # — it holds the shared table data that the plot needs.
         if on_shared_tab:
@@ -512,7 +493,6 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
 
         # Auto-switch to analysis mode for generic/unknown file types that
         # don't have a meaningful raw-data plot (e.g. plain CSVs, tables).
-        # Exception: generic CSVs with auto-detected axes have a good raw plot.
         # On shared tabs, don't change view mode.
         if on_shared_tab:
             new_view_mode = dash.no_update
@@ -522,21 +502,93 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
         else:
             new_view_mode = dash.no_update
 
-        if not on_shared_tab:
-            figure = _apply_preserved_hplc_view(data_manager, figure, active_file, file_id, relayout_data)
-            import plotly.graph_objects as go
-            fig_obj = go.Figure(figure) if isinstance(figure, dict) else figure
-            fig_obj.update_layout(uirevision='main-plot')
-            figure = fig_obj
+        # Never write to main-plot here. handle_view_mode_change is the
+        # sole owner of main-plot — it fires from the active-file change
+        # and builds the correct multi-file overlay with zoom preservation.
+        return dash.no_update, file_id, None, data_table, table_editor, pub_data, new_view_mode
 
-        return dash.no_update if on_shared_tab else figure, file_id, None, data_table, table_editor, pub_data, new_view_mode
+    # ---- Sheet tab switching for multi-sheet Excel files ----
+    @app.callback(
+        [Output('main-plot', 'figure', allow_duplicate=True),
+         Output('table-editor-container', 'children', allow_duplicate=True),
+         Output('pub-data-store', 'data', allow_duplicate=True),
+         Output('metadata-container', 'children', allow_duplicate=True)],
+        [Input({'type': 'sheet-tab', 'index': dash.dependencies.ALL}, 'n_clicks')],
+        [State('active-file', 'data'),
+         State('active-sheet-name', 'data')],
+        prevent_initial_call=True,
+    )
+    def handle_sheet_tab_click(n_clicks_list, active_file, current_sheet):
+        ctx = dash.callback_context
+        if not ctx.triggered or not any(n for n in n_clicks_list if n):
+            return (dash.no_update,) * 4
+
+        triggered_id = ctx.triggered[0]['prop_id']
+        import json
+        try:
+            component_str = triggered_id.rsplit('.', 1)[0]
+            clicked_sheet = json.loads(component_str)['index']
+        except Exception:
+            return (dash.no_update,) * 4
+
+        if clicked_sheet == current_sheet:
+            return (dash.no_update,) * 4
+
+        if not active_file:
+            return (dash.no_update,) * 4
+
+        file_data = data_manager.get_data_by_id(active_file)
+        if not file_data:
+            return (dash.no_update,) * 4
+
+        sheets = file_data.get('sheets')
+        if not sheets or clicked_sheet not in sheets:
+            return (dash.no_update,) * 4
+
+        sheet_info = sheets[clicked_sheet]
+        new_df = sheet_info['data']
+        new_roles = sheet_info['column_roles']
+        new_cat = sheet_info.get('source_category', SourceCategory.GENERIC)
+        new_hint = sheet_info.get('plot_hint', PlotHint.LINE)
+
+        # Update the entry's active data
+        file_data['data'] = new_df
+        file_data['metadata']['active_sheet'] = clicked_sheet
+        sr = file_data.get('standardized')
+        if sr is not None:
+            from src.ingestion.types import StandardizedResult
+            file_data['standardized'] = StandardizedResult(
+                data=new_df,
+                column_roles=new_roles,
+                identity=sr.identity,
+                plot_hint=new_hint,
+                source_category=new_cat,
+                sample_name=sr.sample_name,
+                metadata=file_data['metadata'],
+            )
+
+        figure = plot_manager.get_plot_for_file(file_data)
+        import plotly.graph_objects as go
+        fig_obj = go.Figure(figure) if isinstance(figure, dict) else figure
+        fig_obj.update_layout(uirevision='main-plot')
+
+        table_data = prepare_table_data(file_data, file_id=active_file)
+        sheet_names = file_data.get('metadata', {}).get('sheet_names')
+        table_editor = create_data_table_editor(
+            table_data, table_id='pub-table',
+            sheet_names=sheet_names, active_sheet=clicked_sheet,
+        )
+        pub_data = table_data.to_json(orient='split') if table_data is not None else None
+        data_table = create_data_table(file_data)
+
+        return fig_obj, table_editor, pub_data, data_table
 
     @app.callback(
         Output('main-plot', 'figure', allow_duplicate=True),
         [Input('view-mode', 'data'),
-         Input('pub-plot-trigger', 'data')],
-        [State('active-file', 'data'),
-         State('loaded-files', 'data'),
+         Input('pub-plot-trigger', 'data'),
+         Input('active-file', 'data')],
+        [State('loaded-files', 'data'),
          State('pub-plot-figure', 'data'),
          State('current-plot-settings', 'data'),
          State('selected-peak-idx', 'data'),
@@ -544,6 +596,7 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
         prevent_initial_call=True
     )
     def handle_view_mode_change(view_mode, plot_trigger, active_file, loaded_files, pub_plot_figure, plot_settings, selected_peak_id, relayout_data):
+        # active_file is now an Input (triggers on file switch)
         """Handle view mode toggle between Raw Data and Analysis Plot."""
         import plotly.graph_objects as go
         from services.plot_settings_service import PlotSettingsService, DEFAULT_PLOT_SETTINGS
@@ -556,6 +609,7 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
             return dash.no_update
 
         trigger_id = ctx.triggered[0]['prop_id'].rsplit('.', 1)[0]
+        log.debug(f"🔄 handle_view_mode_change: trigger={trigger_id}, mode={view_mode}, relayout={relayout_data}")
 
         # If publication plot was updated, only show it if user is in analysis mode.
         if trigger_id == 'pub-plot-trigger':
@@ -597,14 +651,14 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
                 )
 
             # Apply current plot settings
-            if plot_settings:
-                try:
-                    fig_obj = go.Figure(figure) if isinstance(figure, dict) else figure
-                    ps = PlotSettingsService.from_dict(s)
-                    PlotSettingsService.apply_to_figure(fig_obj, ps)
-                    figure = _apply_current_hplc_view(data_manager, fig_obj, active_file, relayout_data)
-                except Exception:
-                    log.exception("Failed to apply plot settings to raw figure")
+            try:
+                fig_obj = go.Figure(figure) if isinstance(figure, dict) else figure
+                s = {**DEFAULT_PLOT_SETTINGS, **(plot_settings or {})}
+                ps = PlotSettingsService.from_dict(s)
+                PlotSettingsService.apply_to_figure(fig_obj, ps)
+                figure = _restore_zoom(fig_obj, relayout_data)
+            except Exception:
+                log.exception("Failed to apply plot settings to raw figure")
 
         return figure
 
@@ -667,7 +721,7 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
             fig_obj = go.Figure(fig) if isinstance(fig, dict) else fig
             ps = PlotSettingsService.from_dict(s)
             PlotSettingsService.apply_to_figure(fig_obj, ps)
-            return _apply_current_hplc_view(data_manager, fig_obj, active_file, relayout_data)
+            return _restore_zoom(fig_obj, relayout_data)
         except Exception:
             log.exception("Failed to apply settings to raw plot")
             return fig

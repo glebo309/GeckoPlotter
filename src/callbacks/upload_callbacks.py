@@ -45,6 +45,7 @@ def register_upload_callbacks(app: dash.Dash, data_manager) -> None:
 
             # Load data for each file and track successes
             success_count = 0
+            failed_names = set()
             for record in new_records:
                 try:
                     file_data = data_manager.load_file_data(record)
@@ -52,24 +53,28 @@ def register_upload_callbacks(app: dash.Dash, data_manager) -> None:
                         log.debug(f"Successfully loaded {record['name']}")
                         success_count += 1
                     else:
-                        log.error(f"Failed to process {record['name']}")
+                        log.warning(f"Skipping unsupported file: {record['name']}")
+                        failed_names.add(record['name'])
                 except Exception as e:
                     log.error(f"Error loading {record['name']}: {str(e)}")
+                    failed_names.add(record['name'])
 
-            # Prevent duplicates - merge files by name
+            # Prevent duplicates - merge files by name, exclude failed files
             merged_files = []
             existing_names = set()
-            
+
             # Add existing files first
             for f in (existing_files or []):
                 fname = f.get('name')
                 if fname and fname not in existing_names:
                     merged_files.append(f)
                     existing_names.add(fname)
-            
-            # Add new files that aren't duplicates
+
+            # Add new files that aren't duplicates and weren't failed
             for record in new_records:
                 fname = record.get('name')
+                if fname in failed_names:
+                    continue
                 if fname and fname not in existing_names:
                     merged_files.append(record)
                     existing_names.add(fname)
@@ -124,7 +129,12 @@ def register_upload_callbacks(app: dash.Dash, data_manager) -> None:
                 from components.data_table_editor import create_data_table_editor
 
                 table_data = prepare_table_data(file_data, file_id=auto_active_file)
-                table_editor = create_data_table_editor(table_data, table_id='pub-table')
+                sheet_names = file_data.get('metadata', {}).get('sheet_names')
+                active_sheet = file_data.get('metadata', {}).get('active_sheet')
+                table_editor = create_data_table_editor(
+                    table_data, table_id='pub-table',
+                    sheet_names=sheet_names, active_sheet=active_sheet,
+                )
                 pub_data = table_data.to_json(orient='split') if table_data is not None else None
             
             # Simple success message
@@ -144,7 +154,7 @@ def register_upload_callbacks(app: dash.Dash, data_manager) -> None:
             return merged_files, tree_items, auto_plot, auto_active_file, auto_table, table_editor, pub_data, auto_view_mode
 
         except Exception as e:
-            log.error(f"Upload failed: {str(e)}")
+            log.exception(f"Upload failed: {str(e)}")
             return dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update
 
 
@@ -545,7 +555,7 @@ def render_individual_file_item_selected(item: dict, is_selected: bool = False, 
             className='file-tree-item',
             id={'type': 'file-tree-item', 'index': file_id},
             n_clicks=0,
-            title=f"{item.get('type', 'unknown').capitalize()} · {item.get('size_display', '')}",
+            title=f"{(item.get('type') or 'unknown').capitalize()} · {item.get('size_display', '')}",
             style={
                 'gridArea': 'content',
                 'display': 'flex',
