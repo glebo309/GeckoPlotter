@@ -21,6 +21,15 @@ class PlotHint(str, Enum):
     MULTI_Y = "multi_y"
 
 
+class SourceCategory(str, Enum):
+    CHROMATOGRAM = "chromatogram"
+    SPECTRUM = "spectrum"
+    LCMS_MS = "lcms_ms"
+    LCMS_UV = "lcms_uv"
+    KINETICS = "kinetics"
+    GENERIC = "generic"
+
+
 @dataclass
 class FileIdentity:
     original_name: str
@@ -35,6 +44,7 @@ class StandardizedResult:
     column_roles: Dict[str, ColumnRole]
     identity: FileIdentity
     plot_hint: PlotHint = PlotHint.LINE
+    source_category: SourceCategory = SourceCategory.GENERIC
     sample_name: Optional[str] = None
     metadata: Dict[str, Any] = field(default_factory=dict)
 

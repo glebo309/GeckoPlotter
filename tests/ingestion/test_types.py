@@ -1,7 +1,7 @@
 import pytest
 import pandas as pd
 from src.ingestion.types import (
-    StandardizedResult, ColumnRole, PlotHint, FileIdentity
+    StandardizedResult, ColumnRole, PlotHint, FileIdentity, SourceCategory
 )
 
 
@@ -77,6 +77,24 @@ def test_standardized_result_with_metadata():
     assert set(sr.y_columns) == {"A1", "A2"}
     assert sr.plot_hint == PlotHint.MULTI_Y
     assert sr.sample_name == "Plate 1"
+
+
+def test_source_category_default():
+    sr = StandardizedResult(
+        data=pd.DataFrame({"x": [1], "y": [2]}),
+        column_roles={"x": ColumnRole.X, "y": ColumnRole.Y},
+        identity=FileIdentity("test.csv", "csv", "heuristic", 3),
+    )
+    assert sr.source_category == SourceCategory.GENERIC
+
+
+def test_source_category_values():
+    assert SourceCategory.CHROMATOGRAM == "chromatogram"
+    assert SourceCategory.SPECTRUM == "spectrum"
+    assert SourceCategory.LCMS_MS == "lcms_ms"
+    assert SourceCategory.LCMS_UV == "lcms_uv"
+    assert SourceCategory.KINETICS == "kinetics"
+    assert SourceCategory.GENERIC == "generic"
 
 
 def test_x_columns_empty_when_no_x_role():
