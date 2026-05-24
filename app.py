@@ -129,6 +129,13 @@ app.layout = html.Div(
         dcc.Store(id='plot-peak-click-store', data=None),  # Browser-side peak hit-test selection
         dcc.Store(id='manual-draw-line-store', data=None),  # Browser-side custom integration line
         dcc.Store(id='interaction-action-store', data=None),  # Last action for future undo/redo
+        dcc.Store(id='render-trigger', data=0),  # Counter bumped to trigger master render of main-plot
+        dcc.Store(id='zoom-state', data=None),  # Persisted user zoom ranges across figure rebuilds
+        dcc.Store(id='plot-tabs', data=[]),  # List of plot tab descriptors [{id, label, type, group_key}]
+        dcc.Store(id='active-plot-tab', data=None),  # ID of currently displayed plot tab
+        dcc.Store(id='tab-file-memory', data={}),  # Maps tab_id → last selected file_id
+        dcc.Store(id='tab-panel-memory', data={}),  # Maps tab_id → last active bottom panel
+        dcc.Store(id='tab-zoom-memory', data={}),  # Maps tab_id → saved zoom ranges
         html.Button(id='plot-empty-click-trigger', n_clicks=0, style={'display': 'none'}),
         html.Div(id='clear-transient-shapes-output', style={'display': 'none'}),
         html.Div(id='selected-shapes-sync-output', style={'display': 'none'}),
@@ -150,13 +157,12 @@ app.layout = html.Div(
                         ),
                         html.Div(style={'flex': 1}),
                         html.Div(
-                            className='view-mode-toggle',
-                            children=[
-                                html.Button('Raw Data', id='raw-mode-btn', className='mode-btn active', n_clicks=0),
-                                html.Button('Analysis Plot', id='analysis-mode-btn', className='mode-btn', n_clicks=0),
-                            ],
-                            style={'display': 'flex', 'gap': '5px'}
+                            id='plot-tab-bar',
+                            className='plot-tab-bar',
+                            children=[],
                         ),
+                        html.Button('Raw Data', id='raw-mode-btn', style={'display': 'none'}, n_clicks=0),
+                        html.Button('Analysis Plot', id='analysis-mode-btn', style={'display': 'none'}, n_clicks=0),
                         # Hidden Dev View button (kept for callback compatibility)
                         html.Button('Dev View', id='toggle-dev-panel', style={'display': 'none'}),
                     ],
@@ -1204,32 +1210,52 @@ def sync_active_tab_ui(active_tab):
 
 @app.callback(
     Output('view-mode', 'data'),
-    [Input('raw-mode-btn', 'n_clicks'),
-     Input('analysis-mode-btn', 'n_clicks')],
+    Input('active-plot-tab', 'data'),
+    State('plot-tabs', 'data'),
     prevent_initial_call=True,
 )
-def update_view_mode(_, __):
-    """Update view-mode from the clicked toggle button."""
-    ctx = dash.callback_context
-    if not ctx.triggered:
-        return dash.no_update
+def derive_view_mode(active_tab_id, tabs):
+    """Derive view-mode from the active plot tab type (backwards compat)."""
+    if not active_tab_id or not tabs:
+        return 'raw'
+    tab = next((t for t in tabs if t['id'] == active_tab_id), None)
+    if tab and tab.get('type') == 'analysis':
+        return 'analysis'
+    return 'raw'
 
-    triggered_id = ctx.triggered[0]['prop_id'].split('.')[0]
-    return 'analysis' if triggered_id == 'analysis-mode-btn' else 'raw'
+@app.callback(
+    Output('tab-panel-memory', 'data', allow_duplicate=True),
+    [Input('active-tab', 'data')],
+    [State('active-plot-tab', 'data'),
+     State('tab-panel-memory', 'data')],
+    prevent_initial_call=True,
+)
+def save_panel_per_tab(active_tab, plot_tab, memory):
+    """Remember which bottom panel is open for each plot tab."""
+    if not plot_tab or not active_tab:
+        return dash.no_update
+    memory = memory or {}
+    if memory.get(plot_tab) == active_tab:
+        return dash.no_update
+    return {**memory, plot_tab: active_tab}
 
 
 @app.callback(
-    [Output('raw-mode-btn', 'className'),
-     Output('analysis-mode-btn', 'className')],
-    Input('view-mode', 'data'),
+    Output('active-tab', 'data', allow_duplicate=True),
+    Input('active-plot-tab', 'data'),
+    [State('tab-panel-memory', 'data'),
+     State('active-tab', 'data')],
+    prevent_initial_call=True,
 )
-def sync_view_mode_ui(view_mode):
-    """Keep the view-mode buttons in sync with the store."""
-    is_raw = (view_mode or 'raw') == 'raw'
-    return (
-        'mode-btn active' if is_raw else 'mode-btn',
-        'mode-btn' if is_raw else 'mode-btn active',
-    )
+def restore_panel_on_tab_switch(plot_tab, memory, current_panel):
+    """Restore the last-opened bottom panel when switching plot tabs."""
+    if not plot_tab:
+        return dash.no_update
+    remembered = (memory or {}).get(plot_tab, 'data-overview')
+    if remembered == current_panel:
+        return dash.no_update
+    return remembered
+
 
 # Status update callbacks
 @app.callback(

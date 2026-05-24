@@ -1,8 +1,9 @@
 """Context callbacks for unified per-file UI state.
 
 Plot settings are handled entirely by plot_settings_callbacks.py.
-This module only manages non-plot UI state: view-mode, active-tab,
-toolbox-tab, dev-settings, and file-ui-state persistence.
+This module only manages non-plot UI state: active-tab, toolbox-tab,
+dev-settings, and file-ui-state persistence.  view-mode is derived
+from the active plot tab (see app.py derive_view_mode).
 """
 
 import dash
@@ -15,7 +16,6 @@ def register_context_callbacks(app, data_manager):
     @app.callback(
         [
             Output('file-ui-state', 'data'),
-            Output('view-mode', 'data', allow_duplicate=True),
             Output('active-tab', 'data', allow_duplicate=True),
             Output('toolbox-tab', 'data', allow_duplicate=True),
             Output('dev-settings', 'data', allow_duplicate=True),
@@ -28,7 +28,7 @@ def register_context_callbacks(app, data_manager):
         """Load persisted UI state when the active file changes.
 
         If the user is on a shared tab (peak-analysis, across-samples),
-        keep the current tab and view-mode unchanged.
+        keep the current tab unchanged.
         Plot settings hydration is handled by plot_settings_callbacks.
         """
         state = data_manager.get_file_state(active_file)
@@ -36,7 +36,6 @@ def register_context_callbacks(app, data_manager):
 
         return (
             state,
-            dash.no_update if on_shared_tab else state.get('view_mode', 'raw'),
             current_tab if on_shared_tab else state.get('active_tab', 'data-overview'),
             state.get('toolbox_tab', 'pub-plotter'),
             state.get('dev_settings', {'show': False}),

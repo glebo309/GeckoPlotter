@@ -16,12 +16,10 @@ def register_upload_callbacks(app: dash.Dash, data_manager) -> None:
     @app.callback(
         [Output('loaded-files', 'data', allow_duplicate=True),
          Output('file-tree', 'children', allow_duplicate=True),
-         Output('main-plot', 'figure', allow_duplicate=True),
          Output('active-file', 'data', allow_duplicate=True),
          Output('metadata-container', 'children', allow_duplicate=True),
          Output('table-editor-container', 'children', allow_duplicate=True),
-         Output('pub-data-store', 'data', allow_duplicate=True),
-         Output('view-mode', 'data', allow_duplicate=True)],
+         Output('pub-data-store', 'data', allow_duplicate=True)],
         Input('upload-button', 'contents'),
         [State('upload-button', 'filename'),
          State('upload-button', 'last_modified'),
@@ -30,20 +28,21 @@ def register_upload_callbacks(app: dash.Dash, data_manager) -> None:
     )
     def handle_file_upload(contents_list: List[str], filenames: List[str],
                           last_modified_list: List[int], existing_files: List[Dict[str, Any]]) -> tuple:
-        """Handle file upload and processing."""
+        """Handle file upload and processing.
+
+        Sets active-file and loaded-files; the tab system auto-creates
+        plot tabs from the data types and master_render builds the plot.
+        """
 
         if not contents_list or not filenames:
-            return dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update
+            return (dash.no_update,) * 6
 
         try:
-            # Clear bundle manager to prevent stale bundles
             data_manager.bundle_manager.clear_bundles()
-            
-            # Create file records from uploaded files
+
             from services.storage_manager import create_file_records
             new_records = create_file_records(contents_list, filenames, last_modified_list)
 
-            # Load data for each file and track successes
             success_count = 0
             failed_names = set()
             for record in new_records:
@@ -59,18 +58,15 @@ def register_upload_callbacks(app: dash.Dash, data_manager) -> None:
                     log.error(f"Error loading {record['name']}: {str(e)}")
                     failed_names.add(record['name'])
 
-            # Prevent duplicates - merge files by name, exclude failed files
             merged_files = []
             existing_names = set()
 
-            # Add existing files first
             for f in (existing_files or []):
                 fname = f.get('name')
                 if fname and fname not in existing_names:
                     merged_files.append(f)
                     existing_names.add(fname)
 
-            # Add new files that aren't duplicates and weren't failed
             for record in new_records:
                 fname = record.get('name')
                 if fname in failed_names:
@@ -80,48 +76,46 @@ def register_upload_callbacks(app: dash.Dash, data_manager) -> None:
                     existing_names.add(fname)
                 else:
                     log.warning(f"Skipping duplicate file: {fname}")
-            
+
             log.debug(f"Merged files: {len(merged_files)} total ({len(existing_names)} unique names)")
-            
-            # Get bundled tree items (this handles bundling logic)
+
             bundled_items = data_manager.get_bundled_tree_items(merged_files)
-            
-            # Auto-select and plot the last uploaded file
-            auto_plot = dash.no_update
+
+            new_ids = [r.get('id') for r in new_records if r.get('name') not in failed_names]
             auto_active_file = dash.no_update
             auto_table = dash.no_update
-            file_data = None  # ensure defined for table editor block below
+            file_data = None
 
-            if bundled_items:
-                last_item = bundled_items[-1]
-                last_file_id = last_item.get('id')
+            if bundled_items and new_ids:
+                last_new_id = new_ids[-1]
+                last_file_id = last_new_id
+                bundle = data_manager.get_bundle_by_id(last_new_id)
+                if not bundle:
+                    for b in data_manager.bundle_manager.bundles.values():
+                        if b.main_file and b.main_file.get('id') == last_new_id:
+                            last_file_id = b.bundle_id
+                            break
+                        if any(af.get('id') == last_new_id for af in b.auxiliary_files):
+                            last_file_id = b.bundle_id
+                            break
 
                 if last_file_id:
                     auto_active_file = last_file_id
-
-                    try:
-                        from services.plot_manager import PlotManager
-                        plot_manager = PlotManager()
-
-                        main_file_id = last_file_id.split('|')[0] if '|' in last_file_id else last_file_id
-
-                        file_data = data_manager.get_data_by_id(main_file_id)
-                        if file_data:
-                            auto_plot = plot_manager.get_plot_for_file(file_data)
-
+                    main_file_id = last_file_id.split('|')[0] if '|' in last_file_id else last_file_id
+                    file_data = data_manager.get_data_by_id(main_file_id)
+                    if file_data:
+                        try:
                             from callbacks.viz_callbacks import create_data_table, create_bundle_data_table
                             bundle = data_manager.get_bundle_by_id(main_file_id)
                             if bundle:
                                 auto_table = create_bundle_data_table(bundle, file_data, data_manager)
                             else:
                                 auto_table = create_data_table(file_data)
-                    except Exception as e:
-                        log.exception("Error auto-plotting")
+                        except Exception:
+                            log.exception("Error building metadata table")
 
-            # Render tree with selection highlighting
             tree_items = render_file_tree_with_bundles_selected(merged_files, data_manager, auto_active_file)
 
-            # Create table editor for the auto-selected file
             table_editor = None
             pub_data = None
             if auto_active_file and auto_active_file != dash.no_update and file_data:
@@ -136,38 +130,24 @@ def register_upload_callbacks(app: dash.Dash, data_manager) -> None:
                     sheet_names=sheet_names, active_sheet=active_sheet,
                 )
                 pub_data = table_data.to_json(orient='split') if table_data is not None else None
-            
-            # Simple success message
+
             if success_count > 0:
                 log.debug(f"Successfully uploaded {success_count} files!")
 
-            # Auto-switch view mode based on whether the file has plottable data
-            auto_view_mode = dash.no_update
-            if file_data and auto_active_file and auto_active_file != dash.no_update:
-                from callbacks.viz_callbacks import _has_meaningful_raw_plot
-                if _has_meaningful_raw_plot(file_data):
-                    auto_view_mode = 'raw'
-                else:
-                    auto_view_mode = 'analysis'
-                    log.debug("Auto-switching to analysis mode (no plottable raw data)")
-
-            return merged_files, tree_items, auto_plot, auto_active_file, auto_table, table_editor, pub_data, auto_view_mode
+            return merged_files, tree_items, auto_active_file, auto_table, table_editor, pub_data
 
         except Exception as e:
             log.exception(f"Upload failed: {str(e)}")
-            return dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update
+            return (dash.no_update,) * 6
 
 
-    # Mirror of handle_file_upload that triggers from drag-and-drop zone
     @app.callback(
         [Output('loaded-files', 'data', allow_duplicate=True),
          Output('file-tree', 'children', allow_duplicate=True),
-         Output('main-plot', 'figure', allow_duplicate=True),
          Output('active-file', 'data', allow_duplicate=True),
          Output('metadata-container', 'children', allow_duplicate=True),
          Output('table-editor-container', 'children', allow_duplicate=True),
-         Output('pub-data-store', 'data', allow_duplicate=True),
-         Output('view-mode', 'data', allow_duplicate=True)],
+         Output('pub-data-store', 'data', allow_duplicate=True)],
         Input('drop-zone', 'contents'),
         [State('drop-zone', 'filename'),
          State('drop-zone', 'last_modified'),
@@ -176,12 +156,21 @@ def register_upload_callbacks(app: dash.Dash, data_manager) -> None:
     )
     def handle_drop_upload(contents_list, filenames, last_modified_list, existing_files):
         if not contents_list or not filenames:
-            return (dash.no_update,) * 8
+            return (dash.no_update,) * 6
         return handle_file_upload(contents_list, filenames, last_modified_list, existing_files)
 
 
 def render_file_tree_with_bundles(records: List[dict], data_manager) -> List[html.Div]:
-    """Render file tree with bundles from records."""
+    """Render file tree with bundles from records (no selection or grouping)."""
+    return render_file_tree_with_bundles_selected(records, data_manager)
+
+
+def render_file_tree_with_bundles_selected(records: List[dict], data_manager, active_file_id: str = None, active_plot_tab: str = None) -> List[html.Div]:
+    """Render file tree grouped by overlay group, with group headers.
+
+    Files are sorted into groups matching plot tabs. Generic/unrecognized
+    files go into an 'Unplotted' section at the bottom.
+    """
     if not records:
         return [
             html.Div(
@@ -190,66 +179,100 @@ def render_file_tree_with_bundles(records: List[dict], data_manager) -> List[htm
             )
         ]
 
-    # Get bundled tree items
+    from callbacks.viz_callbacks import (
+        _get_overlay_group, _tab_id_from_group, _tab_label_from_group,
+    )
+    from collections import OrderedDict
+
     bundled_items = data_manager.get_bundled_tree_items(records)
-    
-    tree_items = []
+
+    groups = OrderedDict()
+    ungrouped = []
+
     for item in bundled_items:
+        file_id = item.get('id')
+        fdata = data_manager.get_data_by_id(file_id)
+        if not fdata:
+            bundle = data_manager.get_bundle_by_id(file_id)
+            if bundle and bundle.main_file:
+                fdata = data_manager.get_data_by_id(bundle.main_file.get('id'))
+        if not fdata or fdata.get('standardized') is None:
+            ungrouped.append(item)
+            continue
+        metadata = fdata.get('metadata', {})
+        group = _get_overlay_group(metadata, fdata)
+        tid = _tab_id_from_group(group)
+        if tid not in groups:
+            groups[tid] = {'label': _tab_label_from_group(group), 'items': []}
+        groups[tid]['items'].append(item)
+
+    tree_items = []
+    for tid, group_info in groups.items():
+        is_active_group = tid == active_plot_tab
+        tree_items.append(_render_group_header(
+            group_info['label'], tid, is_active_group))
+        for item in group_info['items']:
+            if item.get('is_bundle'):
+                is_selected = active_file_id == item.get('id')
+                tree_items.append(render_bundle_item_selected(
+                    item, is_selected, data_manager=data_manager,
+                    dimmed=not is_active_group))
+            else:
+                is_selected = active_file_id == item.get('id')
+                tree_items.append(render_individual_file_item_selected(
+                    item, is_selected, data_manager=data_manager,
+                    dimmed=not is_active_group))
+
+    for item in ungrouped:
         if item.get('is_bundle'):
-            # Render bundle item
-            tree_items.append(render_bundle_item(item, data_manager=data_manager))
+            is_selected = active_file_id == item.get('id')
+            tree_items.append(render_bundle_item_selected(
+                item, is_selected, data_manager=data_manager, dimmed=False))
         else:
-            # Render individual file item
-            tree_items.append(render_individual_file_item(item, data_manager=data_manager))
-    
+            is_selected = active_file_id == item.get('id')
+            tree_items.append(render_individual_file_item_selected(
+                item, is_selected, data_manager=data_manager, dimmed=False))
+
     return tree_items
 
 
-def render_file_tree_with_bundles_selected(records: List[dict], data_manager, active_file_id: str = None) -> List[html.Div]:
-    """Render file tree with bundles and selection highlighting from records."""
-    if not records:
-        return [
-            html.Div(
-                'No files loaded',
-                style={'color': '#666', 'padding': '20px', 'textAlign': 'center'},
-            )
-        ]
-
-    # Get bundled tree items
-    bundled_items = data_manager.get_bundled_tree_items(records)
-    
-    tree_items = []
-    for item in bundled_items:
-        if item.get('is_bundle'):
-            # Render bundle item with selection
-            is_selected = active_file_id == item.get('id')
-            tree_items.append(render_bundle_item_selected(item, is_selected, data_manager=data_manager))
-        else:
-            # Render individual file item with selection
-            is_selected = active_file_id == item.get('id')
-            tree_items.append(render_individual_file_item_selected(item, is_selected, data_manager=data_manager))
-    
-    return tree_items
+def _render_group_header(label: str, group_id: str, is_active: bool) -> html.Div:
+    """Render a group header in the file tree."""
+    return html.Div(
+        html.Span(label, style={
+            'fontWeight': '600' if is_active else '500',
+            'fontSize': '11px',
+            'textTransform': 'uppercase',
+            'letterSpacing': '0.5px',
+            'color': '#ff6b35' if is_active else '#888',
+        }),
+        className='file-group-header active' if is_active else 'file-group-header',
+        style={
+            'padding': '6px 8px 3px 8px',
+            'marginTop': '6px',
+            'borderBottom': '1px solid #ff6b35' if is_active else '1px solid #e0e0e0',
+        },
+    )
 
 
-def render_bundle_item(bundle_item: dict, data_manager=None) -> html.Div:
+def render_bundle_item(bundle_item: dict, data_manager=None, dimmed=False) -> html.Div:
     """Render a bundle item."""
-    return render_bundle_item_selected(bundle_item, is_selected=False, data_manager=data_manager)
+    return render_bundle_item_selected(bundle_item, is_selected=False, data_manager=data_manager, dimmed=dimmed)
 
 
-def render_individual_file_item(item: dict, is_child: bool = False, data_manager=None) -> html.Div:
+def render_individual_file_item(item: dict, is_child: bool = False, data_manager=None, dimmed=False) -> html.Div:
     """Render an individual file item."""
-    return render_individual_file_item_selected(item, is_selected=False, is_child=is_child, data_manager=data_manager)
+    return render_individual_file_item_selected(item, is_selected=False, is_child=is_child, data_manager=data_manager, dimmed=dimmed)
 
 
-def render_bundle_item_selected(bundle_item: dict, is_selected: bool = False, data_manager=None) -> html.Div:
+def render_bundle_item_selected(bundle_item: dict, is_selected: bool = False, data_manager=None, dimmed: bool = False) -> html.Div:
     """Render a bundle item with selection highlighting."""
     bundle_icon = bundle_item.get('icon', '📦')
     bundle_id = bundle_item.get('id')
-    
+
     # Selection highlighting colors
-    bg_color = '#fff5f0' if is_selected else '#ffffff'  # Light orange when selected
-    border_color = '#ff6b35' if is_selected else '#e0e0e0'  # Orange border when selected
+    bg_color = '#fff5f0' if is_selected else '#ffffff'
+    opacity = '0.5' if dimmed and not is_selected else '1.0'
     
     # Check stored collapse state for expansion button and child visibility
     initial_icon = '▶'
@@ -360,10 +383,10 @@ def render_bundle_item_selected(bundle_item: dict, is_selected: bool = False, da
             for child in bundle_item.get('children', [])
         ], style={'marginLeft': '16px', 'display': children_display},
           id={'type': 'bundle-children', 'index': bundle_id})
-    ], className='bundle-item')
+    ], className='bundle-item', style={'opacity': opacity})
 
 
-def render_individual_file_item_selected(item: dict, is_selected: bool = False, is_child: bool = False, data_manager=None) -> html.Div:
+def render_individual_file_item_selected(item: dict, is_selected: bool = False, is_child: bool = False, data_manager=None, dimmed: bool = False) -> html.Div:
     """Render an individual file item with selection highlighting using clean grid layout."""
     # Define icons for different file types
     TYPE_ICONS = {
@@ -611,23 +634,22 @@ def render_individual_file_item_selected(item: dict, is_selected: bool = False, 
         })
     ])
 
-    # Return main item with children (initially collapsed)
+    dim_style = {'opacity': '0.5'} if dimmed and not is_selected else {}
+
     if children:
-        # Check if this file should be expanded based on stored collapse state
-        initial_display = 'none'  # Default collapsed
+        initial_display = 'none'
         if data_manager and hasattr(data_manager, 'collapse_state'):
             stored_state = data_manager.collapse_state.get(file_id, 'collapsed')
             if stored_state == 'expanded':
                 initial_display = 'block'
-                log.debug(f"Restoring expanded state for {file_id}")
-        
+
         return html.Div([
             main_item,
-            html.Div(children, style={'marginLeft': '20px', 'display': initial_display}, 
+            html.Div(children, style={'marginLeft': '20px', 'display': initial_display},
                     id={'type': 'file-children', 'index': file_id})
-        ])
+        ], style=dim_style)
     else:
-        return main_item
+        return html.Div([main_item], style=dim_style) if dim_style else main_item
 
 
 
@@ -638,7 +660,6 @@ def register_clear_callbacks(app: dash.Dash, data_manager) -> None:
     @app.callback(
         [Output('loaded-files', 'data', allow_duplicate=True),
          Output('file-tree', 'children', allow_duplicate=True),
-         Output('main-plot', 'figure', allow_duplicate=True),
          Output('active-file', 'data', allow_duplicate=True),
          Output('metadata-container', 'children', allow_duplicate=True),
          Output('table-editor-container', 'children', allow_duplicate=True),
@@ -648,33 +669,15 @@ def register_clear_callbacks(app: dash.Dash, data_manager) -> None:
         prevent_initial_call=True
     )
     def clear_all_files(n_clicks):
-        """Clear all loaded files."""
+        """Clear all loaded files.  Sets active-file to None; master_render
+        picks up the change and shows the empty-state plot."""
         if not n_clicks:
-            return (dash.no_update,) * 8
+            return (dash.no_update,) * 7
 
         from components.data_table_editor import create_data_table_editor
         from components.axis_mapper import get_empty_selections
 
-        # Clear data manager
         data_manager.clear_data()
-
-        # Return empty states
-        import plotly.graph_objects as go
-        empty_fig = go.Figure()
-        empty_fig.add_annotation(
-            text="Upload files to get started",
-            xref="paper", yref="paper",
-            x=0.5, y=0.5, xanchor='center', yanchor='middle',
-            showarrow=False,
-            font=dict(size=16, color="#666")
-        )
-        empty_fig.update_layout(
-            xaxis=dict(visible=False),
-            yaxis=dict(visible=False),
-            plot_bgcolor='white',
-            paper_bgcolor='white',
-            margin=dict(l=0, r=0, t=0, b=0)
-        )
 
         empty_tree = [html.Div(
             'No files loaded',
@@ -688,7 +691,7 @@ def register_clear_callbacks(app: dash.Dash, data_manager) -> None:
 
         empty_table_editor = create_data_table_editor(None, table_id='pub-table')
 
-        return [], empty_tree, empty_fig, None, empty_table, empty_table_editor, None, get_empty_selections()
+        return [], empty_tree, None, empty_table, empty_table_editor, None, get_empty_selections()
 
     @app.callback(
         Output('status-text', 'children', allow_duplicate=True),

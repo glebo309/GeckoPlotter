@@ -141,24 +141,21 @@ def _axis_range_from_relayout(relayout_data, axis_name='xaxis'):
     return None
 
 
-def _restore_zoom(figure, relayout_data):
-    """Re-apply the user's current zoom to a freshly built figure."""
-    import plotly.graph_objects as go
-    fig = go.Figure(figure) if isinstance(figure, dict) else figure
-    fig.update_layout(uirevision='main-plot')
+def _apply_zoom_state(fig, zoom_state):
+    """Re-apply stored user zoom ranges to a freshly built figure."""
+    if not zoom_state:
+        return
 
-    x_range = _axis_range_from_relayout(relayout_data, 'xaxis')
-    y_range = _axis_range_from_relayout(relayout_data, 'yaxis')
-    if not x_range and not y_range:
-        return fig
+    x_range = _axis_range_from_relayout(zoom_state, 'xaxis')
+    y_range = _axis_range_from_relayout(zoom_state, 'yaxis')
 
     layout_update = {}
     if x_range:
         layout_update['xaxis'] = dict(range=x_range, autorange=False)
     if y_range:
         layout_update['yaxis'] = dict(range=y_range, autorange=False)
-    fig.update_layout(**layout_update)
-    return fig
+    if layout_update:
+        fig.update_layout(**layout_update)
 
 
 def _apply_preserved_view(dm, figure, previous_file_id, next_file_id, relayout_data):
@@ -191,18 +188,25 @@ def _apply_preserved_view(dm, figure, previous_file_id, next_file_id, relayout_d
     return fig
 
 
-def _collect_visible_files(dm, active_file_id=None, loaded_files=None):
+def _collect_visible_files(dm, active_file_id=None, loaded_files=None, target_group_override=None):
     """Return dict of {group_key: [(name, file_data), ...]} for visible files.
 
-    Only returns files matching the active file's type so different data
-    types don't get mixed. The eye icon controls visibility within the group.
+    Only returns files matching the target group so different data types
+    don't get mixed. The eye icon controls visibility within the group.
     Files not present in *loaded_files* (if given) are skipped to prevent
     stale data from previous uploads leaking in.
+
+    *target_group_override* can be a group tuple to use directly instead
+    of deriving from the active file.
     """
     vis_state = getattr(dm, 'visibility_state', {})
 
-    # Determine which group to show based on active file
-    target_group = _get_active_file_group(dm, active_file_id) if active_file_id else None
+    if target_group_override:
+        target_group = target_group_override
+    elif active_file_id:
+        target_group = _get_active_file_group(dm, active_file_id)
+    else:
+        target_group = None
 
     # Build set of IDs that are actually loaded in the UI right now
     valid_ids: set | None = None
@@ -278,10 +282,257 @@ def _collect_visible_files(dm, active_file_id=None, loaded_files=None):
     return dict(groups)
 
 
+_GROUP_LABELS = {
+    'chromatogram': 'Chromatograms',
+    'spectrum': 'Spectra',
+    'uvvis': 'UV-Vis Spectra',
+    'lcms_ms': 'LC-MS',
+    'lcms_uv': 'LC-MS UV',
+    'kinetics': 'Kinetics',
+    'generic': 'Data',
+    'table': 'Table',
+}
+
+_AUTO_PLOT_CATEGORIES = frozenset({
+    'chromatogram', 'spectrum', 'lcms_ms', 'lcms_uv', 'kinetics',
+})
+
+
+def _tab_id_from_group(group_key):
+    """Create a stable tab ID from an overlay group key tuple."""
+    cat, x_axis = group_key
+    slug = f"{cat}_{x_axis}".replace(' ', '_').replace('(', '').replace(')', '').lower()
+    return f"tab-{slug}"
+
+
+def _tab_label_from_group(group_key):
+    """Create a human-readable label for a tab from its overlay group key."""
+    cat, x_axis = group_key
+    base = _GROUP_LABELS.get(cat, cat.replace('_', ' ').title())
+    return base
+
+
 def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
     """Register visualization-related callbacks."""
 
     plot_manager = PlotManager()
+
+    # ------------------------------------------------------------------
+    # Plot tab management
+    # ------------------------------------------------------------------
+
+    @app.callback(
+        [Output('plot-tabs', 'data'),
+         Output('active-plot-tab', 'data', allow_duplicate=True)],
+        [Input('loaded-files', 'data')],
+        [State('plot-tabs', 'data'),
+         State('active-plot-tab', 'data'),
+         State('active-file', 'data')],
+        prevent_initial_call=True,
+    )
+    def sync_plot_tabs(loaded_files, existing_tabs, current_active_tab, active_file):
+        """Auto-create/remove plot tabs based on loaded files.
+
+        Each unique overlay group (source_category, x_axis) gets its own tab,
+        but only for recognized scientific data types. Generic CSVs stay
+        unplotted until the user explicitly creates an analysis tab.
+        """
+        existing_tabs = existing_tabs or []
+
+        if not loaded_files:
+            return [], None
+
+        bundled_component_ids = set()
+        for b in data_manager.bundle_manager.bundles.values():
+            if b.main_file:
+                bundled_component_ids.add(b.main_file.get('id'))
+            for af in b.auxiliary_files:
+                bundled_component_ids.add(af.get('id'))
+
+        seen_groups = set()
+        for fid, fdata in data_manager.loaded_data.items():
+            if fid in bundled_component_ids:
+                continue
+            sr = fdata.get('standardized')
+            if sr is None:
+                continue
+            metadata = fdata.get('metadata', {})
+            group = _get_overlay_group(metadata, fdata)
+            seen_groups.add(group)
+
+        new_tabs = []
+        for group in sorted(seen_groups):
+            tid = _tab_id_from_group(group)
+            existing = next((t for t in existing_tabs if t['id'] == tid), None)
+            if existing:
+                new_tabs.append(existing)
+            else:
+                new_tabs.append({
+                    'id': tid,
+                    'label': _tab_label_from_group(group),
+                    'type': 'raw',
+                    'group_key': list(group),
+                })
+
+        analysis_tab = next((t for t in existing_tabs if t['type'] == 'analysis'), None)
+        if analysis_tab:
+            new_tabs.append(analysis_tab)
+
+        new_tab_ids = {t['id'] for t in new_tabs}
+
+        if active_file:
+            file_group = _get_active_file_group(data_manager, active_file)
+            if file_group and _tab_id_from_group(file_group) in new_tab_ids:
+                next_active = _tab_id_from_group(file_group)
+            elif current_active_tab and current_active_tab in new_tab_ids:
+                next_active = current_active_tab
+            else:
+                next_active = new_tabs[0]['id'] if new_tabs else None
+        elif current_active_tab and current_active_tab in new_tab_ids:
+            next_active = current_active_tab
+        else:
+            next_active = new_tabs[0]['id'] if new_tabs else None
+
+        return new_tabs, next_active
+
+    @app.callback(
+        Output('plot-tab-bar', 'children'),
+        [Input('plot-tabs', 'data'),
+         Input('active-plot-tab', 'data')],
+    )
+    def render_tab_bar(tabs, active_tab_id):
+        """Render the plot tab bar above the main plot."""
+        from dash import html as _html
+        if not tabs:
+            return []
+        children = []
+        for tab in tabs:
+            is_active = tab['id'] == active_tab_id
+            children.append(_html.Button(
+                tab['label'],
+                id={'type': 'plot-tab-btn', 'index': tab['id']},
+                className='plot-tab-btn active' if is_active else 'plot-tab-btn',
+                n_clicks=0,
+            ))
+        return children
+
+    @app.callback(
+        Output('active-plot-tab', 'data', allow_duplicate=True),
+        Input({'type': 'plot-tab-btn', 'index': dash.dependencies.ALL}, 'n_clicks'),
+        State('active-plot-tab', 'data'),
+        prevent_initial_call=True,
+    )
+    def handle_tab_click(n_clicks_list, current_tab):
+        """Switch active plot tab when a tab button is clicked."""
+        ctx = dash.callback_context
+        if not ctx.triggered or not any(n for n in n_clicks_list if n):
+            return dash.no_update
+        import json as _json
+        triggered = ctx.triggered[0]['prop_id']
+        component_str = triggered.rsplit('.', 1)[0]
+        tab_id = _json.loads(component_str)['index']
+        if tab_id == current_tab:
+            return dash.no_update
+        return tab_id
+
+    @app.callback(
+        [Output('active-plot-tab', 'data', allow_duplicate=True),
+         Output('tab-file-memory', 'data', allow_duplicate=True)],
+        Input('active-file', 'data'),
+        [State('plot-tabs', 'data'),
+         State('active-plot-tab', 'data'),
+         State('tab-file-memory', 'data')],
+        prevent_initial_call=True,
+    )
+    def auto_switch_tab_and_remember(active_file, tabs, current_tab, memory):
+        """When a file is selected: save it as last-touched for the target tab,
+        and switch to that tab if needed."""
+        if not active_file or not tabs:
+            return dash.no_update, dash.no_update
+        file_group = _get_active_file_group(data_manager, active_file)
+        if not file_group:
+            return dash.no_update, dash.no_update
+        target_tab = _tab_id_from_group(file_group)
+        tab_exists = any(t['id'] == target_tab for t in tabs)
+
+        new_memory = {**(memory or {}), target_tab: active_file}
+
+        if tab_exists and target_tab != current_tab:
+            return target_tab, new_memory
+        if not tab_exists:
+            if current_tab:
+                new_memory[current_tab] = active_file
+            return dash.no_update, new_memory
+        return dash.no_update, new_memory
+
+    @app.callback(
+        [Output('active-file', 'data', allow_duplicate=True),
+         Output('zoom-state', 'data', allow_duplicate=True)],
+        Input('active-plot-tab', 'data'),
+        [State('tab-file-memory', 'data'),
+         State('active-file', 'data'),
+         State('tab-zoom-memory', 'data')],
+        prevent_initial_call=True,
+    )
+    def restore_file_on_tab_switch(active_tab_id, memory, current_file, zoom_memory):
+        """When the plot tab changes, restore the last-touched file and zoom for that tab."""
+        restored_zoom = (zoom_memory or {}).get(active_tab_id)
+        if not active_tab_id or not memory:
+            return dash.no_update, restored_zoom
+        remembered = memory.get(active_tab_id)
+        if not remembered or remembered == current_file:
+            return dash.no_update, restored_zoom
+        if data_manager.get_data_by_id(remembered) or data_manager.get_bundle_by_id(remembered):
+            return remembered, restored_zoom
+        return dash.no_update, restored_zoom
+
+    # Capture user zoom into a dedicated store so it survives figure rebuilds.
+    app.clientside_callback(
+        """
+        function(relayoutData) {
+            if (!relayoutData) return window.dash_clientside.no_update;
+            // User double-clicked to reset zoom — clear stored zoom
+            if (relayoutData['xaxis.autorange'] && relayoutData['yaxis.autorange']) {
+                return null;
+            }
+            // Figure rebuild / autosize / single-axis autorange — don't touch stored zoom
+            if (relayoutData['autosize'] || relayoutData['xaxis.autorange']
+                || relayoutData['yaxis.autorange']) {
+                return window.dash_clientside.no_update;
+            }
+            var zoom = {};
+            var found = false;
+            var keys = Object.keys(relayoutData);
+            for (var i = 0; i < keys.length; i++) {
+                var k = keys[i];
+                if (k.indexOf('range[') !== -1) {
+                    zoom[k] = relayoutData[k];
+                    found = true;
+                }
+            }
+            return found ? zoom : window.dash_clientside.no_update;
+        }
+        """,
+        Output('zoom-state', 'data', allow_duplicate=True),
+        Input('main-plot', 'relayoutData'),
+        prevent_initial_call=True,
+    )
+
+    @app.callback(
+        Output('tab-zoom-memory', 'data', allow_duplicate=True),
+        Input('zoom-state', 'data'),
+        State('active-plot-tab', 'data'),
+        State('tab-zoom-memory', 'data'),
+        prevent_initial_call=True,
+    )
+    def save_zoom_per_tab(zoom_state, active_tab, memory):
+        """Persist zoom ranges per plot tab so they survive tab switches."""
+        if not active_tab:
+            return dash.no_update
+        memory = memory or {}
+        if memory.get(active_tab) == zoom_state:
+            return dash.no_update
+        return {**memory, active_tab: zoom_state}
 
     @app.callback(
         [Output('main-plot', 'figure', allow_duplicate=True),
@@ -289,18 +540,16 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
          Output('selected-peak-idx', 'data', allow_duplicate=True),
          Output('metadata-container', 'children', allow_duplicate=True),
          Output('table-editor-container', 'children', allow_duplicate=True),
-         Output('pub-data-store', 'data', allow_duplicate=True),
-         Output('view-mode', 'data', allow_duplicate=True)],
+         Output('pub-data-store', 'data', allow_duplicate=True)],
         [Input({'type': 'file-tree-item', 'index': dash.dependencies.ALL}, 'n_clicks')],
         [State('loaded-files', 'data'),
          State('active-file', 'data'),
-         State('view-mode', 'data'),
          State('active-tab', 'data'),
          State('main-plot', 'relayoutData'),
          State('selected-peak-idx', 'data')],
         prevent_initial_call=True
     )
-    def handle_file_selection(n_clicks_list, loaded_files, active_file, view_mode, active_tab, relayout_data, selected_peak_id):
+    def handle_file_selection(n_clicks_list, loaded_files, active_file, active_tab, relayout_data, selected_peak_id):
         """Handle file selection from the tree."""
         
         from components.axis_mapper import get_empty_selections
@@ -308,12 +557,12 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
         # Check if any file was clicked
         ctx = dash.callback_context
         if not ctx.triggered:
-            return (dash.no_update,) * 7
+            return (dash.no_update,) * 6
 
         # Find which file was clicked
         triggered_id = ctx.triggered[0]['prop_id']
         if 'n_clicks' not in triggered_id:
-            return (dash.no_update,) * 7
+            return (dash.no_update,) * 6
 
         # Extract file ID from the triggered component
         import json
@@ -331,22 +580,22 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
                 'expand-btn' in triggered_id or 
                 'collapse-btn' in triggered_id):
                 log.debug(f"🚫 Ignoring control button click: {triggered_id}")
-                return (dash.no_update,) * 7
+                return (dash.no_update,) * 6
             
             # Check if this click actually happened (n_clicks > 0)
             trigger_value = ctx.triggered[0]['value']
             if not trigger_value or trigger_value == 0:
-                return (dash.no_update,) * 7
+                return (dash.no_update,) * 6
                 
         except Exception as e:
             log.debug(f"Error parsing callback trigger: {e}")
-            return (dash.no_update,) * 7
+            return (dash.no_update,) * 6
 
         log.debug(f"File clicked: {file_id} (tab={active_tab})")
 
         # Don't redraw if the same file is already active
         if file_id == active_file:
-            return (dash.no_update,) * 7
+            return (dash.no_update,) * 6
 
         # On shared tabs, only update active-file and metadata — don't touch
         # main-plot or pub-data-store (those hold shared analysis data).
@@ -394,7 +643,7 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
                     pub_data = table_data.to_json(orient='split') if table_data is not None else None
                 if data_manager.get_publication_memory(file_id) is None:
                     data_manager.initialise_publication_memory(file_id, get_empty_selections())
-                return dash.no_update if on_shared_tab else figure, file_id, None, data_table, table_editor, pub_data, dash.no_update
+                return dash.no_update, file_id, None, data_table, table_editor, pub_data
 
         if not file_data:
             log.warning(f"File data not found for ID: {file_id}")
@@ -410,14 +659,13 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
                 if data_manager.get_publication_memory(file_id) is None:
                     data_manager.initialise_publication_memory(file_id, get_empty_selections())
                 return (
-                    dash.no_update if on_shared_tab else error_fig,
+                    dash.no_update,
                     file_id, None, error_table, empty_table_editor,
                     dash.no_update if on_shared_tab else None,
-                    dash.no_update,
                 )
             except Exception as e:
                 log.exception(f"Error building error state for {file_id}")
-                return (dash.no_update,) * 7
+                return (dash.no_update,) * 6
 
         log.debug(f"✅ Found file data, creating plot...")
 
@@ -491,34 +739,23 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
             else:
                 data_manager.initialise_publication_memory(file_id, get_empty_selections())
 
-        # Auto-switch to analysis mode for generic/unknown file types that
-        # don't have a meaningful raw-data plot (e.g. plain CSVs, tables).
-        # On shared tabs, don't change view mode.
-        if on_shared_tab:
-            new_view_mode = dash.no_update
-        elif not _has_meaningful_raw_plot(file_data):
-            new_view_mode = 'analysis'
-            log.debug(f"🔀 Auto-switching to analysis mode (no meaningful raw plot)")
-        else:
-            new_view_mode = dash.no_update
-
-        # Never write to main-plot here. handle_view_mode_change is the
-        # sole owner of main-plot — it fires from the active-file change
-        # and builds the correct multi-file overlay with zoom preservation.
-        return dash.no_update, file_id, None, data_table, table_editor, pub_data, new_view_mode
+        # Never write to main-plot here. master_render owns it — the
+        # active-file change triggers auto_switch_tab which triggers render.
+        return dash.no_update, file_id, None, data_table, table_editor, pub_data
 
     # ---- Sheet tab switching for multi-sheet Excel files ----
     @app.callback(
-        [Output('main-plot', 'figure', allow_duplicate=True),
+        [Output('render-trigger', 'data', allow_duplicate=True),
          Output('table-editor-container', 'children', allow_duplicate=True),
          Output('pub-data-store', 'data', allow_duplicate=True),
          Output('metadata-container', 'children', allow_duplicate=True)],
         [Input({'type': 'sheet-tab', 'index': dash.dependencies.ALL}, 'n_clicks')],
         [State('active-file', 'data'),
-         State('active-sheet-name', 'data')],
+         State('active-sheet-name', 'data'),
+         State('render-trigger', 'data')],
         prevent_initial_call=True,
     )
-    def handle_sheet_tab_click(n_clicks_list, active_file, current_sheet):
+    def handle_sheet_tab_click(n_clicks_list, active_file, current_sheet, render_counter):
         ctx = dash.callback_context
         if not ctx.triggered or not any(n for n in n_clicks_list if n):
             return (dash.no_update,) * 4
@@ -551,7 +788,6 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
         new_cat = sheet_info.get('source_category', SourceCategory.GENERIC)
         new_hint = sheet_info.get('plot_hint', PlotHint.LINE)
 
-        # Update the entry's active data
         file_data['data'] = new_df
         file_data['metadata']['active_sheet'] = clicked_sheet
         sr = file_data.get('standardized')
@@ -567,11 +803,6 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
                 metadata=file_data['metadata'],
             )
 
-        figure = plot_manager.get_plot_for_file(file_data)
-        import plotly.graph_objects as go
-        fig_obj = go.Figure(figure) if isinstance(figure, dict) else figure
-        fig_obj.update_layout(uirevision='main-plot')
-
         table_data = prepare_table_data(file_data, file_id=active_file)
         sheet_names = file_data.get('metadata', {}).get('sheet_names')
         table_editor = create_data_table_editor(
@@ -581,150 +812,106 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
         pub_data = table_data.to_json(orient='split') if table_data is not None else None
         data_table = create_data_table(file_data)
 
-        return fig_obj, table_editor, pub_data, data_table
+        return (render_counter or 0) + 1, table_editor, pub_data, data_table
 
     @app.callback(
-        Output('main-plot', 'figure', allow_duplicate=True),
-        [Input('view-mode', 'data'),
+        [Output('main-plot', 'figure', allow_duplicate=True),
+         Output('zoom-state', 'data', allow_duplicate=True)],
+        [Input('active-plot-tab', 'data'),
          Input('pub-plot-trigger', 'data'),
-         Input('active-file', 'data')],
+         Input('active-file', 'data'),
+         Input('current-plot-settings', 'data'),
+         Input('render-trigger', 'data')],
         [State('loaded-files', 'data'),
+         State('plot-tabs', 'data'),
          State('pub-plot-figure', 'data'),
-         State('current-plot-settings', 'data'),
          State('selected-peak-idx', 'data'),
-         State('main-plot', 'relayoutData')],
+         State('zoom-state', 'data'),
+         State('tab-zoom-memory', 'data')],
         prevent_initial_call=True
     )
-    def handle_view_mode_change(view_mode, plot_trigger, active_file, loaded_files, pub_plot_figure, plot_settings, selected_peak_id, relayout_data):
-        # active_file is now an Input (triggers on file switch)
-        """Handle view mode toggle between Raw Data and Analysis Plot."""
-        import plotly.graph_objects as go
-        from services.plot_settings_service import PlotSettingsService, DEFAULT_PLOT_SETTINGS
+    def master_render(active_tab_id, plot_trigger, active_file, plot_settings, render_trigger,
+                      loaded_files, plot_tabs, pub_plot_figure, selected_peak_id, zoom_state,
+                      zoom_memory):
+        """Single owner of main-plot. Renders the active plot tab's figure.
 
-        if not active_file:
-            return dash.no_update
-
-        ctx = dash.callback_context
-        if not ctx.triggered:
-            return dash.no_update
-
-        trigger_id = ctx.triggered[0]['prop_id'].rsplit('.', 1)[0]
-        log.debug(f"🔄 handle_view_mode_change: trigger={trigger_id}, mode={view_mode}, relayout={relayout_data}")
-
-        # If publication plot was updated, only show it if user is in analysis mode.
-        if trigger_id == 'pub-plot-trigger':
-            if (view_mode or 'raw') == 'analysis' and pub_plot_figure:
-                return pub_plot_figure
-            else:
-                return dash.no_update
-
-        # Get the active file data
-        file_data = data_manager.get_data_by_id(active_file)
-        if not file_data:
-            bundle = data_manager.get_bundle_by_id(active_file)
-            if bundle and bundle.main_file:
-                file_data = data_manager.get_data_by_id(bundle.main_file.get('id'))
-        if not file_data:
-            return dash.no_update
-
-        if view_mode == 'analysis':
-            if pub_plot_figure:
-                return pub_plot_figure
-            else:
-                figure = plot_manager.create_empty_plot("Select data in Data Selector to create analysis plot")
-        else:
-            # Raw mode — multi-file plot respecting visibility
-            s = {**DEFAULT_PLOT_SETTINGS, **(plot_settings or {})}
-            layout_mode = s.get('layout_mode', 'overlay')
-
-            visible_files = _collect_visible_files(data_manager, active_file, loaded_files)
-            if not visible_files:
-                return plot_manager.create_hidden_state_plot()
-
-            figure = plot_manager.create_multi_file_plot(visible_files, layout_mode)
-
-            # Overlay peaks (manual baseline + imported + detected)
-            _ov_time, _ov_signal = get_chromatogram_arrays(data_manager, active_file)
-            if _ov_time is not None:
-                figure = overlay_peaks_on_figure(
-                    data_manager.peak_service.get_peaks(active_file), figure, _ov_time, _ov_signal, selected_peak_id
-                )
-
-            # Apply current plot settings
-            try:
-                fig_obj = go.Figure(figure) if isinstance(figure, dict) else figure
-                s = {**DEFAULT_PLOT_SETTINGS, **(plot_settings or {})}
-                ps = PlotSettingsService.from_dict(s)
-                PlotSettingsService.apply_to_figure(fig_obj, ps)
-                figure = _restore_zoom(fig_obj, relayout_data)
-            except Exception:
-                log.exception("Failed to apply plot settings to raw figure")
-
-        return figure
-
-    # ------------------------------------------------------------------
-    # Re-render raw plot when settings change (while in raw mode)
-    # ------------------------------------------------------------------
-    _last_raw_settings = [None]
-
-    @app.callback(
-        Output('main-plot', 'figure', allow_duplicate=True),
-        [Input('current-plot-settings', 'data'),
-         Input('peak-change-trigger', 'data')],
-        [State('view-mode', 'data'),
-         State('active-file', 'data'),
-         State('loaded-files', 'data'),
-         State('selected-peak-idx', 'data'),
-         State('main-plot', 'relayoutData')],
-        prevent_initial_call=True,
-    )
-    def apply_settings_to_raw_plot(plot_settings, peak_change, view_mode, active_file, loaded_files, selected_peak_id, relayout_data):
-        """Re-render raw plot when settings change, but only in raw mode.
-
-        Skips redraw when triggered by peak-change-trigger (baseline callback
-        already returned updated figure) or when settings haven't changed
-        (e.g. tab switch that re-hydrates the same values).
+        Each tab has a type ('raw' or 'analysis') and a group_key that
+        determines which files are shown.  Baseline/peak callbacks may
+        still Patch() the figure afterwards.
         """
         import plotly.graph_objects as go
         from services.plot_settings_service import PlotSettingsService, DEFAULT_PLOT_SETTINGS
 
-        if (view_mode or 'raw') != 'raw' or not active_file:
-            return dash.no_update
+        no_zoom = dash.no_update
 
         ctx = dash.callback_context
         trigger_id = ctx.triggered[0]['prop_id'].rsplit('.', 1)[0] if ctx.triggered else ''
-        if trigger_id == 'peak-change-trigger':
-            return dash.no_update
+        log.debug(f"master_render: trigger={trigger_id}, tab={active_tab_id}")
 
+        if not active_tab_id or not plot_tabs:
+            return plot_manager.create_empty_plot("Upload files to get started"), None
+
+        tab = next((t for t in plot_tabs if t['id'] == active_tab_id), None)
+        if not tab:
+            return plot_manager.create_empty_plot("Upload files to get started"), None
+
+        # -- Analysis tab --
+        if tab.get('type') == 'analysis':
+            if trigger_id == 'current-plot-settings':
+                return dash.no_update, no_zoom
+            if pub_plot_figure:
+                return pub_plot_figure, no_zoom
+            return plot_manager.create_empty_plot(
+                "Select data in Data Selector to create analysis plot"), no_zoom
+
+        # -- Raw tab --
+        if trigger_id == 'pub-plot-trigger':
+            return dash.no_update, no_zoom
+
+        is_tab_switch = trigger_id == 'active-plot-tab'
+        restored_zoom = (zoom_memory or {}).get(active_tab_id) if is_tab_switch else None
+        set_zoom = restored_zoom if is_tab_switch else no_zoom
+
+        group_key = tuple(tab.get('group_key', []))
         s = {**DEFAULT_PLOT_SETTINGS, **(plot_settings or {})}
-
-        if s == _last_raw_settings[0]:
-            return dash.no_update
-        _last_raw_settings[0] = s
-
         layout_mode = s.get('layout_mode', 'overlay')
 
-        visible_files = _collect_visible_files(data_manager, active_file, loaded_files)
+        visible_files = _collect_visible_files(
+            data_manager, active_file, loaded_files, target_group_override=group_key)
         if not visible_files:
-            return plot_manager.create_hidden_state_plot()
+            return plot_manager.create_hidden_state_plot(), set_zoom
 
-        fig = plot_manager.create_multi_file_plot(visible_files, layout_mode)
+        figure = plot_manager.create_multi_file_plot(visible_files, layout_mode)
 
-        # Overlay peaks
-        _ov_time, _ov_signal = get_chromatogram_arrays(data_manager, active_file)
-        if _ov_time is not None:
-            fig = overlay_peaks_on_figure(
-                data_manager.peak_service.get_peaks(active_file), fig, _ov_time, _ov_signal, selected_peak_id
-            )
+        if active_file:
+            _ov_time, _ov_signal = get_chromatogram_arrays(data_manager, active_file)
+            if _ov_time is not None:
+                figure = overlay_peaks_on_figure(
+                    data_manager.peak_service.get_peaks(active_file),
+                    figure, _ov_time, _ov_signal, selected_peak_id)
+
+        if is_tab_switch:
+            effective_zoom = restored_zoom
+        else:
+            effective_zoom = zoom_state
 
         try:
-            fig_obj = go.Figure(fig) if isinstance(fig, dict) else fig
+            fig_obj = go.Figure(figure) if isinstance(figure, dict) else figure
             ps = PlotSettingsService.from_dict(s)
             PlotSettingsService.apply_to_figure(fig_obj, ps)
-            return _restore_zoom(fig_obj, relayout_data)
+            fig_obj.update_layout(uirevision=active_tab_id)
+            if effective_zoom:
+                _apply_zoom_state(fig_obj, effective_zoom)
+            else:
+                fig_obj.update_layout(
+                    xaxis=dict(autorange=True),
+                    yaxis=dict(autorange=True),
+                )
+            figure = fig_obj
         except Exception:
-            log.exception("Failed to apply settings to raw plot")
-            return fig
+            log.exception("Failed to apply plot settings to raw figure")
+
+        return figure, set_zoom
 
     # Selection highlighting is handled centrally in app.py.
     # Keeping a second DOM-mutation callback here causes stale/high-conflicting

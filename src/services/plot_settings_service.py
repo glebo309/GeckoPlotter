@@ -308,7 +308,6 @@ class PlotSettingsService:
             title_text=settings.x_label,
             showgrid=settings.show_grid_x,
             griddash=grid_dash,
-            range=x_range,
             type=settings.x_scale,
             tickfont=dict(size=settings.tick_font_size),
             showline=settings.show_frame,
@@ -319,13 +318,17 @@ class PlotSettingsService:
             title_text=settings.y_label,
             showgrid=settings.show_grid_y,
             griddash=grid_dash,
-            range=y_range,
             type=settings.y_scale,
             tickfont=dict(size=settings.tick_font_size),
             showline=settings.show_frame,
             mirror=settings.show_frame,
             **tick_cfg,
         )
+        if not settings.auto_range:
+            axis_common_x['range'] = x_range
+            axis_common_x['autorange'] = False
+            axis_common_y['range'] = y_range
+            axis_common_y['autorange'] = False
 
         # Update all x/y axes (subplots: xaxis, xaxis2, …)
         # Exclude coloraxis, polar axis, etc.
@@ -355,33 +358,47 @@ class PlotSettingsService:
         # -- Colour palette & trace styling ----------------------------------
         palette = cls.get_color_palette(settings.palette)
         line_dash = _DASH_MAP.get(settings.line_style, 'solid')
+        recolor = settings.palette != 'okabe_ito'
 
-        for idx, trace in enumerate(fig.data):
-            color = palette[idx % len(palette)]
+        data_trace_idx = 0
+        for trace in fig.data:
             is_bar = isinstance(trace, go.Bar)
 
-            # Trace opacity
+            # Skip peak overlay traces (fills, deselect catchers, baselines)
+            trace_name = getattr(trace, 'name', '') or ''
+            is_peak_trace = (
+                getattr(trace, 'fill', None) is not None
+                or trace_name.startswith('peak:')
+                or trace_name == '__deselect__'
+                or 'baseline' in trace_name.lower()
+            )
+            if is_peak_trace:
+                continue
+
+            if recolor:
+                color = palette[data_trace_idx % len(palette)]
+            else:
+                color = None
+
             if settings.trace_opacity < 1.0:
                 trace.update(opacity=settings.trace_opacity)
 
-            # Line traces (Scatter with lines — skip bars)
             if not is_bar and hasattr(trace, "line") and trace.line is not None:
                 trace.line.width = settings.line_width
-                trace.line.color = color
+                if color:
+                    trace.line.color = color
                 trace.line.dash = line_dash
 
-            # Markers — bars only support color, not symbol/size
             if is_bar:
-                if hasattr(trace, "marker") and trace.marker is not None:
+                if color and hasattr(trace, "marker") and trace.marker is not None:
                     trace.marker.color = color
             elif hasattr(trace, "marker") and trace.marker is not None:
                 trace.marker.size = settings.marker_size
-                trace.marker.color = color
+                if color:
+                    trace.marker.color = color
                 trace.marker.symbol = settings.marker_symbol
 
-            # Filled areas (peak fills)
-            if hasattr(trace, "fill") and trace.fill is not None:
-                trace.update(fillcolor=_hex_to_rgba(color, settings.peak_opacity))
+            data_trace_idx += 1
 
         # -- Dimensions & margins --------------------------------------------
         fig.update_layout(

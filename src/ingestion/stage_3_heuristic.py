@@ -517,17 +517,8 @@ def _coerce_numerics(df: pd.DataFrame) -> pd.DataFrame:
 def _infer_source_category(
     df: pd.DataFrame, roles: Dict[str, ColumnRole]
 ) -> SourceCategory:
-    x_col = next((c for c, r in roles.items() if r == ColumnRole.X), None)
-    if x_col is None:
-        return SourceCategory.GENERIC
-    lower = str(x_col).lower()
-    for pat, kind in _X_PATTERNS:
-        if re.search(pat, lower):
-            if kind == "time":
-                return SourceCategory.KINETICS
-            if kind == "wavelength":
-                return SourceCategory.SPECTRUM
-            break
+    # Stage 3 is the fallback for files that didn't match any preset.
+    # Stay conservative: only presets should assign specific categories.
     return SourceCategory.GENERIC
 
 

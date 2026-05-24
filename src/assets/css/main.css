@@ -659,32 +659,41 @@ button[id*="collapse-btn"]:active {
     padding: 20px;
 }
 
-/* View Mode Toggle */
-.view-mode-toggle {
+/* Plot Tab Bar */
+.plot-tab-bar {
     display: flex;
-    gap: 5px;
+    gap: 2px;
+    align-items: center;
+    padding: 0 4px;
 }
 
-.mode-btn {
-    padding: 4px 12px;
+.plot-tab-btn {
+    padding: 4px 14px;
     border: 1px solid #d0d0d0;
-    background: #f8f9fa;
+    border-bottom: none;
+    background: #f0f0f0;
     color: #666;
     font-size: 12px;
+    font-weight: 500;
     cursor: pointer;
-    transition: all 0.2s;
-    border-radius: 4px;
+    transition: all 0.15s;
+    border-radius: 4px 4px 0 0;
+    white-space: nowrap;
 }
 
-.mode-btn:hover {
+.plot-tab-btn:hover {
     background: #e8e8e8;
     color: #333;
 }
 
-.mode-btn.active {
-    background: #ff6b35;
-    color: white;
-    border-color: #ff6b35;
+.plot-tab-btn.active {
+    background: #ffffff;
+    color: #ff6b35;
+    border-color: #d0d0d0;
+    border-bottom: 1px solid #ffffff;
+    font-weight: 600;
+    position: relative;
+    top: 1px;
 }
 
 /* Toolbox Tabs */
