@@ -45,19 +45,18 @@ def register_plot_settings_callbacks(app, data_manager):
     @app.callback(
         Output('active-plot-context', 'data'),
         [Input('active-file', 'data'),
-         Input('active-tab', 'data'),
-         Input('view-mode', 'data')],
+         Input('view-mode', 'data'),
+         Input('active-tab', 'data')],
     )
-    def resolve_plot_context(active_file, active_tab, view_mode):
-        """Compute the context key for the currently visible plot."""
-        if active_tab == 'peak-analysis':
-            return 'shared:peak-analysis'
-        if active_tab == 'across-samples':
-            return 'shared:across-samples'
-        # Raw mode uses a single shared context — one combined plot
+    def resolve_plot_context(active_file, view_mode, active_tab):
+        """Compute the context key for the currently visible plot.
+
+        Shared tabs get their own context so settings persist across file switches.
+        """
+        if active_tab in ('peak-analysis', 'across-samples'):
+            return f'shared:{active_tab}'
         if (view_mode or 'raw') == 'raw':
             return 'shared:raw'
-        # Analysis mode is per-file
         if active_file:
             return f'file:{active_file}'
         return None
@@ -83,6 +82,7 @@ def register_plot_settings_callbacks(app, data_manager):
             # Plot Settings controls
             Output('pt-plot-type', 'value', allow_duplicate=True),
             Output('pt-auto-range', 'value', allow_duplicate=True),
+            Output('pt-categorical-x', 'value', allow_duplicate=True),
             Output('pt-x-min', 'value', allow_duplicate=True),
             Output('pt-x-max', 'value', allow_duplicate=True),
             Output('pt-y-min', 'value', allow_duplicate=True),
@@ -118,11 +118,14 @@ def register_plot_settings_callbacks(app, data_manager):
     )
     def hydrate_plot_settings(context_key):
         """Load saved settings for the active context and push to controls."""
+        import logging
+        _log = logging.getLogger('geckoplotter.settings')
         from callbacks.publication_callbacks import build_y1_series_controls
 
         # Load from persistence (or defaults)
         saved = _load_settings(data_manager, context_key)
         s = {**DEFAULT_PLOT_SETTINGS, **(saved or {})}
+        _log.debug(f"HYDRATE [{context_key}] y1_stats={s.get('y1_stats')} categorical_x={s.get('categorical_x')}")
 
         series_count = max(1, s.get('y1_series_count', 1))
 
@@ -143,6 +146,7 @@ def register_plot_settings_callbacks(app, data_manager):
             # Plot Settings controls
             s['plot_type'],
             ['auto'] if s['auto_range'] else [],
+            ['cat'] if s.get('categorical_x', True) else [],
             s['x_min'],
             s['x_max'],
             s['y_min'],
@@ -190,6 +194,7 @@ def register_plot_settings_callbacks(app, data_manager):
          # Plot Settings controls
          Input('pt-plot-type', 'value'),
          Input('pt-auto-range', 'value'),
+         Input('pt-categorical-x', 'value'),
          Input('pt-x-min', 'value'),
          Input('pt-x-max', 'value'),
          Input('pt-y-min', 'value'),
@@ -227,7 +232,7 @@ def register_plot_settings_callbacks(app, data_manager):
         ds_plot_type, y1_stats, x_label, y1_label, y2_label,
         show_raw, y2_enable,
         # Plot Settings
-        pt_plot_type, pt_auto_range,
+        pt_plot_type, pt_auto_range, pt_categorical_x,
         pt_x_min, pt_x_max, pt_y_min, pt_y_max,
         pt_x_scale, pt_y_scale,
         pt_theme, pt_palette, pt_bg_color, pt_paper_color,
@@ -268,6 +273,7 @@ def register_plot_settings_callbacks(app, data_manager):
             'y1_series_count': current_settings.get('y1_series_count', 1),
             # Axes
             'auto_range': 'auto' in (pt_auto_range or []),
+            'categorical_x': 'cat' in (pt_categorical_x or []),
             'x_min': pt_x_min,
             'x_max': pt_x_max,
             'y_min': pt_y_min,
@@ -326,8 +332,11 @@ def register_plot_settings_callbacks(app, data_manager):
     )
     def persist_plot_settings(settings, context_key):
         """Save current-plot-settings to persistence under the active context."""
+        import logging
+        _log = logging.getLogger('geckoplotter.settings')
         if not context_key or not settings:
             return dash.no_update
+        _log.debug(f"PERSIST [{context_key}] y1_stats={settings.get('y1_stats')}")
         _save_settings(data_manager, context_key, settings)
         return dash.no_update
 

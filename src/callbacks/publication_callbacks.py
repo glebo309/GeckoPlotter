@@ -370,18 +370,41 @@ def register_publication_callbacks(app: dash.Dash, data_manager) -> None:
             return [{'if': {'column_id': '_row_id'}, 'display': 'none'}]
         return _build_highlight_styles(selections, active_selector)
 
+    GROUP_COLORS = [
+        '#E3F2FD', '#FFF3E0', '#E8F5E9', '#FCE4EC',
+        '#F3E5F5', '#E0F7FA', '#FFF8E1', '#F1F8E9',
+    ]
+
     @app.callback(
         Output('cross-sample-table', 'style_data_conditional', allow_duplicate=True),
         [Input('pub-selections', 'data'),
-         Input('active-selector', 'data')],
-        [State('cross-sample-table', 'data'),
-         State('active-tab', 'data')],
+         Input('active-selector', 'data'),
+         Input('cross-sample-table', 'data')],
+        State('active-tab', 'data'),
         prevent_initial_call=True
     )
     def update_cross_sample_table_highlighting(selections, active_selector, table_data, active_tab):
-        if not selections or not table_data or active_tab != 'across-samples':
-            return [{'if': {'column_id': '_row_id'}, 'display': 'none'}]
-        return _build_highlight_styles(selections, active_selector)
+        base = [{'if': {'column_id': '_row_id'}, 'display': 'none'}]
+        if not table_data:
+            return base
+
+        groups_seen = {}
+        for row in table_data:
+            g = (row.get('Group') or '').strip()
+            if g and g not in groups_seen:
+                groups_seen[g] = GROUP_COLORS[len(groups_seen) % len(GROUP_COLORS)]
+        group_styles = []
+        for i, row in enumerate(table_data):
+            g = (row.get('Group') or '').strip()
+            if g and g in groups_seen:
+                group_styles.append({
+                    'if': {'row_index': i},
+                    'backgroundColor': groups_seen[g],
+                })
+
+        if not selections or active_tab != 'across-samples':
+            return base + group_styles
+        return _build_highlight_styles(selections, active_selector) + group_styles
 
     def _build_highlight_styles(selections, active_selector):
         """Build style_data_conditional for highlighting selected cells."""
@@ -1080,6 +1103,7 @@ def register_publication_callbacks(app: dash.Dash, data_manager) -> None:
                 'y1_label': s['y1_label'],
                 'y2_label': s['y2_label'],
                 'show_raw_points': s['show_raw_points'],
+                'categorical_x': s.get('categorical_x', True),
             }
 
             fig, export_data = create_publication_plot(df, None, selections, plot_config)

@@ -584,6 +584,7 @@ class DataManager:
         self.bundle_manager.clear_bundles()
         self.lcms_bundles.clear()
         self.file_ui_state.clear()
+        self.peak_service.clear_all_peaks()
 
         # Cleanup temp files
         for temp_file in self.temp_files:

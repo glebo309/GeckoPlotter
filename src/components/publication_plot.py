@@ -67,11 +67,28 @@ def create_publication_plot(df, virtual_data, selections, plot_config):
     # Build X axis based on display order
     x_sel = selections['x']['data']
     
+    force_categorical = plot_config.get('categorical_x', True)
+
     if x_sel.get('row_ids') and x_sel.get('column_id'):
         # X has data - use it
         x_order, x_labels_raw = get_values_in_display_order(x_sel['row_ids'], x_sel['column_id'], as_strings=True)
-        x_vals = list(range(len(x_order)))
-        use_categorical = True
+        if not force_categorical:
+            numeric_x = []
+            for lbl in x_labels_raw:
+                try:
+                    numeric_x.append(float(lbl))
+                except (ValueError, TypeError):
+                    numeric_x = None
+                    break
+            if numeric_x is not None:
+                x_vals = numeric_x
+                use_categorical = False
+            else:
+                x_vals = list(range(len(x_order)))
+                use_categorical = True
+        else:
+            x_vals = list(range(len(x_order)))
+            use_categorical = True
     else:
         # No X selected - use all Y points in display order
         all_y_rows = set()
@@ -176,7 +193,100 @@ def create_publication_plot(df, virtual_data, selections, plot_config):
         'y2': None
     }
 
-    # Calculate statistics if requested
+    # Group-based aggregation: when Group column has values, aggregate rows by group
+    has_groups = 'Group' in df.columns and df['Group'].astype(str).str.strip().ne('').any()
+
+    if calc_stats and has_groups:
+        y1_col = y1_series_names[0] if y1_series_names else None
+        if y1_col and y1_col in df.columns:
+            grouped = df[df['Group'].astype(str).str.strip().ne('')].copy()
+            grouped['_y_val'] = pd.to_numeric(grouped[y1_col].astype(str).str.replace('%', ''), errors='coerce')
+            agg = grouped.groupby('Group', sort=False)['_y_val']
+
+            group_labels = []
+            y_means = []
+            y_errs = []
+            y_raw_groups = []
+
+            for gname, gvals in agg:
+                vals = gvals.dropna().values
+                if len(vals) == 0:
+                    continue
+                group_labels.append(str(gname))
+                if stat_type == 'mean_sd':
+                    y_means.append(np.mean(vals))
+                    y_errs.append(np.std(vals, ddof=1) if len(vals) > 1 else 0)
+                elif stat_type == 'mean_sem':
+                    y_means.append(np.mean(vals))
+                    sd = np.std(vals, ddof=1) if len(vals) > 1 else 0
+                    y_errs.append(sd / np.sqrt(len(vals)))
+                elif stat_type == 'median_iqr':
+                    y_means.append(np.median(vals))
+                    y_errs.append(np.percentile(vals, 75) - np.percentile(vals, 25) if len(vals) > 1 else 0)
+                y_raw_groups.append(vals)
+
+            if group_labels:
+                if not force_categorical:
+                    numeric_gx = []
+                    for lbl in group_labels:
+                        try:
+                            numeric_gx.append(float(lbl))
+                        except (ValueError, TypeError):
+                            numeric_gx = None
+                            break
+                    if numeric_gx is not None:
+                        g_x = numeric_gx
+                    else:
+                        g_x = list(range(len(group_labels)))
+                else:
+                    g_x = list(range(len(group_labels)))
+                stat_label = stat_type.split('_')[1].upper()
+
+                export_data['y1_series'].append({
+                    'name': f"Mean ± {stat_label}",
+                    'x': g_x,
+                    'y': y_means,
+                    'error': y_errs,
+                })
+
+                if plot_type == 'bar':
+                    fig.add_trace(go.Bar(
+                        x=g_x, y=y_means, name=f"Mean ± {stat_label}",
+                        marker_color=OKABE_ITO[0], marker_line=dict(color='black', width=0.75),
+                        error_y=dict(type='data', array=y_errs, thickness=1, width=3, color='black'),
+                        opacity=0.7 if show_raw else 1.0,
+                    ))
+                elif plot_type == 'scatter':
+                    fig.add_trace(go.Scatter(
+                        x=g_x, y=y_means, mode='markers', name=f"Mean ± {stat_label}",
+                        marker=dict(size=10, color=OKABE_ITO[0], line=dict(color='black', width=0.75)),
+                        error_y=dict(type='data', array=y_errs, thickness=1, width=3, color='black'),
+                    ))
+                else:
+                    fig.add_trace(go.Scatter(
+                        x=g_x, y=y_means, mode='lines+markers', name=f"Mean ± {stat_label}",
+                        line=dict(color=OKABE_ITO[0], width=2.5),
+                        marker=dict(size=8, color=OKABE_ITO[0], line=dict(color='black', width=0.75)),
+                        error_y=dict(type='data', array=y_errs, thickness=1, width=3, color='black'),
+                    ))
+
+                if show_raw:
+                    for gi, vals in enumerate(y_raw_groups):
+                        x_jitter = np.full(len(vals), g_x[gi]) + np.random.uniform(-0.08, 0.08, len(vals))
+                        fig.add_trace(go.Scatter(
+                            x=x_jitter, y=vals, mode='markers',
+                            name=f'Raw', marker=dict(size=5, color=OKABE_ITO[0], opacity=0.5, line=dict(width=0)),
+                            showlegend=(gi == 0),
+                        ))
+
+                x_labels_raw = group_labels
+                x_vals = g_x
+                use_categorical = force_categorical
+                calc_stats = False
+                y1_series_data = []
+                y1_aligned = []
+
+    # Calculate statistics if requested (multi-series, no Group column)
     if calc_stats and sum(len(s) > 0 for s in y1_series_data) > 1:
         # Find common indices
         present_mask = [all(not np.isnan(series.iloc[i]) for series in y1_aligned) for i in range(len(x_order))]

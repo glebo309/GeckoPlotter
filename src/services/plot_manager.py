@@ -14,7 +14,10 @@ class PlotManager:
     """Manages plot creation for different data types."""
 
     def __init__(self):
-        self.default_colors = ['#ff6b35', '#007acc', '#28a745', '#dc3545', '#ffc107']
+        self.default_colors = [
+            '#E69F00', '#56B4E9', '#009E73', '#F0E442',
+            '#0072B2', '#D55E00', '#CC79A7',
+        ]
 
     def create_empty_plot(self, message: str = "Select a file to view data") -> go.Figure:
         """Create an empty placeholder plot."""
@@ -68,8 +71,9 @@ class PlotManager:
 
     def _create_overlay_plot(self, files: list) -> go.Figure:
         fig = go.Figure()
+        trace_idx = 0
         for idx, (name, file_data) in enumerate(files):
-            self._add_traces(fig, name, file_data, color_offset=idx)
+            trace_idx = self._add_traces(fig, name, file_data, color_offset=trace_idx)
         fig.update_layout(
             template='plotly_white',
             autosize=True,
@@ -104,9 +108,10 @@ class PlotManager:
         for row_idx, key in enumerate(group_keys, start=1):
             files = groups[key]
             legend_group = f'group{row_idx}'
+            trace_idx = 0
             for i, (name, fdata) in enumerate(files):
                 sub = go.Figure()
-                self._add_traces(sub, name, fdata, color_offset=i)
+                trace_idx = self._add_traces(sub, name, fdata, color_offset=trace_idx)
                 for trace in sub.data:
                     trace.showlegend = True
                     trace.legendgroup = legend_group
@@ -146,11 +151,12 @@ class PlotManager:
             rows=n, cols=1, shared_xaxes=True,
             vertical_spacing=max(0.03, 0.14 / n),
         )
+        trace_idx = 0
         for i, (name, file_data) in enumerate(files):
             row = i + 1
             legend_group = f'group{row}'
             sub_fig = go.Figure()
-            self._add_traces(sub_fig, name, file_data, color_offset=i)
+            trace_idx = self._add_traces(sub_fig, name, file_data, color_offset=trace_idx)
             for trace in sub_fig.data:
                 trace.showlegend = True
                 trace.legendgroup = legend_group
@@ -180,28 +186,29 @@ class PlotManager:
     # -- helper: add traces from one file to a figure -----------------------
 
     def _add_traces(self, fig, name, file_data, color_offset=0):
-        """Add traces from file_data to fig using StandardizedResult."""
+        """Add traces from file_data to fig. Returns next color index."""
         sr = file_data.get('standardized')
         if sr is None:
-            return
+            return color_offset
 
         df = sr.data
         x_cols = sr.x_columns
         y_cols = sr.y_columns
 
         if not x_cols or not y_cols:
-            return
+            return color_offset
 
         x_col = x_cols[0]
         if x_col not in df.columns:
-            return
+            return color_offset
 
         x_vals = df[x_col]
+        idx = color_offset
 
         for j, y_col in enumerate(y_cols):
             if y_col not in df.columns:
                 continue
-            color = self.default_colors[(color_offset + j) % len(self.default_colors)]
+            color = self.default_colors[idx % len(self.default_colors)]
             label = f"{name} — {y_col}" if len(y_cols) > 1 else name
             fig.add_trace(go.Scatter(
                 x=x_vals,
@@ -210,6 +217,9 @@ class PlotManager:
                 name=label,
                 line=dict(color=color, width=2),
             ))
+            idx += 1
+
+        return idx
 
     # -- hidden / empty state -----------------------------------------------
 
@@ -305,7 +315,9 @@ class PlotManager:
                 hovertemplate=f"{col}<br>{x_title}: %{{x}}<br>%{{y:.4f}}<extra></extra>",
             ))
 
-        title = result.sample_name or result.identity.original_name
+        import os
+        raw_title = result.sample_name or result.identity.original_name
+        title = os.path.splitext(raw_title)[0]
         wl = result.metadata.get("wavelength", "")
         if wl:
             title += f" ({wl} nm)"

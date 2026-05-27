@@ -37,7 +37,7 @@ def register_context_callbacks(app, data_manager):
         return (
             state,
             current_tab if on_shared_tab else state.get('active_tab', 'data-overview'),
-            state.get('toolbox_tab', 'pub-plotter'),
+            dash.no_update if on_shared_tab else state.get('toolbox_tab', 'pub-plotter'),
             state.get('dev_settings', {'show': False}),
         )
 

@@ -124,7 +124,10 @@ def get_chromatogram_arrays(data_manager, file_id):
     if file_data is None:
         bundle = data_manager.get_bundle_by_id(file_id)
         if bundle and bundle.main_file:
-            file_data = data_manager.get_data_by_id(bundle.main_file.get('id'))
+            main_id = bundle.main_file.get('id')
+            log.debug(f"get_chromatogram_arrays: registering alias {file_id} -> {main_id}")
+            data_manager.peak_service.register_alias(file_id, main_id)
+            file_data = data_manager.get_data_by_id(main_id)
     if file_data is None:
         return None, None
 
@@ -146,6 +149,18 @@ def get_chromatogram_arrays(data_manager, file_id):
         df[time_col].to_numpy(dtype=float),
         df[signal_col].to_numpy(dtype=float),
     )
+
+
+def resolve_peak_file_id(data_manager, file_id):
+    """Resolve a bundle ID to the main-file UUID used as peak storage key."""
+    if file_id in data_manager.peak_service._peaks:
+        return file_id
+    bundle = data_manager.get_bundle_by_id(file_id)
+    if bundle and bundle.main_file:
+        main_id = bundle.main_file.get('id')
+        if main_id and main_id in data_manager.peak_service._peaks:
+            return main_id
+    return file_id
 
 
 # ---------------------------------------------------------------------------
@@ -219,11 +234,64 @@ def register_baseline_callbacks(app: dash.Dash, data_manager) -> None:
 
     # ── Draw mode: capture new line from relayoutData ────────────────
 
+    def _subplot_row(subplot_key):
+        """Parse a Plotly subplot key like 'x2y2' into a 1-based row number."""
+        if not subplot_key or subplot_key == 'xy':
+            return 1
+        import re
+        m = re.search(r'y(\d+)', subplot_key)
+        return int(m.group(1)) if m else 1
+
+    def _file_id_for_subplot_row(row, active_file, plot_settings, loaded_files, plot_tabs, active_tab_id):
+        """Map a subplot row number to the file_id whose data occupies that row.
+
+        Returns the same kind of ID that the file selector uses (bundle ID
+        for bundled files), so peaks are stored under a consistent key.
+        """
+        from callbacks.viz_callbacks import _collect_visible_files
+        from services.plot_settings_service import DEFAULT_PLOT_SETTINGS
+
+        s = {**DEFAULT_PLOT_SETTINGS, **(plot_settings or {})}
+        if s.get('layout_mode') != 'stacked':
+            return active_file
+
+        tab = None
+        for t in (plot_tabs or []):
+            if t['id'] == active_tab_id:
+                tab = t
+                break
+        if not tab:
+            return active_file
+
+        group_key = tuple(tab.get('group_key', []))
+        visible = _collect_visible_files(data_manager, active_file, loaded_files, target_group_override=group_key)
+        flat = []
+        for files in visible.values():
+            flat.extend(files)
+        if row < 1 or row > len(flat):
+            return active_file
+        _, fdata = flat[row - 1]
+
+        # Return the bundle ID if this file is bundled, matching what
+        # the file selector sets as active_file.
+        for bundle in data_manager.bundle_manager.bundles.values():
+            if bundle.main_file and bundle.main_file.get('id') == fdata.get('record', {}).get('id'):
+                return bundle.bundle_id
+            if data_manager.loaded_data.get(bundle.bundle_id) is fdata:
+                return bundle.bundle_id
+
+        # Fallback: use the loaded_data key
+        for fid, fd in data_manager.loaded_data.items():
+            if fd is fdata:
+                return fid
+        return fdata.get('record', {}).get('id') or active_file
+
     @app.callback(
         [Output('main-plot', 'figure', allow_duplicate=True),
          Output('peak-change-trigger', 'data', allow_duplicate=True),
          Output('clear-shapes-trigger', 'data', allow_duplicate=True),
-         Output('selected-peak-idx', 'data', allow_duplicate=True)],
+         Output('selected-peak-idx', 'data', allow_duplicate=True),
+         Output('render-trigger', 'data', allow_duplicate=True)],
         [Input('main-plot', 'relayoutData'),
          Input('manual-draw-line-store', 'data')],
         [State('baseline-mode', 'data'),
@@ -232,13 +300,22 @@ def register_baseline_callbacks(app: dash.Dash, data_manager) -> None:
          State('main-plot', 'figure'),
          State('peak-change-trigger', 'data'),
          State('selected-peak-idx', 'data'),
-         State('clear-shapes-trigger', 'data')],
+         State('clear-shapes-trigger', 'data'),
+         State('current-plot-settings', 'data'),
+         State('loaded-files', 'data'),
+         State('plot-tabs', 'data'),
+         State('active-plot-tab', 'data'),
+         State('render-trigger', 'data')],
         prevent_initial_call=True,
     )
-    def handle_relayout(relayout, draw_line, mode, easy_mode, active_file, current_figure, peak_counter, selected_idx, clear_counter):
+    def handle_relayout(relayout, draw_line, mode, easy_mode, active_file, current_figure, peak_counter, selected_idx, clear_counter,
+                        plot_settings, loaded_files, plot_tabs, active_tab_id, render_counter):
         """Handle draw-mode new shapes and edit-mode shape drags."""
         import plotly.graph_objects as go
 
+        tab = next((t for t in (plot_tabs or []) if t['id'] == active_tab_id), None)
+        if tab and tab.get('type') == 'custom':
+            raise PreventUpdate
         if not active_file:
             raise PreventUpdate
 
@@ -250,13 +327,18 @@ def register_baseline_callbacks(app: dash.Dash, data_manager) -> None:
             if any(v is None for pt in display_pts for v in pt):
                 raise PreventUpdate
             subplot_key = draw_line.get('subplot', 'xy')
-            log.debug(f"Draw on subplot={subplot_key}")
+            row = _subplot_row(subplot_key)
+            target_file = _file_id_for_subplot_row(row, active_file, plot_settings, loaded_files, plot_tabs, active_tab_id)
+            log.debug(f"Draw on subplot={subplot_key} row={row} target_file={target_file} active_file={active_file}")
+            log.debug(f"  plot_settings layout_mode={plot_settings.get('layout_mode') if plot_settings else 'None'}")
+            log.debug(f"  plot_tabs={plot_tabs}, active_tab_id={active_tab_id}")
+            log.debug(f"  draw_line keys={list(draw_line.keys())} subplot_raw={draw_line.get('subplot')}")
             calc_pts = display_pts
 
             if easy_mode and 'easy' in easy_mode:
                 calc_pts = [(display_pts[0][0], 0), (display_pts[1][0], 0)]
 
-            time_arr, signal_arr = _get_chrom(active_file)
+            time_arr, signal_arr = _get_chrom(target_file)
             if time_arr is None:
                 raise PreventUpdate
 
@@ -269,12 +351,10 @@ def register_baseline_callbacks(app: dash.Dash, data_manager) -> None:
             line_x_max = max(display_pts[0][0], display_pts[1][0])
             line_width = line_x_max - line_x_min
 
-            all_peaks = data_manager.peak_service.get_peaks(active_file)
+            all_peaks = data_manager.peak_service.get_peaks(target_file)
             replaced = False
             changed_peak = None
             for p in all_peaks:
-                if p.source not in ('manual', 'detected'):
-                    continue
                 if p.p_line and len(p.p_line) == 2:
                     p_x_min = min(p.p_line[0][0], p.p_line[1][0])
                     p_x_max = max(p.p_line[0][0], p.p_line[1][0])
@@ -304,7 +384,7 @@ def register_baseline_callbacks(app: dash.Dash, data_manager) -> None:
 
             if not replaced:
                 changed_peak = data_manager.peak_service.add_baseline_peak(
-                    file_id=active_file,
+                    file_id=target_file,
                     area=res['area'],
                     height=res['height'],
                     apex_x=res['apex_x'],
@@ -316,10 +396,15 @@ def register_baseline_callbacks(app: dash.Dash, data_manager) -> None:
                 )
                 log.debug(f"Added peak RT={res['apex_x']:.3f}, area={res['area']:.1f}")
 
+            data_manager.peak_service.group_peaks_across_samples()
+            from services.plot_settings_service import DEFAULT_PLOT_SETTINGS
+            _s = {**DEFAULT_PLOT_SETTINGS, **(plot_settings or {})}
+            if _s.get('layout_mode') == 'stacked':
+                return dash.no_update, (peak_counter or 0) + 1, (clear_counter or 0) + 1, None, (render_counter or 0) + 1
             fig_patch = patch_figure_with_peaks(
-                data_manager.peak_service.get_peaks(active_file), current_figure, time_arr, signal_arr, None
+                data_manager.peak_service.get_peaks(target_file), current_figure, time_arr, signal_arr, None
             )
-            return fig_patch, (peak_counter or 0) + 1, (clear_counter or 0) + 1, None
+            return fig_patch, (peak_counter or 0) + 1, (clear_counter or 0) + 1, None, dash.no_update
 
         # ── Edit selected/all baseline shape endpoint(s) ──
         if not relayout:
@@ -368,7 +453,16 @@ def register_baseline_callbacks(app: dash.Dash, data_manager) -> None:
                 calc_p0 = (x0, 0)
                 calc_p1 = (x1, 0)
 
-            all_peaks = data_manager.peak_service.get_peaks(active_file)
+            # Determine which file owns this shape (subplot-aware)
+            edit_file = active_file
+            if _is_stacked(plot_settings):
+                import re
+                shape_yref = getattr(shape, 'yref', 'y') or 'y'
+                m = re.search(r'y(\d+)', shape_yref)
+                edit_row = int(m.group(1)) if m else 1
+                edit_file = _file_id_for_subplot_row(edit_row, active_file, plot_settings, loaded_files, plot_tabs, active_tab_id)
+
+            all_peaks = data_manager.peak_service.get_peaks(edit_file)
             shape_name = getattr(shape, 'name', None)
             p = None
             if isinstance(shape_name, str) and shape_name.startswith('baseline:'):
@@ -388,7 +482,7 @@ def register_baseline_callbacks(app: dash.Dash, data_manager) -> None:
             if p is None:
                 raise PreventUpdate
 
-            time_arr, signal_arr = _get_chrom(active_file)
+            time_arr, signal_arr = _get_chrom(edit_file)
             if time_arr is None:
                 raise PreventUpdate
 
@@ -409,28 +503,41 @@ def register_baseline_callbacks(app: dash.Dash, data_manager) -> None:
             p.width = p.rt_end - p.rt_start
             if p.source == 'detected':
                 p.source = 'manual'
-            log.debug(f"Edit-dragged peak idx={shape_idx}: RT={res['apex_x']:.3f}")
+            log.debug(f"Edit-dragged peak idx={shape_idx}: RT={res['apex_x']:.3f} file={edit_file}")
+
+            if _is_stacked(plot_settings):
+                return dash.no_update, (peak_counter or 0) + 1, (clear_counter or 0) + 1, p.peak_id if mode != 'edit' else None, (render_counter or 0) + 1
 
             selected_for_rebuild = None if mode == 'edit' else p.peak_id
             fig_patch = patch_figure_with_peaks(
-                data_manager.peak_service.get_peaks(active_file), current_figure, time_arr, signal_arr, selected_for_rebuild
+                data_manager.peak_service.get_peaks(edit_file), current_figure, time_arr, signal_arr, selected_for_rebuild
             )
-            return fig_patch, (peak_counter or 0) + 1, (clear_counter or 0) + 1, p.peak_id if mode != 'edit' else None
+            return fig_patch, (peak_counter or 0) + 1, (clear_counter or 0) + 1, p.peak_id if mode != 'edit' else None, dash.no_update
 
         raise PreventUpdate
 
     # ── Normal mode: click a filled peak to select/highlight it ───────
 
+    def _is_stacked(plot_settings):
+        from services.plot_settings_service import DEFAULT_PLOT_SETTINGS
+        s = {**DEFAULT_PLOT_SETTINGS, **(plot_settings or {})}
+        return s.get('layout_mode') == 'stacked'
+
     @app.callback(
         [Output('selected-peak-idx', 'data', allow_duplicate=True),
-         Output('main-plot', 'figure', allow_duplicate=True)],
+         Output('main-plot', 'figure', allow_duplicate=True),
+         Output('render-trigger', 'data', allow_duplicate=True)],
         Input('plot-peak-click-store', 'data'),
         [State('active-file', 'data'),
-         State('main-plot', 'figure')],
+         State('main-plot', 'figure'),
+         State('current-plot-settings', 'data'),
+         State('render-trigger', 'data'),
+         State('view-mode', 'data')],
         prevent_initial_call=True,
     )
-    def select_peak_from_browser_hit_test(hit_data, active_file, current_figure):
-        """Select a peak from the browser-side pointer hit test before Plotly starts drawing."""
+    def select_peak_from_browser_hit_test(hit_data, active_file, current_figure, plot_settings, render_counter, view_mode):
+        if (view_mode or 'raw') != 'raw':
+            raise PreventUpdate
         if not hit_data or not active_file:
             raise PreventUpdate
 
@@ -438,29 +545,38 @@ def register_baseline_callbacks(app: dash.Dash, data_manager) -> None:
         if not peak_id:
             raise PreventUpdate
 
+        if _is_stacked(plot_settings):
+            return peak_id, dash.no_update, (render_counter or 0) + 1
+
+        peak_fid = resolve_peak_file_id(data_manager, active_file)
         time_arr, signal_arr = _get_chrom(active_file)
         if time_arr is None:
             raise PreventUpdate
 
         fig_patch = patch_figure_with_peaks(
-            data_manager.peak_service.get_peaks(active_file), current_figure, time_arr, signal_arr, peak_id
+            data_manager.peak_service.get_peaks(peak_fid), current_figure, time_arr, signal_arr, peak_id
         )
-        return peak_id, fig_patch
+        return peak_id, fig_patch, dash.no_update
 
     @app.callback(
         [Output('selected-peak-idx', 'data', allow_duplicate=True),
-         Output('main-plot', 'figure', allow_duplicate=True)],
+         Output('main-plot', 'figure', allow_duplicate=True),
+         Output('render-trigger', 'data', allow_duplicate=True)],
         Input('main-plot', 'clickData'),
         [State('active-file', 'data'),
          State('main-plot', 'figure'),
          State('selected-peak-idx', 'data'),
-         State('baseline-mode', 'data')],
+         State('baseline-mode', 'data'),
+         State('current-plot-settings', 'data'),
+         State('render-trigger', 'data'),
+         State('view-mode', 'data')],
         prevent_initial_call=True,
     )
-    def select_peak_by_click(click_data, active_file, current_figure, selected_peak_id, mode):
-        """Select peaks from any mode; the invisible catcher deselects."""
+    def select_peak_by_click(click_data, active_file, current_figure, selected_peak_id, mode, plot_settings, render_counter, view_mode):
         import plotly.graph_objects as go
 
+        if (view_mode or 'raw') != 'raw':
+            raise PreventUpdate
         if not click_data or not active_file:
             raise PreventUpdate
 
@@ -479,40 +595,52 @@ def register_baseline_callbacks(app: dash.Dash, data_manager) -> None:
             raise PreventUpdate
 
         next_selected = None if peak_id == '__deselect__' else peak_id
+
+        if _is_stacked(plot_settings):
+            return next_selected, dash.no_update, (render_counter or 0) + 1
+
+        peak_fid = resolve_peak_file_id(data_manager, active_file)
         time_arr, signal_arr = _get_chrom(active_file)
         if time_arr is None:
             raise PreventUpdate
 
         fig_patch = patch_figure_with_peaks(
-            data_manager.peak_service.get_peaks(active_file), current_figure, time_arr, signal_arr, next_selected
+            data_manager.peak_service.get_peaks(peak_fid), current_figure, time_arr, signal_arr, next_selected
         )
-        return next_selected, fig_patch
+        return next_selected, fig_patch, dash.no_update
 
     @app.callback(
         [Output('selected-peak-idx', 'data', allow_duplicate=True),
-         Output('main-plot', 'figure', allow_duplicate=True)],
+         Output('main-plot', 'figure', allow_duplicate=True),
+         Output('render-trigger', 'data', allow_duplicate=True)],
         Input('plot-empty-click-trigger', 'n_clicks'),
         [State('active-file', 'data'),
          State('main-plot', 'figure'),
          State('selected-peak-idx', 'data'),
-         State('baseline-mode', 'data')],
+         State('baseline-mode', 'data'),
+         State('current-plot-settings', 'data'),
+         State('render-trigger', 'data'),
+         State('view-mode', 'data')],
         prevent_initial_call=True,
     )
-    def deselect_peak_from_empty_plot_click(n_clicks, active_file, current_figure, selected_peak_id, mode):
-        """Deselect the current peak when the browser detects a blank plot click."""
-        import plotly.graph_objects as go
-
+    def deselect_peak_from_empty_plot_click(n_clicks, active_file, current_figure, selected_peak_id, mode, plot_settings, render_counter, view_mode):
+        if (view_mode or 'raw') != 'raw':
+            raise PreventUpdate
         if not n_clicks or not active_file or not selected_peak_id:
             raise PreventUpdate
 
+        if _is_stacked(plot_settings):
+            return None, dash.no_update, (render_counter or 0) + 1
+
+        peak_fid = resolve_peak_file_id(data_manager, active_file)
         time_arr, signal_arr = _get_chrom(active_file)
         if time_arr is None:
             raise PreventUpdate
 
         fig_patch = patch_figure_with_peaks(
-            data_manager.peak_service.get_peaks(active_file), current_figure, time_arr, signal_arr, None
+            data_manager.peak_service.get_peaks(peak_fid), current_figure, time_arr, signal_arr, None
         )
-        return None, fig_patch
+        return None, fig_patch, dash.no_update
 
     # ── Client-side cleanup for Plotly's transient draw shape ─────────
 
@@ -558,29 +686,38 @@ def register_baseline_callbacks(app: dash.Dash, data_manager) -> None:
     @app.callback(
         [Output('main-plot', 'figure', allow_duplicate=True),
          Output('selected-peak-idx', 'data', allow_duplicate=True),
-         Output('peak-change-trigger', 'data', allow_duplicate=True)],
+         Output('peak-change-trigger', 'data', allow_duplicate=True),
+         Output('render-trigger', 'data', allow_duplicate=True)],
         Input('baseline-clear-btn', 'n_clicks'),
         [State('active-file', 'data'),
          State('main-plot', 'figure'),
          State('peak-change-trigger', 'data'),
-         State('selected-peak-idx', 'data')],
+         State('selected-peak-idx', 'data'),
+         State('current-plot-settings', 'data'),
+         State('render-trigger', 'data'),
+         State('view-mode', 'data')],
         prevent_initial_call=True,
     )
-    def clear_manual_peaks(n_clicks, active_file, current_figure, peak_counter, selected_peak_id):
+    def clear_manual_peaks(n_clicks, active_file, current_figure, peak_counter, selected_peak_id, plot_settings, render_counter, view_mode):
         if not n_clicks:
             raise PreventUpdate
         if active_file:
+            peak_fid = resolve_peak_file_id(data_manager, active_file)
+            log.debug(f"clear_manual_peaks: active={active_file} -> peak_fid={peak_fid}, selected={selected_peak_id}")
             if selected_peak_id:
-                data_manager.peak_service.remove_peak(active_file, selected_peak_id)
+                data_manager.peak_service.remove_peak(peak_fid, selected_peak_id)
             else:
-                data_manager.peak_service.clear_manual_peaks(active_file)
+                data_manager.peak_service.clear_manual_peaks(peak_fid)
+            data_manager.peak_service.group_peaks_across_samples()
+            if _is_stacked(plot_settings):
+                return dash.no_update, None, (peak_counter or 0) + 1, (render_counter or 0) + 1
             time_arr, signal_arr = _get_chrom(active_file)
             if time_arr is not None:
                 fig_patch = patch_figure_with_peaks(
-                    data_manager.peak_service.get_peaks(active_file), current_figure, time_arr, signal_arr
+                    data_manager.peak_service.get_peaks(peak_fid), current_figure, time_arr, signal_arr
                 )
-                return fig_patch, None, (peak_counter or 0) + 1
-        return current_figure, None, (peak_counter or 0) + 1
+                return fig_patch, None, (peak_counter or 0) + 1, dash.no_update
+        return current_figure, None, (peak_counter or 0) + 1, dash.no_update
 
     # ── Peak count indicator in toolbox ───────────────────────────────
 
@@ -595,20 +732,11 @@ def register_baseline_callbacks(app: dash.Dash, data_manager) -> None:
         if not active_file:
             return html.Div()
         all_peaks = data_manager.peak_service.get_peaks(active_file)
-        manual = [p for p in all_peaks if p.source == 'manual']
-        detected = [p for p in all_peaks if p.source == 'detected']
-        imported = [p for p in all_peaks if p.source == 'imported']
-        parts = []
-        if imported:
-            parts.append(f'{len(imported)} imported')
-        if manual:
-            parts.append(f'{len(manual)} manual')
-        if detected:
-            parts.append(f'{len(detected)} detected')
-        if not parts:
+        count = len(all_peaks)
+        if not count:
             return html.Div('No peaks', style={'fontSize': '11px', 'color': '#999', 'fontStyle': 'italic'})
         return html.Div(
-            f'Peaks: {", ".join(parts)}. See Peak Analysis tab for details.',
+            f'{count} peak{"s" if count != 1 else ""}. See Peak Analysis tab for details.',
             style={'fontSize': '11px', 'color': '#666'},
         )
 
@@ -621,7 +749,7 @@ def _add_edit_handles(data_manager, file_id, fig):
     """Add editable line shapes for each editable peak's baseline."""
     all_peaks = data_manager.peak_service.get_peaks(file_id)
     editable = sorted(
-        [p for p in all_peaks if p.source in ('manual', 'detected') and p.p_line and len(p.p_line) == 2],
+        [p for p in all_peaks if p.p_line and len(p.p_line) == 2],
         key=lambda p: p.rt,
     )
     for p in editable:

@@ -6,6 +6,7 @@ Visualization callbacks for GeckoPlotter V2.
 """
 
 import logging
+import os
 import sys
 from typing import Dict, Any, Optional
 import dash
@@ -16,7 +17,7 @@ from services.plot_manager import PlotManager
 from services.storage_manager import DataManager
 from components.data_table_editor import create_data_table_editor
 from components.publication_plot import create_publication_plot
-from callbacks.peak_overlay import overlay_peaks_on_figure, patch_figure_with_peaks, rgba, FILL_COLORS
+from callbacks.peak_overlay import overlay_peaks_on_figure, patch_figure_with_peaks, rgba, FILL_COLORS, cleanup_peak_traces, add_peak_traces
 from callbacks.baseline_callbacks import get_chromatogram_arrays
 from src.ingestion.types import PlotHint, SourceCategory
 
@@ -188,7 +189,16 @@ def _apply_preserved_view(dm, figure, previous_file_id, next_file_id, relayout_d
     return fig
 
 
-def _collect_visible_files(dm, active_file_id=None, loaded_files=None, target_group_override=None):
+def _find_file_id(dm, fdata):
+    """Find the loaded_data key that corresponds to an fdata dict."""
+    for fid, fd in dm.loaded_data.items():
+        if fd is fdata:
+            return fid
+    rec = fdata.get('record', {})
+    return rec.get('id')
+
+
+def _collect_visible_files(dm, active_file_id=None, loaded_files=None, target_group_override=None, file_order=None):
     """Return dict of {group_key: [(name, file_data), ...]} for visible files.
 
     Only returns files matching the target group so different data types
@@ -272,14 +282,40 @@ def _collect_visible_files(dm, active_file_id=None, loaded_files=None, target_gr
                 x_col = sr.x_columns[0]
                 sub_df = fdata['data'][[x_col] + [w for w in vis_wells if w in fdata['data'].columns]].copy()
                 sub_data = {**fdata, 'data': sub_df}
-                name = fdata.get('record', {}).get('name', fid)
+                name = os.path.splitext(fdata.get('record', {}).get('name', fid))[0]
                 groups[group].append((name, sub_data))
         else:
             if vis_state.get(fid, True):
-                name = fdata.get('record', {}).get('name', fid)
+                name = os.path.splitext(fdata.get('record', {}).get('name', fid))[0]
                 groups[group].append((name, fdata))
 
-    return dict(groups)
+    result = dict(groups)
+    if file_order:
+        for gkey, file_list in result.items():
+            tab_id = _tab_id_from_group(gkey)
+            group_order = file_order.get(tab_id)
+            if not group_order:
+                file_list.sort(key=lambda x: x[0].lower())
+                continue
+            explicit = group_order.get('order')
+            if explicit:
+                id_map = {fid: idx for idx, fid in enumerate(explicit)}
+                def _sort_key(entry):
+                    _, fd = entry
+                    fid = fd.get('record', {}).get('id', '')
+                    for bid, bdata in dm.loaded_data.items():
+                        if bdata is fd:
+                            fid = bid
+                            break
+                    return id_map.get(fid, 999999)
+                file_list.sort(key=_sort_key)
+            else:
+                sort_dir = group_order.get('sort_dir', 'asc')
+                file_list.sort(key=lambda x: x[0].lower(), reverse=(sort_dir == 'desc'))
+    else:
+        for gkey, file_list in result.items():
+            file_list.sort(key=lambda x: x[0].lower())
+    return result
 
 
 _GROUP_LABELS = {
@@ -374,9 +410,9 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
                     'group_key': list(group),
                 })
 
-        analysis_tab = next((t for t in existing_tabs if t['type'] == 'analysis'), None)
-        if analysis_tab:
-            new_tabs.append(analysis_tab)
+        for t in existing_tabs:
+            if t.get('type') == 'custom':
+                new_tabs.append(t)
 
         new_tab_ids = {t['id'] for t in new_tabs}
 
@@ -408,8 +444,24 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
         children = []
         for tab in tabs:
             is_active = tab['id'] == active_tab_id
-            children.append(_html.Button(
+            is_custom = tab.get('type') == 'custom'
+            label_el = _html.Span(
                 tab['label'],
+                id={'type': 'plot-tab-label', 'index': tab['id']},
+                contentEditable='true' if is_custom else 'false',
+                style={'outline': 'none'},
+            )
+            tab_children = [label_el]
+            if is_custom:
+                tab_children.append(_html.Span(
+                    '×',
+                    id={'type': 'plot-tab-close', 'index': tab['id']},
+                    n_clicks=0,
+                    style={'marginLeft': '6px', 'cursor': 'pointer', 'fontWeight': 'bold',
+                           'fontSize': '14px', 'opacity': '0.6'},
+                ))
+            children.append(_html.Button(
+                tab_children,
                 id={'type': 'plot-tab-btn', 'index': tab['id']},
                 className='plot-tab-btn active' if is_active else 'plot-tab-btn',
                 n_clicks=0,
@@ -533,6 +585,134 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
         if memory.get(active_tab) == zoom_state:
             return dash.no_update
         return {**memory, active_tab: zoom_state}
+
+    # -- Close custom plot tab --
+    @app.callback(
+        [Output('plot-tabs', 'data', allow_duplicate=True),
+         Output('active-plot-tab', 'data', allow_duplicate=True),
+         Output('custom-plot-figures', 'data', allow_duplicate=True)],
+        Input({'type': 'plot-tab-close', 'index': dash.dependencies.ALL}, 'n_clicks'),
+        [State('plot-tabs', 'data'),
+         State('active-plot-tab', 'data'),
+         State('custom-plot-figures', 'data')],
+        prevent_initial_call=True,
+    )
+    def close_custom_tab(n_clicks_list, tabs, active_tab, figures):
+        ctx = dash.callback_context
+        if not ctx.triggered or not any(n for n in n_clicks_list if n):
+            return dash.no_update, dash.no_update, dash.no_update
+        import json as _json
+        triggered = ctx.triggered[0]['prop_id']
+        tab_id = _json.loads(triggered.rsplit('.', 1)[0])['index']
+        new_tabs = [t for t in tabs if t['id'] != tab_id]
+        new_figures = {k: v for k, v in (figures or {}).items() if k != tab_id}
+        new_active = active_tab
+        if active_tab == tab_id:
+            new_active = new_tabs[-1]['id'] if new_tabs else None
+        return new_tabs, new_active, new_figures
+
+    # -- Rename custom plot tab --
+    @app.callback(
+        Output('plot-tabs', 'data', allow_duplicate=True),
+        Input('tab-rename-event', 'data'),
+        State('plot-tabs', 'data'),
+        prevent_initial_call=True,
+    )
+    def rename_custom_tab(event, tabs):
+        if not event or not tabs:
+            return dash.no_update
+        tab_id = event.get('tab_id')
+        new_label = event.get('new_label')
+        if not tab_id or not new_label:
+            return dash.no_update
+        updated = []
+        changed = False
+        for t in tabs:
+            if t['id'] == tab_id and t.get('type') == 'custom' and t['label'] != new_label:
+                updated.append({**t, 'label': new_label})
+                changed = True
+            else:
+                updated.append(t)
+        return updated if changed else dash.no_update
+
+    # -- Create custom plot tab from Plot button --
+    @app.callback(
+        [Output('plot-tabs', 'data', allow_duplicate=True),
+         Output('active-plot-tab', 'data', allow_duplicate=True),
+         Output('custom-plot-figures', 'data', allow_duplicate=True),
+         Output('custom-plot-counter', 'data')],
+        Input('create-plot-btn', 'n_clicks'),
+        [State('pub-selections', 'data'),
+         State('pub-data-store', 'data'),
+         State('current-plot-settings', 'data'),
+         State('plot-tabs', 'data'),
+         State('custom-plot-figures', 'data'),
+         State('custom-plot-counter', 'data'),
+         State('active-tab', 'data'),
+         State('peak-group-selector', 'value')],
+        prevent_initial_call=True,
+    )
+    def create_custom_plot_tab(n_clicks, selections, data_json, settings,
+                               tabs, figures, counter, active_bottom_tab,
+                               peak_group_idx):
+        import plotly.graph_objects as go
+        import time
+        import io
+        from services.plot_settings_service import PlotSettingsService, DEFAULT_PLOT_SETTINGS
+
+        if not n_clicks or not data_json or not selections:
+            return dash.no_update, dash.no_update, dash.no_update, dash.no_update
+
+        x_col = selections.get('x', {}).get('data', {}).get('column_id')
+        y1_series = selections.get('y1', {}).get('series', [])
+        has_y = any(sr.get('column_id') for sr in y1_series)
+        if not x_col or not has_y:
+            return dash.no_update, dash.no_update, dash.no_update, dash.no_update
+
+        s = {**DEFAULT_PLOT_SETTINGS, **(settings or {})}
+        df = pd.read_json(io.StringIO(data_json), orient='split')
+        if '_row_id' not in df.columns:
+            df.insert(0, '_row_id', range(len(df)))
+
+        plot_config = {
+            'type': s['plot_type'],
+            'calc_stats': len(s['y1_stats']) > 0,
+            'stat_type': s['y1_stats'][0] if s['y1_stats'] else 'mean_sd',
+            'x_label': s['x_label'],
+            'y1_label': s['y1_label'],
+            'y2_label': s['y2_label'],
+            'show_raw_points': s['show_raw_points'],
+            'categorical_x': s.get('categorical_x', True),
+        }
+
+        fig, _ = create_publication_plot(df, None, selections, plot_config)
+        settings_for_style = dict(s, y_label=s.get('y1_label', 'Y1'))
+        ps = PlotSettingsService.from_dict(settings_for_style)
+        PlotSettingsService.apply_to_figure(fig, ps)
+
+        counter = (counter or 0) + 1
+        y_cols = [sr['column_id'] for sr in y1_series if sr.get('column_id')]
+        label = f"Plot {counter}"
+        if y_cols:
+            label = f"{', '.join(y_cols)} vs {x_col}"
+        tab_id = f"custom-plot-{counter}"
+
+        source_tab = active_bottom_tab or 'data-overview'
+        new_tab = {'id': tab_id, 'label': label, 'type': 'custom'}
+        tabs = list(tabs or [])
+        tabs.append(new_tab)
+        figures = dict(figures or {})
+        entry = {
+            'figure': fig.to_dict() if hasattr(fig, 'to_dict') else fig,
+            'selections': selections,
+            'data_json': data_json,
+            'source_tab': source_tab,
+        }
+        if source_tab == 'across-samples' and peak_group_idx is not None:
+            entry['peak_group_idx'] = peak_group_idx
+        figures[tab_id] = entry
+
+        return tabs, tab_id, figures, counter
 
     @app.callback(
         [Output('main-plot', 'figure', allow_duplicate=True),
@@ -821,24 +1001,25 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
          Input('pub-plot-trigger', 'data'),
          Input('active-file', 'data'),
          Input('current-plot-settings', 'data'),
-         Input('render-trigger', 'data')],
+         Input('render-trigger', 'data'),
+         Input('file-order', 'data'),
+         Input('pub-table', 'sort_by'),
+         Input('peak-table', 'sort_by'),
+         Input('cross-sample-table', 'sort_by')],
         [State('loaded-files', 'data'),
          State('plot-tabs', 'data'),
          State('pub-plot-figure', 'data'),
          State('selected-peak-idx', 'data'),
          State('zoom-state', 'data'),
-         State('tab-zoom-memory', 'data')],
+         State('tab-zoom-memory', 'data'),
+         State('custom-plot-figures', 'data')],
         prevent_initial_call=True
     )
     def master_render(active_tab_id, plot_trigger, active_file, plot_settings, render_trigger,
-                      loaded_files, plot_tabs, pub_plot_figure, selected_peak_id, zoom_state,
-                      zoom_memory):
-        """Single owner of main-plot. Renders the active plot tab's figure.
-
-        Each tab has a type ('raw' or 'analysis') and a group_key that
-        determines which files are shown.  Baseline/peak callbacks may
-        still Patch() the figure afterwards.
-        """
+                      file_order, pub_sort, peak_sort, cross_sort,
+                      loaded_files, plot_tabs, pub_plot_figure, selected_peak_id,
+                      zoom_state, zoom_memory, custom_figures):
+        """Single owner of main-plot. Renders the active plot tab's figure."""
         import plotly.graph_objects as go
         from services.plot_settings_service import PlotSettingsService, DEFAULT_PLOT_SETTINGS
 
@@ -855,17 +1036,61 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
         if not tab:
             return plot_manager.create_empty_plot("Upload files to get started"), None
 
-        # -- Analysis tab --
-        if tab.get('type') == 'analysis':
-            if trigger_id == 'current-plot-settings':
-                return dash.no_update, no_zoom
-            if pub_plot_figure:
-                return pub_plot_figure, no_zoom
-            return plot_manager.create_empty_plot(
-                "Select data in Data Selector to create analysis plot"), no_zoom
+        # -- Custom plot tab --
+        if tab.get('type') == 'custom':
+            entry = (custom_figures or {}).get(active_tab_id)
+            if not entry:
+                return plot_manager.create_empty_plot("Plot data not found"), no_zoom
+            if isinstance(entry, dict) and 'selections' in entry:
+                import io as _io
+                s = {**DEFAULT_PLOT_SETTINGS, **(plot_settings or {})}
+                sel = entry['selections']
+                dj = entry['data_json']
+                df = pd.read_json(_io.StringIO(dj), orient='split')
+                if '_row_id' not in df.columns:
+                    df.insert(0, '_row_id', range(len(df)))
+
+                source_tab = entry.get('source_tab', 'data-overview')
+                sort_by = None
+                if source_tab == 'data-overview':
+                    sort_by = pub_sort
+                elif source_tab == 'peak-analysis':
+                    sort_by = peak_sort
+                elif source_tab == 'across-samples':
+                    sort_by = cross_sort
+                if sort_by:
+                    for sb in reversed(sort_by):
+                        col = sb.get('column_id')
+                        asc = sb.get('direction', 'asc') == 'asc'
+                        if col in df.columns:
+                            df = df.sort_values(col, ascending=asc, ignore_index=True)
+
+                plot_config = {
+                    'type': s['plot_type'],
+                    'calc_stats': len(s['y1_stats']) > 0,
+                    'stat_type': s['y1_stats'][0] if s['y1_stats'] else 'mean_sd',
+                    'x_label': s['x_label'],
+                    'y1_label': s['y1_label'],
+                    'y2_label': s['y2_label'],
+                    'show_raw_points': s['show_raw_points'],
+                    'categorical_x': s.get('categorical_x', True),
+                }
+                fig, _ = create_publication_plot(df, None, sel, plot_config)
+                settings_for_style = dict(s, y_label=s.get('y1_label', 'Y1'))
+                ps = PlotSettingsService.from_dict(settings_for_style)
+                PlotSettingsService.apply_to_figure(fig, ps)
+                fig.update_layout(uirevision=active_tab_id)
+                return fig, no_zoom
+            return entry, no_zoom
 
         # -- Raw tab --
-        if trigger_id == 'pub-plot-trigger':
+        if trigger_id in ('pub-plot-trigger', 'pub-table', 'peak-table', 'cross-sample-table'):
+            return dash.no_update, no_zoom
+
+        s = {**DEFAULT_PLOT_SETTINGS, **(plot_settings or {})}
+        layout_mode = s.get('layout_mode', 'overlay')
+
+        if trigger_id == 'active-file' and layout_mode == 'stacked':
             return dash.no_update, no_zoom
 
         is_tab_switch = trigger_id == 'active-plot-tab'
@@ -873,17 +1098,39 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
         set_zoom = restored_zoom if is_tab_switch else no_zoom
 
         group_key = tuple(tab.get('group_key', []))
-        s = {**DEFAULT_PLOT_SETTINGS, **(plot_settings or {})}
-        layout_mode = s.get('layout_mode', 'overlay')
 
         visible_files = _collect_visible_files(
-            data_manager, active_file, loaded_files, target_group_override=group_key)
+            data_manager, active_file, loaded_files, target_group_override=group_key,
+            file_order=file_order)
         if not visible_files:
             return plot_manager.create_hidden_state_plot(), set_zoom
 
         figure = plot_manager.create_multi_file_plot(visible_files, layout_mode)
 
-        if active_file:
+        fig_obj_for_peaks = go.Figure(figure) if isinstance(figure, dict) else figure
+        if layout_mode == 'stacked':
+            flat_files = []
+            for files in visible_files.values():
+                flat_files.extend(files)
+            cleanup_peak_traces(fig_obj_for_peaks)
+            for row_idx, (fname, fdata) in enumerate(flat_files, start=1):
+                fid = None
+                for bundle in data_manager.bundle_manager.bundles.values():
+                    if data_manager.loaded_data.get(bundle.bundle_id) is fdata:
+                        fid = bundle.bundle_id
+                        break
+                if not fid:
+                    fid = _find_file_id(data_manager, fdata)
+                if not fid:
+                    continue
+                peaks = data_manager.peak_service.get_peaks(fid)
+                if not peaks:
+                    continue
+                _ov_time, _ov_signal = get_chromatogram_arrays(data_manager, fid)
+                if _ov_time is not None:
+                    add_peak_traces(fig_obj_for_peaks, peaks, _ov_time, _ov_signal, selected_peak_id, row=row_idx)
+            figure = fig_obj_for_peaks
+        elif active_file:
             _ov_time, _ov_signal = get_chromatogram_arrays(data_manager, active_file)
             if _ov_time is not None:
                 figure = overlay_peaks_on_figure(

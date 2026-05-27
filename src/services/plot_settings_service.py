@@ -94,6 +94,7 @@ DEFAULT_PLOT_SETTINGS: Dict[str, object] = {
     "y_max": None,
     "x_scale": "linear",
     "y_scale": "linear",
+    "categorical_x": True,
     # Theme & Colors
     "theme": "plotly_white",
     "palette": "okabe_ito",
@@ -113,7 +114,7 @@ DEFAULT_PLOT_SETTINGS: Dict[str, object] = {
     "font": "Arial",
     "font_size": 12,
     "title_font_size": 14,
-    "tick_font_size": 10,
+    "tick_font_size": 16,
     "bold_title": True,
     # Legend
     "show_legend": True,
@@ -149,6 +150,7 @@ class PlotSettings:
     y_max: Optional[float] = None
     x_scale: str = "linear"              # linear, log
     y_scale: str = "linear"              # linear, log
+    categorical_x: bool = True
 
     # -- 3. Style / Theme --
     theme: str = "plotly_white"
@@ -174,7 +176,7 @@ class PlotSettings:
     # -- 6. Typography --
     font: str = "Arial"
     font_size: int = 12
-    tick_font_size: int = 10
+    tick_font_size: int = 16
     bold_title: bool = True
 
     # -- 7. Legend --
@@ -331,13 +333,24 @@ class PlotSettingsService:
             axis_common_y['autorange'] = False
 
         # Update all x/y axes (subplots: xaxis, xaxis2, …)
-        # Exclude coloraxis, polar axis, etc.
+        # Preserve categorical tick config set by publication_plot
         _xaxis_re = re.compile(r'^xaxis\d*$')
         _yaxis_re = re.compile(r'^yaxis\d*$')
-        layout_keys = list(fig.layout.to_plotly_json().keys())
+        layout_json = fig.layout.to_plotly_json()
+        layout_keys = list(layout_json.keys())
+
+        _categorical_keys = ('ticktext', 'tickvals', 'tickmode')
+
         for key in layout_keys:
             if _xaxis_re.match(key):
-                fig.update_layout(**{key: axis_common_x})
+                existing = layout_json.get(key, {})
+                merged = dict(axis_common_x)
+                if existing.get('tickmode') == 'array' and settings.categorical_x:
+                    for ck in _categorical_keys:
+                        if ck in existing:
+                            merged[ck] = existing[ck]
+                    merged.pop('type', None)
+                fig.update_layout(**{key: merged})
             elif _yaxis_re.match(key):
                 fig.update_layout(**{key: axis_common_y})
 

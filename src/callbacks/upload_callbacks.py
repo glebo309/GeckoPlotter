@@ -1,5 +1,6 @@
 # Clean version of upload_callbacks.py with just the essential functions
 import logging
+import os
 
 from typing import List, Dict, Any
 import dash
@@ -19,15 +20,18 @@ def register_upload_callbacks(app: dash.Dash, data_manager) -> None:
          Output('active-file', 'data', allow_duplicate=True),
          Output('metadata-container', 'children', allow_duplicate=True),
          Output('table-editor-container', 'children', allow_duplicate=True),
-         Output('pub-data-store', 'data', allow_duplicate=True)],
+         Output('pub-data-store', 'data', allow_duplicate=True),
+         Output('render-trigger', 'data', allow_duplicate=True)],
         Input('upload-button', 'contents'),
         [State('upload-button', 'filename'),
          State('upload-button', 'last_modified'),
-         State('loaded-files', 'data')],
+         State('loaded-files', 'data'),
+         State('render-trigger', 'data')],
         prevent_initial_call=True
     )
     def handle_file_upload(contents_list: List[str], filenames: List[str],
-                          last_modified_list: List[int], existing_files: List[Dict[str, Any]]) -> tuple:
+                          last_modified_list: List[int], existing_files: List[Dict[str, Any]],
+                          render_counter) -> tuple:
         """Handle file upload and processing.
 
         Sets active-file and loaded-files; the tab system auto-creates
@@ -35,7 +39,7 @@ def register_upload_callbacks(app: dash.Dash, data_manager) -> None:
         """
 
         if not contents_list or not filenames:
-            return (dash.no_update,) * 6
+            return (dash.no_update,) * 7
 
         try:
             data_manager.bundle_manager.clear_bundles()
@@ -134,11 +138,11 @@ def register_upload_callbacks(app: dash.Dash, data_manager) -> None:
             if success_count > 0:
                 log.debug(f"Successfully uploaded {success_count} files!")
 
-            return merged_files, tree_items, auto_active_file, auto_table, table_editor, pub_data
+            return merged_files, tree_items, auto_active_file, auto_table, table_editor, pub_data, (render_counter or 0) + 1
 
         except Exception as e:
             log.exception(f"Upload failed: {str(e)}")
-            return (dash.no_update,) * 6
+            return (dash.no_update,) * 7
 
 
     @app.callback(
@@ -147,17 +151,19 @@ def register_upload_callbacks(app: dash.Dash, data_manager) -> None:
          Output('active-file', 'data', allow_duplicate=True),
          Output('metadata-container', 'children', allow_duplicate=True),
          Output('table-editor-container', 'children', allow_duplicate=True),
-         Output('pub-data-store', 'data', allow_duplicate=True)],
+         Output('pub-data-store', 'data', allow_duplicate=True),
+         Output('render-trigger', 'data', allow_duplicate=True)],
         Input('drop-zone', 'contents'),
         [State('drop-zone', 'filename'),
          State('drop-zone', 'last_modified'),
-         State('loaded-files', 'data')],
+         State('loaded-files', 'data'),
+         State('render-trigger', 'data')],
         prevent_initial_call=True
     )
-    def handle_drop_upload(contents_list, filenames, last_modified_list, existing_files):
+    def handle_drop_upload(contents_list, filenames, last_modified_list, existing_files, render_counter):
         if not contents_list or not filenames:
-            return (dash.no_update,) * 6
-        return handle_file_upload(contents_list, filenames, last_modified_list, existing_files)
+            return (dash.no_update,) * 7
+        return handle_file_upload(contents_list, filenames, last_modified_list, existing_files, render_counter)
 
 
 def render_file_tree_with_bundles(records: List[dict], data_manager) -> List[html.Div]:
@@ -165,7 +171,25 @@ def render_file_tree_with_bundles(records: List[dict], data_manager) -> List[htm
     return render_file_tree_with_bundles_selected(records, data_manager)
 
 
-def render_file_tree_with_bundles_selected(records: List[dict], data_manager, active_file_id: str = None, active_plot_tab: str = None) -> List[html.Div]:
+def _sort_group_items(items, file_order_info):
+    """Sort items within a group based on file-order store entry."""
+    if not file_order_info:
+        items.sort(key=lambda it: (it.get('name') or '').lower())
+        return items
+
+    explicit_order = file_order_info.get('order')
+    if explicit_order:
+        order_map = {fid: idx for idx, fid in enumerate(explicit_order)}
+        items.sort(key=lambda it: order_map.get(it.get('id'), 999999))
+        return items
+
+    sort_dir = file_order_info.get('sort_dir', 'asc')
+    reverse = sort_dir == 'desc'
+    items.sort(key=lambda it: (it.get('name') or '').lower(), reverse=reverse)
+    return items
+
+
+def render_file_tree_with_bundles_selected(records: List[dict], data_manager, active_file_id: str = None, active_plot_tab: str = None, file_order: dict = None) -> List[html.Div]:
     """Render file tree grouped by overlay group, with group headers.
 
     Files are sorted into groups matching plot tabs. Generic/unrecognized
@@ -184,6 +208,7 @@ def render_file_tree_with_bundles_selected(records: List[dict], data_manager, ac
     )
     from collections import OrderedDict
 
+    file_order = file_order or {}
     bundled_items = data_manager.get_bundled_tree_items(records)
 
     groups = OrderedDict()
@@ -209,19 +234,35 @@ def render_file_tree_with_bundles_selected(records: List[dict], data_manager, ac
     tree_items = []
     for tid, group_info in groups.items():
         is_active_group = tid == active_plot_tab
+        group_order = file_order.get(tid, {})
+        sort_dir = group_order.get('sort_dir', 'asc')
+        sorted_items = _sort_group_items(group_info['items'], group_order)
+
         tree_items.append(_render_group_header(
-            group_info['label'], tid, is_active_group))
-        for item in group_info['items']:
+            group_info['label'], tid, is_active_group, sort_dir=sort_dir))
+
+        group_container_children = []
+        for item in sorted_items:
+            file_id = item.get('id')
             if item.get('is_bundle'):
-                is_selected = active_file_id == item.get('id')
-                tree_items.append(render_bundle_item_selected(
+                is_selected = active_file_id == file_id
+                rendered = render_bundle_item_selected(
                     item, is_selected, data_manager=data_manager,
-                    dimmed=not is_active_group))
+                    dimmed=not is_active_group)
             else:
-                is_selected = active_file_id == item.get('id')
-                tree_items.append(render_individual_file_item_selected(
+                is_selected = active_file_id == file_id
+                rendered = render_individual_file_item_selected(
                     item, is_selected, data_manager=data_manager,
-                    dimmed=not is_active_group))
+                    dimmed=not is_active_group)
+            group_container_children.append(
+                html.Div(rendered, className='draggable-file-item',
+                         **{'data-file-id': file_id}))
+
+        tree_items.append(html.Div(
+            group_container_children,
+            className='file-group-container',
+            id={'type': 'file-group', 'index': tid},
+        ))
 
     for item in ungrouped:
         if item.get('is_bundle'):
@@ -236,9 +277,10 @@ def render_file_tree_with_bundles_selected(records: List[dict], data_manager, ac
     return tree_items
 
 
-def _render_group_header(label: str, group_id: str, is_active: bool) -> html.Div:
-    """Render a group header in the file tree."""
-    return html.Div(
+def _render_group_header(label: str, group_id: str, is_active: bool, sort_dir: str = 'asc') -> html.Div:
+    """Render a group header in the file tree with sort toggle."""
+    arrow = '↑' if sort_dir == 'asc' else '↓'
+    return html.Div([
         html.Span(label, style={
             'fontWeight': '600' if is_active else '500',
             'fontSize': '11px',
@@ -246,11 +288,20 @@ def _render_group_header(label: str, group_id: str, is_active: bool) -> html.Div
             'letterSpacing': '0.5px',
             'color': '#ff6b35' if is_active else '#888',
         }),
-        className='file-group-header active' if is_active else 'file-group-header',
+        html.Button(arrow, id={'type': 'group-sort-btn', 'index': group_id},
+            n_clicks=0,
+            style={
+                'padding': '0 4px', 'fontSize': '10px', 'lineHeight': '14px',
+                'border': '1px solid #ccc', 'borderRadius': '3px',
+                'backgroundColor': 'white', 'color': '#888', 'cursor': 'pointer',
+                'marginLeft': '6px', 'verticalAlign': 'middle',
+            }),
+    ], className='file-group-header active' if is_active else 'file-group-header',
         style={
             'padding': '6px 8px 3px 8px',
             'marginTop': '6px',
             'borderBottom': '1px solid #ff6b35' if is_active else '1px solid #e0e0e0',
+            'display': 'flex', 'alignItems': 'center', 'justifyContent': 'space-between',
         },
     )
 
@@ -311,7 +362,7 @@ def render_bundle_item_selected(bundle_item: dict, is_selected: bool = False, da
             # Bundle content (clickable for selection)
             html.Div([
                 html.Span(bundle_icon, style={'marginRight': '6px', 'fontSize': '11px', 'flexShrink': '0'}),
-                html.Span(bundle_item.get('name'), style={
+                html.Span(os.path.splitext(bundle_item.get('name', ''))[0], style={
                     'fontWeight': '600', 'overflow': 'hidden', 'textOverflow': 'ellipsis',
                     'whiteSpace': 'nowrap', 'flex': '1',
                 }),
@@ -449,7 +500,7 @@ def render_individual_file_item_selected(item: dict, is_selected: bool = False, 
                     html.Div([
                         html.Span(child_icon_symbol, style={'marginRight': '8px'}),
                         html.Div([
-                            html.Div(child.get('name', ''), style={'fontWeight': '500'}),
+                            html.Div(os.path.splitext(child.get('name', ''))[0], style={'fontWeight': '500'}),
                             html.Div(child_info, style={'fontSize': '12px', 'color': '#666'}),
                         ], style={'flex': '1'})
                     ], 
@@ -567,7 +618,7 @@ def render_individual_file_item_selected(item: dict, is_selected: bool = False, 
             # File content (clickable for selection)
             html.Div([
                 html.Span(icon, style={'marginRight': '6px', 'fontSize': '11px', 'flexShrink': '0'}),
-                html.Span(item.get('name'), style={
+                html.Span(os.path.splitext(item.get('name', ''))[0], style={
                     'overflow': 'hidden', 'textOverflow': 'ellipsis', 'whiteSpace': 'nowrap', 'flex': '1',
                     'fontWeight': '500' if is_selected else '400',
                 }),

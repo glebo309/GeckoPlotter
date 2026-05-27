@@ -115,17 +115,23 @@ app.layout = html.Div(
         dcc.Store(id='pub-data-store'),  # Store for publication plotter data
         dcc.Store(id='pub-plot-figure'),  # Store for the publication plot figure
         dcc.Store(id='pub-plot-trigger'),  # Trigger to update main plot
+        dcc.Store(id='custom-plot-figures', data={}),  # Maps custom tab_id → figure dict
+        dcc.Store(id='custom-plot-counter', data=0),  # Auto-incrementing counter for plot names
+        dcc.Store(id='tab-rename-event', data=None),  # {tab_id, new_label} from JS
         dcc.Store(id='plot-export-data'),  # Export data from publication plot
         dcc.Store(id='peak-shared-selections', data={}),  # Shared selections for peak-analysis tab
         dcc.Store(id='cross-shared-selections', data={}),  # Shared selections for across-samples tab
         dcc.Store(id='peak-table-store', data=None),  # Mirror of peak-table data (JSON split) — always in layout
         dcc.Store(id='cross-sample-table-store', data=None),  # Mirror of cross-sample-table data (JSON split) — always in layout
-        dcc.Dropdown(id='peak-group-selector', style={'display': 'none'}),  # Placeholder for dynamically created dropdown
+        dcc.Dropdown(id='peak-group-selector', style={'display': 'none'}),
+        html.Div(dcc.Slider(id='retention-time-slider', value=0.2, min=0.05, max=1.0, step=0.05), style={'display': 'none'}),
         # Baseline integration stores (p-line drawing)
         dcc.Store(id='baseline-mode', data='navigate'),  # 'draw' | 'edit' | 'navigate'
         dcc.Store(id='selected-peak-idx', data=None),  # Index of peak being edited
         dcc.Store(id='clear-shapes-trigger', data=0),  # Counter to trigger shape clearing
         dcc.Store(id='peak-change-trigger', data=0),  # Counter to refresh tables/overlays after peak edits
+        dcc.Store(id='peak-name-persist-trigger', data=None),
+        dcc.Store(id='cross-sample-name-trigger', data=None),
         dcc.Store(id='plot-peak-click-store', data=None),  # Browser-side peak hit-test selection
         dcc.Store(id='manual-draw-line-store', data=None),  # Browser-side custom integration line
         dcc.Store(id='interaction-action-store', data=None),  # Last action for future undo/redo
@@ -136,6 +142,8 @@ app.layout = html.Div(
         dcc.Store(id='tab-file-memory', data={}),  # Maps tab_id → last selected file_id
         dcc.Store(id='tab-panel-memory', data={}),  # Maps tab_id → last active bottom panel
         dcc.Store(id='tab-zoom-memory', data={}),  # Maps tab_id → saved zoom ranges
+        dcc.Store(id='file-order', data={}),  # Per-group file ordering {group_id: {sort_dir: 'asc'|'desc'|null, order: [id, ...]}}
+        dcc.Store(id='file-reorder-event', data=None),  # JS drag-and-drop event {group_id, order: [id, ...]}
         html.Button(id='plot-empty-click-trigger', n_clicks=0, style={'display': 'none'}),
         html.Div(id='clear-transient-shapes-output', style={'display': 'none'}),
         html.Div(id='selected-shapes-sync-output', style={'display': 'none'}),
@@ -274,6 +282,7 @@ app.layout = html.Div(
                                                 html.Div(
                                                     id='pub-plotter-container',
                                                     className='toolbox-tab-content active',
+                                                    style={'padding': '10px', 'overflowY': 'auto', 'maxHeight': 'calc(100% - 40px)'},
                                                     children=create_axis_mapper_layout(),
                                                 ),
                                                 # Plot Settings Tab
@@ -295,7 +304,7 @@ app.layout = html.Div(
                                                                 id='pt-layout-mode',
                                                                 options=[
                                                                     {'label': ' Superposed', 'value': 'overlay'},
-                                                                    {'label': ' Separate plots', 'value': 'stacked'},
+                                                                    {'label': ' Subplots', 'value': 'stacked'},
                                                                 ],
                                                                 value='overlay', inline=True,
                                                                 style={'fontSize': '12px', 'marginBottom': '10px'},
@@ -321,6 +330,8 @@ app.layout = html.Div(
                                                         html.Div('Axes', className='toolbox-section-title'),
                                                         dcc.Checklist(id='pt-auto-range', options=[{'label': ' Auto range', 'value': 'auto'}],
                                                                       value=['auto'], style={'marginBottom': '6px', 'fontSize': '12px'}),
+                                                        dcc.Checklist(id='pt-categorical-x', options=[{'label': ' Categorical X axis', 'value': 'cat'}],
+                                                                      value=['cat'], style={'marginBottom': '6px', 'fontSize': '12px'}),
                                                         html.Div(id='pt-range-wrapper', children=[
                                                             html.Div([
                                                                 html.Div([html.Label('X min', className='form-label'),
@@ -782,6 +793,7 @@ app.layout = html.Div(
                                                                     data=[],
                                                                     cell_selectable=True,
                                                                     column_selectable='single',
+                                                                    sort_action='native',
                                                                     style_table={'display': 'none'},
                                                                 ),
                                                                 html.Div(
@@ -835,6 +847,21 @@ app.layout = html.Div(
                                                         'overflowY': 'auto'
                                                     }, children=[
                                                         html.Div(id='across-samples-container', children=[
+                                                            html.Div([
+                                                                dcc.Input(id='group-label-input', type='text',
+                                                                          placeholder='Group label...',
+                                                                          style={'width': '120px', 'padding': '3px 6px',
+                                                                                 'fontSize': '11px', 'border': '1px solid #ccc',
+                                                                                 'borderRadius': '3px'}),
+                                                                html.Button('Apply to selected', id='apply-group-btn',
+                                                                            style={'padding': '3px 8px', 'fontSize': '11px',
+                                                                                   'marginLeft': '4px', 'cursor': 'pointer'}),
+                                                                html.Button('Clear groups', id='clear-groups-btn',
+                                                                            style={'padding': '3px 8px', 'fontSize': '11px',
+                                                                                   'marginLeft': '4px', 'cursor': 'pointer',
+                                                                                   'color': '#999'}),
+                                                            ], style={'display': 'flex', 'alignItems': 'center',
+                                                                      'gap': '2px', 'marginBottom': '6px', 'padding': '4px 0'}),
                                                             # cross-sample-table: data updated in-place by tab_callbacks
                                                             dash_table.DataTable(
                                                                 id='cross-sample-table',
@@ -842,6 +869,7 @@ app.layout = html.Div(
                                                                 editable=True,
                                                                 cell_selectable=True,
                                                                 column_selectable='single',
+                                                                row_selectable='multi',
                                                                 row_deletable=True,
                                                                 sort_action='native',
                                                                 style_table={'display': 'none'},
@@ -1219,7 +1247,7 @@ def derive_view_mode(active_tab_id, tabs):
     if not active_tab_id or not tabs:
         return 'raw'
     tab = next((t for t in tabs if t['id'] == active_tab_id), None)
-    if tab and tab.get('type') == 'analysis':
+    if tab and tab.get('type') in ('analysis', 'custom'):
         return 'analysis'
     return 'raw'
 
@@ -1244,17 +1272,45 @@ def save_panel_per_tab(active_tab, plot_tab, memory):
     Output('active-tab', 'data', allow_duplicate=True),
     Input('active-plot-tab', 'data'),
     [State('tab-panel-memory', 'data'),
-     State('active-tab', 'data')],
+     State('active-tab', 'data'),
+     State('custom-plot-figures', 'data')],
     prevent_initial_call=True,
 )
-def restore_panel_on_tab_switch(plot_tab, memory, current_panel):
-    """Restore the last-opened bottom panel when switching plot tabs."""
+def restore_panel_on_tab_switch(plot_tab, memory, current_panel, figures):
+    """Auto-switch bottom panel only for custom plot tabs.
+
+    When the user clicks a custom plot tab, switch to its source panel
+    (e.g. across-samples).  For all other plot tabs, leave the bottom
+    panel alone — avoids overriding the user's manual panel click when
+    switch_to_raw_tab_on_panel_change auto-switches the plot tab.
+    """
     if not plot_tab:
         return dash.no_update
-    remembered = (memory or {}).get(plot_tab, 'data-overview')
-    if remembered == current_panel:
+    if figures and plot_tab in figures:
+        target = figures[plot_tab].get('source_tab')
+        if target and target != current_panel:
+            return target
+    return dash.no_update
+
+
+@app.callback(
+    Output('active-plot-tab', 'data', allow_duplicate=True),
+    Input('active-tab', 'data'),
+    [State('plot-tabs', 'data'),
+     State('active-plot-tab', 'data')],
+    prevent_initial_call=True,
+)
+def switch_to_raw_tab_on_panel_change(active_tab, tabs, current_plot_tab):
+    """Switch to Chromatograms tab when leaving Across Samples panel."""
+    if not tabs or active_tab == 'across-samples':
         return dash.no_update
-    return remembered
+    current = next((t for t in tabs if t['id'] == current_plot_tab), None)
+    if not current or current.get('type') != 'custom':
+        return dash.no_update
+    raw_tab = next((t for t in tabs if t.get('type') not in ('custom', 'analysis')), None)
+    if raw_tab:
+        return raw_tab['id']
+    return dash.no_update
 
 
 # Status update callbacks

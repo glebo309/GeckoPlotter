@@ -32,12 +32,13 @@ def register_tab_callbacks(app: dash.Dash, data_manager) -> None:
          Output('peak-table', 'style_table', allow_duplicate=True),
          Output('peak-table-store', 'data', allow_duplicate=True)],
         [Input('active-file', 'data'),
-         Input('peak-analysis-tab', 'n_clicks'),
-         Input('peak-change-trigger', 'data')],
+         Input('peak-change-trigger', 'data'),
+         Input('peak-name-persist-trigger', 'data'),
+         Input('cross-sample-name-trigger', 'data')],
         [State('loaded-files', 'data')],
         prevent_initial_call=True
     )
-    def update_peak_analysis_tab(active_file_id, tab_clicks, peak_change, loaded_files):
+    def update_peak_analysis_tab(active_file_id, peak_change, _name_trigger, _xname_trigger, loaded_files):
         """Update peak-table data in-place (preserves selections)."""
 
         HIDE = {'display': 'none'}
@@ -61,14 +62,19 @@ def register_tab_callbacks(app: dash.Dash, data_manager) -> None:
 
                 if integration_file:
                     from services.storage_manager import _decode_content
+                    from callbacks.baseline_callbacks import get_chromatogram_arrays
                     raw_content = _decode_content(integration_file['encoded']).decode('utf-8')
                     integration_results = parse_integration_results(raw_content)
                     if integration_results:
+                        time_arr, signal_arr = get_chromatogram_arrays(data_manager, active_file_id)
                         data_manager.peak_service.import_instrument_peaks(
                             file_id=active_file_id,
                             parsed_results=integration_results,
                             sample_name=bundle.base_name,
+                            time_axis=time_arr,
+                            signal=signal_arr,
                         )
+                        data_manager.peak_service.group_peaks_across_samples()
 
             df = data_manager.peak_service.peaks_to_table(active_file_id)
             if df.empty:
@@ -76,27 +82,121 @@ def register_tab_callbacks(app: dash.Dash, data_manager) -> None:
 
             if '_row_id' not in df.columns:
                 df.insert(0, '_row_id', range(len(df)))
+            hidden = {'_row_id', 'peak_id'}
             columns = [
                 {"name": col, "id": col,
-                 "editable": col != '_row_id', "selectable": col != '_row_id',
-                 "deletable": col != '_row_id', "renamable": col != '_row_id'}
-                for col in df.columns
+                 "editable": col not in hidden,
+                 "selectable": col not in hidden,
+                 "deletable": col not in hidden,
+                 "renamable": col not in hidden}
+                for col in df.columns if col not in hidden
             ]
             return df.to_dict('records'), columns, SHOW, df.to_json(orient='split')
 
         except Exception as e:
             log.exception(f"Error updating peak analysis tab: {e}")
             return [], [], HIDE, None
-    
+
+    @app.callback(
+        Output('peak-name-persist-trigger', 'data', allow_duplicate=True),
+        Input('peak-table', 'data'),
+        State('active-file', 'data'),
+        prevent_initial_call=True
+    )
+    def persist_peak_names(table_data, active_file_id):
+        """Write Peak Name edits from the peak-analysis table back to peak_service."""
+        log.debug(f"[persist_peak_names] fired, active_file={active_file_id}, rows={len(table_data) if table_data else 0}")
+        if not table_data or not active_file_id:
+            return dash.no_update
+        ps = data_manager.peak_service
+        peaks = ps.get_peaks(active_file_id)
+        if not peaks:
+            log.debug("[persist_peak_names] no peaks in service")
+            return dash.no_update
+        changed = False
+        for row in table_data:
+            pid = row.get('peak_id')
+            new_name = row.get('Peak Name', '')
+            rt = row.get('RT (min)')
+            log.debug(f"[persist_peak_names] row peak_id={pid!r}, RT={rt}, name={new_name!r}, keys={list(row.keys())}")
+            if not new_name:
+                continue
+            matched = None
+            if pid:
+                matched = next((p for p in peaks if p.peak_id == pid), None)
+            if matched is None and rt is not None:
+                matched = next((p for p in peaks if abs(p.rt - float(rt)) < 0.01), None)
+            if matched and matched.name != new_name:
+                log.debug(f"[persist_peak_names] RENAME {matched.name!r} -> {new_name!r} (pid={matched.peak_id})")
+                ps.rename_peak(active_file_id, matched.peak_id, new_name)
+                changed = True
+        if changed:
+            ps.group_peaks_across_samples()
+        log.debug(f"[persist_peak_names] changed={changed}")
+        return {'ts': str(changed)} if changed else dash.no_update
+
+    @app.callback(
+        Output('cross-sample-name-trigger', 'data'),
+        Input('cross-sample-table', 'data'),
+        State('loaded-files', 'data'),
+        prevent_initial_call=True
+    )
+    def persist_cross_sample_peak_names(table_data, loaded_files):
+        """Write Peak Name edits from the cross-sample table back to peak_service.
+
+        Snapshot service names BEFORE applying changes so that only the
+        user-edited row triggers a rename.  rename_peak propagates via
+        group_id, so the un-edited rows (which still show the old name
+        in the table) won't overwrite the propagation.
+        """
+        log.debug(f"[persist_cross_sample] fired, rows={len(table_data) if table_data else 0}")
+        if not table_data or not loaded_files:
+            return dash.no_update
+        ps = data_manager.peak_service
+
+        snapshot = {}
+        for row in table_data:
+            sample = row.get('Sample', '')
+            rt = row.get('RT (min)')
+            if not sample or rt is None:
+                continue
+            bundle = next((b for b in data_manager.bundle_manager.bundles.values()
+                           if b.base_name == sample), None)
+            if not bundle:
+                continue
+            for p in ps.get_peaks(bundle.bundle_id):
+                if abs(p.rt - float(rt)) < 0.01:
+                    snapshot[(sample, rt)] = (p.name, bundle.bundle_id, p.peak_id)
+                    break
+
+        changed = False
+        for row in table_data:
+            sample = row.get('Sample', '')
+            rt = row.get('RT (min)')
+            new_name = row.get('Peak Name', '')
+            if not sample or rt is None or not new_name:
+                continue
+            entry = snapshot.get((sample, rt))
+            if not entry:
+                continue
+            old_name, bid, pid = entry
+            if old_name != new_name:
+                log.debug(f"[persist_cross_sample] RENAME {old_name!r} -> {new_name!r} (sample={sample})")
+                ps.rename_peak(bid, pid, new_name)
+                changed = True
+        if changed:
+            ps.group_peaks_across_samples()
+        log.debug(f"[persist_cross_sample] changed={changed}")
+        return {'ts': str(changed)} if changed else dash.no_update
+
     @app.callback(
         [Output('across-samples-container', 'children'),
          Output('cross-sample-table-store', 'data', allow_duplicate=True)],
         [Input('loaded-files', 'data'),
-         Input('across-samples-tab', 'n_clicks'),
          Input('peak-change-trigger', 'data')],
         prevent_initial_call=True
     )
-    def update_across_samples_tab(loaded_files, tab_clicks, peak_change):
+    def update_across_samples_tab(loaded_files, peak_change):
         """Update the Across Samples tab with controls + selectable DataTable.
 
         NOTE: This does NOT depend on active-file — it's shared across all samples.
@@ -126,15 +226,22 @@ def register_tab_callbacks(app: dash.Dash, data_manager) -> None:
         [Output('cross-sample-table', 'data', allow_duplicate=True),
          Output('cross-sample-table', 'columns', allow_duplicate=True),
          Output('cross-sample-table-store', 'data', allow_duplicate=True)],
-        [Input('peak-group-selector', 'value')],
-        [State('loaded-files', 'data')],
+        [Input('peak-group-selector', 'value'),
+         Input('retention-time-slider', 'value'),
+         Input('peak-name-persist-trigger', 'data'),
+         Input('cross-sample-name-trigger', 'data')],
+        [State('loaded-files', 'data'),
+         State('cross-sample-table', 'data')],
         prevent_initial_call=True
     )
-    def update_selected_peak_group(selected_group_idx, loaded_files):
-        """Update cross-sample-table data when peak group selection changes."""
+    def update_selected_peak_group(selected_group_idx, time_window, _name_trigger, _xname_trigger, loaded_files, current_data):
+        """Update cross-sample-table data when peak group selection or time window changes."""
 
         if selected_group_idx is None or not loaded_files:
             return dash.no_update, dash.no_update, dash.no_update
+
+        if time_window is None:
+            time_window = 0.2
 
         bundles_with_peaks = _collect_bundles_with_peaks(data_manager, loaded_files)
 
@@ -142,7 +249,7 @@ def register_tab_callbacks(app: dash.Dash, data_manager) -> None:
             return dash.no_update, dash.no_update, dash.no_update
 
         all_peaks = _collect_all_peaks(bundles_with_peaks)
-        peak_groups = group_peaks_by_retention_time(all_peaks, 0.2)
+        peak_groups = group_peaks_by_retention_time(all_peaks, time_window)
         comparison_groups = [g for g in peak_groups if len(g) > 1]
 
         if selected_group_idx < len(comparison_groups):
@@ -150,15 +257,156 @@ def register_tab_callbacks(app: dash.Dash, data_manager) -> None:
             df = cross_sample_group_to_dataframe(selected_group)
             if '_row_id' not in df.columns:
                 df.insert(0, '_row_id', range(len(df)))
+
+            if current_data:
+                old_groups = {row.get('Sample', ''): row.get('Group', '')
+                              for row in current_data if row.get('Group', '').strip()}
+                if old_groups:
+                    df['Group'] = df['Sample'].map(old_groups).fillna('')
+
+            hidden = {'_row_id'}
             columns = [
                 {"name": col, "id": col,
-                 "editable": col != '_row_id', "selectable": col != '_row_id',
-                 "deletable": col != '_row_id', "renamable": col != '_row_id'}
-                for col in df.columns
+                 "editable": True, "selectable": True,
+                 "deletable": True, "renamable": True}
+                for col in df.columns if col not in hidden
             ]
             return df.to_dict('records'), columns, df.to_json(orient='split')
         else:
             return dash.no_update, dash.no_update, dash.no_update
+
+    @app.callback(
+        [Output('cross-sample-table', 'data', allow_duplicate=True),
+         Output('cross-sample-table-store', 'data', allow_duplicate=True)],
+        Input('apply-group-btn', 'n_clicks'),
+        [State('group-label-input', 'value'),
+         State('cross-sample-table', 'selected_rows'),
+         State('cross-sample-table', 'data')],
+        prevent_initial_call=True
+    )
+    def apply_group_label(n_clicks, label, selected_rows, data):
+        """Apply a group label to selected rows in the cross-sample table."""
+        if not n_clicks or not label or not selected_rows or not data:
+            raise PreventUpdate
+        for idx in selected_rows:
+            if 0 <= idx < len(data):
+                data[idx]['Group'] = label.strip()
+        df = pd.DataFrame(data)
+        return data, df.to_json(orient='split')
+
+    @app.callback(
+        Output('cross-sample-table', 'data', allow_duplicate=True),
+        Input('clear-groups-btn', 'n_clicks'),
+        State('cross-sample-table', 'data'),
+        prevent_initial_call=True
+    )
+    def clear_all_groups(n_clicks, data):
+        """Clear all group labels from the cross-sample table."""
+        if not n_clicks or not data:
+            raise PreventUpdate
+        for row in data:
+            row['Group'] = ''
+        return data
+
+    GROUP_COLORS = [
+        '#E3F2FD', '#FFF3E0', '#E8F5E9', '#FCE4EC',
+        '#F3E5F5', '#E0F7FA', '#FFF8E1', '#F1F8E9',
+    ]
+
+    @app.callback(
+        [Output('peak-group-selector', 'options'),
+         Output('peak-group-selector', 'value')],
+        [Input('retention-time-slider', 'value')],
+        [State('loaded-files', 'data')],
+        prevent_initial_call=True
+    )
+    def update_group_options_on_slider(time_window, loaded_files):
+        """Re-group peaks and update dropdown options when the slider changes."""
+        if not loaded_files or time_window is None:
+            return dash.no_update, dash.no_update
+
+        bundles_with_peaks = _collect_bundles_with_peaks(data_manager, loaded_files)
+        if len(bundles_with_peaks) < 2:
+            return [], None
+
+        all_peaks = _collect_all_peaks(bundles_with_peaks)
+        peak_groups = group_peaks_by_retention_time(all_peaks, time_window)
+        comparison_groups = [g for g in peak_groups if len(g) > 1]
+
+        if not comparison_groups:
+            return [], None
+
+        group_options = []
+        for i, group in enumerate(comparison_groups):
+            avg_time = sum(p['retention_time'] for p in group) / len(group)
+            samples = sorted(set(p['sample_name'] for p in group))
+            samples_str = ', '.join(samples)
+            group_options.append({
+                'label': f"Group {i+1}: {avg_time:.2f} min - Found in {len(group)} samples ({samples_str})",
+                'value': i
+            })
+        return group_options, 0
+
+    @app.callback(
+        Output('peak-group-selector', 'value', allow_duplicate=True),
+        Input('selected-peak-idx', 'data'),
+        [State('active-file', 'data'),
+         State('loaded-files', 'data'),
+         State('retention-time-slider', 'value')],
+        prevent_initial_call=True
+    )
+    def sync_group_selector_to_selected_peak(selected_peak_id, active_file, loaded_files, time_window):
+        """When a peak is clicked on the plot, jump the Across Samples dropdown to its group."""
+        if not selected_peak_id or not active_file or not loaded_files:
+            raise dash.exceptions.PreventUpdate
+
+        from callbacks.baseline_callbacks import resolve_peak_file_id
+        peak_fid = resolve_peak_file_id(data_manager, active_file)
+        peaks = data_manager.peak_service.get_peaks(peak_fid)
+        selected = next((p for p in peaks if p.peak_id == selected_peak_id), None)
+        if not selected:
+            raise dash.exceptions.PreventUpdate
+
+        bundle = data_manager.get_bundle_by_id(active_file)
+        if not bundle:
+            raise dash.exceptions.PreventUpdate
+        sample_name = bundle.base_name
+
+        if time_window is None:
+            time_window = 0.2
+
+        bundles_with_peaks = _collect_bundles_with_peaks(data_manager, loaded_files)
+        if len(bundles_with_peaks) < 2:
+            raise dash.exceptions.PreventUpdate
+
+        all_peaks = _collect_all_peaks(bundles_with_peaks)
+        peak_groups = group_peaks_by_retention_time(all_peaks, time_window)
+        comparison_groups = [g for g in peak_groups if len(g) > 1]
+
+        for idx, group in enumerate(comparison_groups):
+            if any(p['sample_name'] == sample_name and abs(p['retention_time'] - selected.rt) < 0.001
+                   for p in group):
+                return idx
+
+        raise dash.exceptions.PreventUpdate
+
+    @app.callback(
+        Output('peak-group-selector', 'value', allow_duplicate=True),
+        Input('active-plot-tab', 'data'),
+        State('custom-plot-figures', 'data'),
+        prevent_initial_call=True
+    )
+    def sync_group_selector_to_plot_tab(active_tab_id, figures):
+        """When switching to a custom plot tab from Across Samples, sync the dropdown."""
+        if not active_tab_id or not figures:
+            raise dash.exceptions.PreventUpdate
+        entry = figures.get(active_tab_id)
+        if not entry or entry.get('source_tab') != 'across-samples':
+            raise dash.exceptions.PreventUpdate
+        idx = entry.get('peak_group_idx')
+        if idx is None:
+            raise dash.exceptions.PreventUpdate
+        return idx
 
 
 def parse_integration_results(content: str) -> List[Dict[str, Any]]:
@@ -299,46 +547,23 @@ def parse_integration_results(content: str) -> List[Dict[str, Any]]:
 
 
 def group_peaks_by_retention_time(all_peaks, time_window=0.2):
-    """
-    Group peaks from different chromatograms by retention time.
-    
-    Parameters:
-    -----------
-    all_peaks : list
-        List of peak dictionaries with chromatogram info
-    time_window : float, optional
-        Time window for grouping peaks (default: 0.2)
-        
-    Returns:
-    --------
-    list
-        List of peak groups
-    """
-    # Sort all peaks by retention time
-    all_peaks.sort(key=lambda p: p['retention_time'])
-    
-    # Group peaks by proximity (considering them the same compound)
+    """Group peaks from different samples by retention time proximity.
+    Peaks from the same sample are never placed in the same group."""
+    sorted_peaks = sorted(all_peaks, key=lambda p: p['retention_time'])
+
     peak_groups = []
-    current_group = []
-    
-    for peak in all_peaks:
-        if not current_group:
-            current_group = [peak]
-        else:
-            # Check if this peak is close to the ones in the current group
-            avg_rt = sum(p['retention_time'] for p in current_group) / len(current_group)
-            if abs(peak['retention_time'] - avg_rt) <= time_window:
-                # This peak is close enough, add to current group
-                current_group.append(peak)
-            else:
-                # Start a new group
-                peak_groups.append(current_group)
-                current_group = [peak]
-    
-    # Add the last group if it exists
-    if current_group:
-        peak_groups.append(current_group)
-    
+    for peak in sorted_peaks:
+        placed = False
+        for group in peak_groups:
+            avg_rt = sum(p['retention_time'] for p in group) / len(group)
+            samples_in_group = {p['sample_name'] for p in group}
+            if abs(peak['retention_time'] - avg_rt) <= time_window and peak['sample_name'] not in samples_in_group:
+                group.append(peak)
+                placed = True
+                break
+        if not placed:
+            peak_groups.append([peak])
+
     return peak_groups
 
 
@@ -589,6 +814,7 @@ def cross_sample_group_to_dataframe(group):
         cross_pct = (p['area'] / total_area * 100) if total_area > 0 else 0
         rows.append({
             'Sample': p.get('sample_name', ''),
+            'Group': '',
             'Peak Name': p.get('peak_name', ''),
             'RT (min)': round(p.get('retention_time', 0), 3),
             'Area': round(p.get('area', 0), 1),
@@ -618,15 +844,19 @@ def _collect_bundles_with_peaks(data_manager, loaded_files):
         if integration_file:
             try:
                 from services.storage_manager import _decode_content
+                from callbacks.baseline_callbacks import get_chromatogram_arrays
                 raw_content = _decode_content(integration_file['encoded']).decode('utf-8')
                 results = parse_integration_results(raw_content)
                 if results:
-                    # Store in PeakService for persistence & grouping
+                    time_arr, signal_arr = get_chromatogram_arrays(data_manager, bundle_id)
                     data_manager.peak_service.import_instrument_peaks(
                         file_id=bundle_id,
                         parsed_results=results,
                         sample_name=bundle.base_name,
+                        time_axis=time_arr,
+                        signal=signal_arr,
                     )
+                    data_manager.peak_service.group_peaks_across_samples()
             except Exception:
                 continue
 
