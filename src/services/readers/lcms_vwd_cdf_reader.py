@@ -93,9 +93,10 @@ class LCMSVWDCDFReader(BaseReader):
         intensity = np.asarray(intensity_var[:], dtype=float)
         retention_seconds = np.asarray(retention_var[:], dtype=float)
 
-        if retention_seconds.size == 0:
-            interval = float(dataset.variables.get("actual_sampling_interval", [0.4])[0])
-            retention_seconds = np.arange(len(intensity)) * interval
+        if retention_seconds.size == 0 or np.all(retention_seconds == 0):
+            delay = float(dataset.variables.get("actual_delay_time", [0.0])[:].flat[0])
+            interval = float(dataset.variables.get("actual_sampling_interval", [0.4])[:].flat[0])
+            retention_seconds = delay + np.arange(len(intensity)) * interval
 
         rt_minutes = retention_seconds / 60.0
         self.chromatogram = pd.DataFrame(

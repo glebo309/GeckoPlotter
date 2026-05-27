@@ -17,7 +17,7 @@ from services.storage_manager import DataManager
 from components.data_table_editor import create_data_table_editor
 from components.publication_plot import create_publication_plot
 from callbacks.peak_overlay import overlay_peaks_on_figure, patch_figure_with_peaks, rgba, FILL_COLORS
-from callbacks.baseline_callbacks import get_chromatogram_arrays
+from callbacks.baseline_callbacks import get_xy_arrays
 from src.ingestion.types import PlotHint, SourceCategory
 
 log = logging.getLogger('geckoplotter.viz')
@@ -220,32 +220,16 @@ def _collect_visible_files(dm, active_file_id=None, loaded_files=None, target_gr
             if main and main.get('id') in valid_ids:
                 valid_ids.add(bundle.bundle_id)
 
-    # Build set of main-file IDs represented by a bundle (skip raw dupes)
-    bundled_main_ids: set = set()
-    bundle_ids: set = set()
-    for bundle in dm.bundle_manager.bundles.values():
-        main = bundle.main_file
-        if main:
-            bundled_main_ids.add(main.get('id'))
-            bundle_ids.add(bundle.bundle_id)
-    for bkey in dm.lcms_bundles:
-        bundle_ids.add(bkey)
-
     from collections import defaultdict
     groups = defaultdict(list)
 
     # First pass: collect all candidate files and their groups
     candidates = []
-    log.debug(f"_collect_visible_files: active={active_file_id}, valid_ids={valid_ids}, bundled_main_ids={bundled_main_ids}, bundle_ids={bundle_ids}")
+    log.debug(f"_collect_visible_files: active={active_file_id}, valid_ids={valid_ids}")
     for fid, fdata in dm.loaded_data.items():
         if valid_ids is not None and fid not in valid_ids:
-            log.error(f"{fid}: not in valid_ids")
-            continue
-        if fid in bundled_main_ids and fid not in bundle_ids:
-            log.error(f"{fid}: bundled main (raw dupe)")
             continue
         if fdata.get('standardized') is None:
-            log.debug(f"{fid}: no standardized data, skipping")
             continue
         metadata = fdata.get('metadata', {})
         group = _get_overlay_group(metadata, fdata)
@@ -482,7 +466,7 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
         remembered = memory.get(active_tab_id)
         if not remembered or remembered == current_file:
             return dash.no_update, restored_zoom
-        if data_manager.get_data_by_id(remembered) or data_manager.get_bundle_by_id(remembered):
+        if data_manager.get_data_by_id(remembered):
             return remembered, restored_zoom
         return dash.no_update, restored_zoom
 
@@ -591,6 +575,18 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
             log.debug(f"Error parsing callback trigger: {e}")
             return (dash.no_update,) * 6
 
+        # Resolve bundle clicks to real file UUIDs
+        bundle = data_manager.get_bundle_by_id(file_id)
+        if bundle and bundle.main_file:
+            file_id = bundle.main_file.get('id')
+            log.debug(f"Resolved bundle click to main file: {file_id}")
+        elif not data_manager.get_data_by_id(file_id) and file_id in data_manager.lcms_bundles:
+            lcms = data_manager.lcms_bundles[file_id]
+            comp_ids = lcms.get('files', [])
+            if comp_ids:
+                file_id = comp_ids[0]
+                log.debug(f"Resolved LCMS bundle click to first component: {file_id}")
+
         log.debug(f"File clicked: {file_id} (tab={active_tab})")
 
         # Don't redraw if the same file is already active
@@ -601,29 +597,9 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
         # main-plot or pub-data-store (those hold shared analysis data).
         on_shared_tab = active_tab in ('peak-analysis', 'across-samples')
 
-        # Find the file data - check if it's a bundle first
         file_data = data_manager.get_data_by_id(file_id)
-
-        if file_data:
-            log.debug(f"Found direct file data for: {file_id}")
-        else:
-            log.debug(f"No direct data found for '{file_id}', checking if it's a bundle...")
-            log.debug(f"loaded_data keys: {list(data_manager.loaded_data.keys())}")
-
-            # Check if this is a bundle
-            bundle = data_manager.get_bundle_by_id(file_id)
-            if bundle and bundle.main_file:
-                # Use the main file's data for the bundle
-                main_file_id = bundle.main_file.get('id')
-                file_data = data_manager.get_data_by_id(main_file_id)
-
-                if file_data:
-                    log.debug(f"Using main file data for bundle: {bundle.base_name}")
-                else:
-                    log.error(f"No data found for main file: {main_file_id}")
-            else:
-                log.error(f"No bundle found for ID: {file_id}")
-                log.debug(f"bundle_manager bundles: {list(data_manager.bundle_manager.bundles.keys())}")
+        if not file_data:
+            log.error(f"No data found for file: {file_id}")
 
         # Check if this is a well selection (file_id contains |)
         if not file_data and '|' in file_id:
@@ -884,7 +860,7 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
         figure = plot_manager.create_multi_file_plot(visible_files, layout_mode)
 
         if active_file:
-            _ov_time, _ov_signal = get_chromatogram_arrays(data_manager, active_file)
+            _ov_time, _ov_signal = get_xy_arrays(data_manager, active_file)
             if _ov_time is not None:
                 figure = overlay_peaks_on_figure(
                     data_manager.peak_service.get_peaks(active_file),

@@ -37,6 +37,23 @@ class LCMSService:
     def _get_metadata(data: dict) -> dict:
         return data.get("metadata", {})
 
+    @staticmethod
+    def _get_spectral_arrays(data: dict) -> Optional[dict]:
+        """Locate mass spectral arrays regardless of storage layout.
+
+        Returns dict with mass_values, intensity_values, scan_index or None.
+        """
+        meta = data.get("metadata", {})
+        msd = meta.get("mass_spectral_data")
+        if isinstance(msd, dict) and "mass_values" in msd:
+            return msd
+
+        raw = data.get("data", data)
+        if isinstance(raw, dict) and "mass_values" in raw:
+            return raw
+
+        return None
+
     # ------------------------------------------------------------------
     # Chromatogram extraction
     # ------------------------------------------------------------------
@@ -112,21 +129,17 @@ class LCMSService:
     # Mass spectrum access
     # ------------------------------------------------------------------
 
-    @staticmethod
     def get_mass_spectrum(
-        data: dict, scan_index: int
+        self, data: dict, scan_index: int
     ) -> Tuple[np.ndarray, np.ndarray]:
         """Return (m/z, intensity) arrays for a single scan by index."""
-        raw = data.get("data", data)
-        if not isinstance(raw, dict):
-            raise ValueError("Raw data is not a dict; cannot extract scan.")
+        arrays = self._get_spectral_arrays(data)
+        if arrays is None:
+            raise ValueError("No mass spectral data available.")
 
-        mass_values = np.asarray(raw.get("mass_values", []), dtype=float)
-        intensity_values = np.asarray(raw.get("intensity_values", []), dtype=float)
-        scan_index_arr = np.asarray(raw.get("scan_index", []), dtype=int)
-
-        if mass_values.size == 0 or intensity_values.size == 0:
-            raise ValueError("No mass/intensity data available.")
+        mass_values = np.asarray(arrays["mass_values"], dtype=float)
+        intensity_values = np.asarray(arrays["intensity_values"], dtype=float)
+        scan_index_arr = np.asarray(arrays["scan_index"], dtype=int)
 
         n_scans = scan_index_arr.size
         if scan_index < 0 or scan_index >= n_scans:
@@ -169,16 +182,13 @@ class LCMSService:
         summed signal within the m/z window for that scan.
         """
         time_arr, _ = self.extract_tic(data)
-        raw = data.get("data", data)
-        if not isinstance(raw, dict):
-            raise ValueError("Raw data is not a dict; cannot build EIC.")
+        arrays = self._get_spectral_arrays(data)
+        if arrays is None:
+            raise ValueError("No mass spectral data available for EIC.")
 
-        mass_values = np.asarray(raw.get("mass_values", []), dtype=float)
-        intensity_values = np.asarray(raw.get("intensity_values", []), dtype=float)
-        scan_index_arr = np.asarray(raw.get("scan_index", []), dtype=int)
-
-        if mass_values.size == 0:
-            raise ValueError("No mass data available for EIC.")
+        mass_values = np.asarray(arrays["mass_values"], dtype=float)
+        intensity_values = np.asarray(arrays["intensity_values"], dtype=float)
+        scan_index_arr = np.asarray(arrays["scan_index"], dtype=int)
 
         n_scans = scan_index_arr.size
         eic_intensities = np.zeros(n_scans, dtype=float)
@@ -382,10 +392,14 @@ class LCMSService:
             if isinstance(mr, (list, tuple)) and len(mr) == 2:
                 return (float(mr[0]), float(mr[1]))
 
-        raw = data.get("data", data)
-        if isinstance(raw, dict) and "mass_values" in raw:
-            mv = np.asarray(raw["mass_values"], dtype=float)
+        arrays = self._get_spectral_arrays(data)
+        if arrays is not None:
+            mv = np.asarray(arrays["mass_values"], dtype=float)
             if mv.size:
                 return (float(mv.min()), float(mv.max()))
 
         return (0.0, 0.0)
+
+    def has_spectral_data(self, data: dict) -> bool:
+        """Check whether per-scan mass spectral arrays are present."""
+        return self._get_spectral_arrays(data) is not None

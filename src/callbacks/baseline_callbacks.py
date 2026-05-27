@@ -112,13 +112,15 @@ def _area_with_constraints(time_arr, signal_arr, p1, p2):
 
 
 # ---------------------------------------------------------------------------
-# Shared: get chromatogram arrays from file_id
+# Shared: get X/Y arrays from any file
 # ---------------------------------------------------------------------------
 
-def get_chromatogram_arrays(data_manager, file_id):
-    """Extract (time, signal) arrays from the active chromatogram.
+def get_xy_arrays(data_manager, file_id):
+    """Extract (x, y) arrays from any loaded file using pipeline metadata.
 
-    Exported so integration_callbacks can reuse it.
+    Uses auto_x / auto_y set by the ingestion pipeline, falling back to
+    StandardizedResult column roles, then to the first two numeric columns.
+    Works on chromatograms, spectra, kinetics, generic CSVs — anything.
     """
     file_data = data_manager.get_data_by_id(file_id)
     if file_data is None:
@@ -132,20 +134,38 @@ def get_chromatogram_arrays(data_manager, file_id):
     if df is None:
         return None, None
 
-    time_col = signal_col = None
-    for c in df.columns:
-        cl = c.lower()
-        if 'time' in cl:
-            time_col = c
-        elif any(k in cl for k in ('value', 'intensity', 'mau', 'absorbance', 'signal')):
-            signal_col = c
-    if time_col is None or signal_col is None:
+    metadata = file_data.get('metadata', {})
+    x_col = metadata.get('auto_x')
+    y_cols = metadata.get('auto_y')
+
+    if not x_col or not y_cols:
+        sr = file_data.get('standardized')
+        if sr:
+            if not x_col and sr.x_columns:
+                x_col = sr.x_columns[0]
+            if not y_cols and sr.y_columns:
+                y_cols = sr.y_columns
+
+    if not x_col or not y_cols:
+        numeric = df.select_dtypes(include='number').columns.tolist()
+        if len(numeric) >= 2:
+            x_col = numeric[0]
+            y_cols = [numeric[1]]
+
+    if not x_col or not y_cols:
+        return None, None
+
+    y_col = y_cols[0] if isinstance(y_cols, list) else y_cols
+    if x_col not in df.columns or y_col not in df.columns:
         return None, None
 
     return (
-        df[time_col].to_numpy(dtype=float),
-        df[signal_col].to_numpy(dtype=float),
+        df[x_col].to_numpy(dtype=float),
+        df[y_col].to_numpy(dtype=float),
     )
+
+
+get_chromatogram_arrays = get_xy_arrays
 
 
 # ---------------------------------------------------------------------------
@@ -156,7 +176,7 @@ def register_baseline_callbacks(app: dash.Dash, data_manager) -> None:
     """Register all manual baseline integration callbacks."""
 
     def _get_chrom(file_id):
-        return get_chromatogram_arrays(data_manager, file_id)
+        return get_xy_arrays(data_manager, file_id)
 
     # ── Mode switching ────────────────────────────────────────────────
 

@@ -117,6 +117,14 @@
         return inside;
     }
 
+    function traceMatchesSubplot(trace, spKey) {
+        var traceXa = (trace.xaxis || 'x').replace('x', '');
+        var traceYa = (trace.yaxis || 'y').replace('y', '');
+        var expectXa = spKey.replace(/y\d*$/, '').replace('x', '');
+        var expectYa = spKey.replace(/^x\d*/, '').replace('y', '');
+        return traceXa === expectXa && traceYa === expectYa;
+    }
+
     function peakIdAtEvent(gd, event) {
         if (!gd || !gd.data) return null;
         var sp = subplotAtEvent(gd, event);
@@ -128,6 +136,7 @@
         for (var i = gd.data.length - 1; i >= 0; i--) {
             var trace = gd.data[i];
             if (!trace || trace.meta !== 'peak_overlay' || trace.fill !== 'toself' || !trace.x || !trace.y) continue;
+            if (!traceMatchesSubplot(trace, sp.key)) continue;
             var peakId = null;
             if (Array.isArray(trace.customdata) && trace.customdata.length) {
                 peakId = Array.isArray(trace.customdata[0]) ? trace.customdata[0][0] : trace.customdata[0];
@@ -223,7 +232,6 @@
     function subplotAtEvent(gd, event) {
         if (!gd || !gd._fullLayout || !event) return null;
 
-        // Collect all .nsewdrag rects and match the one under the pointer
         var allDrags = gd.querySelectorAll('.nsewdrag');
         var hitDrag = null;
         var hitBounds = null;
@@ -238,18 +246,17 @@
         }
         if (!hitDrag) return null;
 
-        // Try to find which subplot owns this drag rect
         var plots = gd._fullLayout._plots;
         if (plots) {
-            for (var key in plots) {
-                if (!plots.hasOwnProperty(key)) continue;
-                var subplot = plots[key];
-                // plotgroup may be a D3 selection or DOM node
-                var groupNode = subplot.plotgroup;
-                if (groupNode && typeof groupNode.node === 'function') groupNode = groupNode.node();
-                if (groupNode && groupNode.contains && groupNode.contains(hitDrag)) {
+            // The drag rect's parent <g> has the subplot key as its class
+            // e.g. <g class="xy">, <g class="x2y2">
+            var parentG = hitDrag.parentNode;
+            if (parentG && parentG.getAttribute) {
+                var cls = parentG.getAttribute('class') || '';
+                if (cls && plots[cls]) {
+                    var subplot = plots[cls];
                     return {
-                        key: key,
+                        key: cls,
                         xaxis: subplot.xaxis,
                         yaxis: subplot.yaxis,
                         plotArea: hitDrag,
@@ -257,9 +264,35 @@
                     };
                 }
             }
+
+            // Fallback: match by axis pixel ranges
+            for (var key in plots) {
+                if (!plots.hasOwnProperty(key)) continue;
+                var sp = plots[key];
+                var xa = sp.xaxis;
+                var ya = sp.yaxis;
+                if (!xa || !ya) continue;
+                var plotRect = gd.querySelector('.main-svg');
+                if (!plotRect) continue;
+                var gdRect = plotRect.getBoundingClientRect();
+                var spLeft = gdRect.left + xa._offset;
+                var spRight = spLeft + xa._length;
+                var spTop = gdRect.top + ya._offset;
+                var spBottom = spTop + ya._length;
+                var cx = (hitBounds.left + hitBounds.right) / 2;
+                var cy = (hitBounds.top + hitBounds.bottom) / 2;
+                if (cx >= spLeft && cx <= spRight && cy >= spTop && cy <= spBottom) {
+                    return {
+                        key: key,
+                        xaxis: xa,
+                        yaxis: ya,
+                        plotArea: hitDrag,
+                        bounds: hitBounds
+                    };
+                }
+            }
         }
 
-        // Fallback: single-subplot layout
         return {
             key: 'xy',
             xaxis: gd._fullLayout.xaxis,
@@ -422,10 +455,12 @@
         if (!startData) return false;
 
         stopPlotlyGesture(event);
+        var startSp = subplotAtEvent(gd, event);
         gd.__geckoManualIntegrationDrawing = {
             startClientX: event.clientX,
             startClientY: event.clientY,
             startData: startData,
+            startSubplot: startSp,
             momentary: isDrawModifier(event) && gd.__geckoManualIntegrationMode !== 'draw'
         };
         if (gd.__geckoManualIntegrationDrawing.momentary) {
@@ -435,14 +470,27 @@
         syncInteractionDragmode(gd);
         updatePreviewLine(event.clientX, event.clientY, event.clientX, event.clientY);
 
+        var clampToSubplot = function (clientX, clientY) {
+            var drawing = gd.__geckoManualIntegrationDrawing;
+            if (!drawing || !drawing.startSubplot || !drawing.startSubplot.bounds) {
+                return { x: clientX, y: clientY };
+            }
+            var b = drawing.startSubplot.bounds;
+            return {
+                x: Math.max(b.left, Math.min(b.right, clientX)),
+                y: Math.max(b.top, Math.min(b.bottom, clientY))
+            };
+        };
+
         var move = function (moveEvent) {
             if (!gd.__geckoManualIntegrationDrawing) return;
             stopPlotlyGesture(moveEvent);
+            var clamped = clampToSubplot(moveEvent.clientX, moveEvent.clientY);
             updatePreviewLine(
                 gd.__geckoManualIntegrationDrawing.startClientX,
                 gd.__geckoManualIntegrationDrawing.startClientY,
-                moveEvent.clientX,
-                moveEvent.clientY
+                clamped.x,
+                clamped.y
             );
         };
 
@@ -463,15 +511,18 @@
             }
             syncInteractionDragmode(gd);
 
-            var distance = Math.hypot(upEvent.clientX - drawing.startClientX, upEvent.clientY - drawing.startClientY);
-            var endData = dataPointAtEvent(gd, upEvent);
-            if (distance < 4 || !endData) return;
+            var clamped = clampToSubplot(upEvent.clientX, upEvent.clientY);
+            var distance = Math.hypot(clamped.x - drawing.startClientX, clamped.y - drawing.startClientY);
+            var sp = drawing.startSubplot;
+            var endX = sp ? axisPixelToData(sp.xaxis, clamped.x - sp.bounds.left, sp.bounds.width, false) : null;
+            var endY = sp ? axisPixelToData(sp.yaxis, clamped.y - sp.bounds.top, sp.bounds.height, true) : null;
+            if (distance < 4 || endX === null || endY === null) return;
 
             publishDrawLine({
                 x0: drawing.startData.x,
                 y0: drawing.startData.y,
-                x1: endData.x,
-                y1: endData.y,
+                x1: Number(endX),
+                y1: Number(endY),
                 subplot: drawing.startData.subplot,
                 momentary: drawing.momentary
             });

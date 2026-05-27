@@ -35,6 +35,7 @@ class LCMSCDFReader(BaseReader):
         self.tic_data: Optional[pd.DataFrame] = None
         self.mass_range: Tuple[float, float] = (0.0, 0.0)
         self.scan_count: int = 0
+        self.mass_spectral_data: Optional[Dict[str, np.ndarray]] = None
 
     # ------------------------------------------------------------------
     # BaseReader overrides
@@ -49,6 +50,7 @@ class LCMSCDFReader(BaseReader):
                 self._extract_metadata(dataset)
                 self._detect_ionization_mode(dataset)
                 self._extract_tic_data(dataset)
+                self._extract_mass_spectral_data(dataset)
 
             return True
         except Exception as exc:  # pragma: no cover - defensive logging helper
@@ -138,6 +140,11 @@ class LCMSCDFReader(BaseReader):
         except KeyError as exc:
             raise KeyError(f"Missing TIC variable in CDF: {exc}") from exc
 
+        if scan_times.size > 0 and np.all(scan_times == 0):
+            delay = float(dataset.variables.get("actual_delay_time", [0.0])[:].flat[0])
+            interval = float(dataset.variables.get("actual_sampling_interval", [1.0])[:].flat[0])
+            scan_times = delay + np.arange(len(signal)) * interval
+
         # Convert to minutes
         scan_times_min = scan_times / 60.0
         self.tic_data = pd.DataFrame(
@@ -166,6 +173,22 @@ class LCMSCDFReader(BaseReader):
                 "max_intensity": float(signal.max()) if signal.size else 0.0,
             }
         )
+
+    def _extract_mass_spectral_data(self, dataset: nc.Dataset) -> None:
+        """Extract per-scan mass spectral arrays when available."""
+        needed = ("mass_values", "intensity_values", "scan_index")
+        if not all(v in dataset.variables for v in needed):
+            return
+
+        self.mass_spectral_data = {
+            "mass_values": np.asarray(dataset.variables["mass_values"][:], dtype=np.float32),
+            "intensity_values": np.asarray(dataset.variables["intensity_values"][:], dtype=np.float32),
+            "scan_index": np.asarray(dataset.variables["scan_index"][:], dtype=np.int32),
+        }
+        if "point_count" in dataset.variables:
+            self.mass_spectral_data["point_count"] = np.asarray(
+                dataset.variables["point_count"][:], dtype=np.int32
+            )
 
     # ------------------------------------------------------------------
     # Public API helpers

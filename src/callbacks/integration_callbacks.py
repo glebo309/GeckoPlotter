@@ -25,41 +25,10 @@ if not log.handlers:
 def register_integration_callbacks(app: dash.Dash, data_manager) -> None:
     """Register all Integration toolbox callbacks."""
 
-    def _get_chromatogram_arrays(file_id):
-        """Extract time and signal arrays from the active chromatogram.
+    from callbacks.baseline_callbacks import get_xy_arrays
 
-        Returns (time, signal) numpy arrays or (None, None) if the active
-        file is not a chromatogram.
-        """
-        file_data = data_manager.get_data_by_id(file_id)
-        if file_data is None:
-            bundle = data_manager.get_bundle_by_id(file_id)
-            if bundle and bundle.main_file:
-                file_data = data_manager.get_data_by_id(bundle.main_file.get('id'))
-
-        if file_data is None:
-            return None, None
-
-        df = file_data.get('data')
-        if df is None:
-            return None, None
-
-        # Chromatogram columns: 'Time (min)' / 'Value (mAU)'
-        time_col = signal_col = None
-        for c in df.columns:
-            cl = c.lower()
-            if 'time' in cl:
-                time_col = c
-            elif 'value' in cl or 'intensity' in cl or 'mau' in cl:
-                signal_col = c
-
-        if time_col is None or signal_col is None:
-            return None, None
-
-        return (
-            df[time_col].to_numpy(dtype=float),
-            df[signal_col].to_numpy(dtype=float),
-        )
+    def _get_xy(file_id):
+        return get_xy_arrays(data_manager, file_id)
 
     # ── Detect Peaks ──────────────────────────────────────────────────
 
@@ -89,9 +58,9 @@ def register_integration_callbacks(app: dash.Dash, data_manager) -> None:
         if not n_clicks or not active_file:
             return dash.no_update
 
-        time_arr, signal_arr = _get_chromatogram_arrays(active_file)
+        time_arr, signal_arr = _get_xy(active_file)
         if time_arr is None:
-            log.debug("No chromatogram data for integration")
+            log.debug("No plottable X/Y data for integration")
             return dash.no_update
 
         # Update IntegrationService settings

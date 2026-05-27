@@ -94,13 +94,18 @@ class ChromeleonTxtPreset(FormatPreset):
             df[col] = pd.to_numeric(df[col], errors="coerce")
         df.dropna(axis=0, how="any", inplace=True)
 
+        _SKIP_COLS = {"step (s)", "step", "step(s)"}
         cols = list(df.columns)
         column_roles: Dict[str, ColumnRole] = {}
         if cols:
             column_roles[cols[0]] = ColumnRole.X
+        y_cols = []
         for c in cols[1:]:
-            column_roles[c] = ColumnRole.Y
+            if c.strip().lower() not in _SKIP_COLS:
+                column_roles[c] = ColumnRole.Y
+                y_cols.append(c)
 
+        first_y = y_cols[0] if y_cols else (cols[1] if len(cols) > 1 else None)
         return {
             "data": df,
             "column_roles": column_roles,
@@ -111,7 +116,7 @@ class ChromeleonTxtPreset(FormatPreset):
                 "file_type_detail": "chromeleon_chromatogram",
                 "data_points": len(df),
                 "time_range": f"{df[cols[0]].min():.2f} - {df[cols[0]].max():.2f} min" if cols else None,
-                "value_range": f"{df[cols[1]].min():.1f} - {df[cols[1]].max():.1f} mAU" if len(cols) > 1 else None,
+                "value_range": f"{df[first_y].min():.1f} - {df[first_y].max():.1f} mAU" if first_y else None,
                 **header_meta,
             },
         }

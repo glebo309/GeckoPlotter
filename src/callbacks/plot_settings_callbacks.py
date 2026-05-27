@@ -45,19 +45,16 @@ def register_plot_settings_callbacks(app, data_manager):
     @app.callback(
         Output('active-plot-context', 'data'),
         [Input('active-file', 'data'),
-         Input('active-tab', 'data'),
          Input('view-mode', 'data')],
     )
-    def resolve_plot_context(active_file, active_tab, view_mode):
-        """Compute the context key for the currently visible plot."""
-        if active_tab == 'peak-analysis':
-            return 'shared:peak-analysis'
-        if active_tab == 'across-samples':
-            return 'shared:across-samples'
-        # Raw mode uses a single shared context — one combined plot
+    def resolve_plot_context(active_file, view_mode):
+        """Compute the context key for the currently visible plot.
+
+        Data tabs (Peak Analysis, Across Samples, etc.) do NOT change the
+        plot context — they only affect which table panel is shown below.
+        """
         if (view_mode or 'raw') == 'raw':
             return 'shared:raw'
-        # Analysis mode is per-file
         if active_file:
             return f'file:{active_file}'
         return None

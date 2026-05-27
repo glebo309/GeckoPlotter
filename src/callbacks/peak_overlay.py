@@ -69,7 +69,7 @@ def add_deselect_catcher(fig, time_arr, signal_arr):
     ))
 
 
-def add_selected_baseline_handle(fig, peak):
+def add_selected_baseline_handle(fig, peak, row=None):
     """Show the selected peak's baseline plus visible p-point markers."""
     import plotly.graph_objects as go
 
@@ -78,14 +78,21 @@ def add_selected_baseline_handle(fig, peak):
 
     line_color = peak.color or '#E69F00'
     p0, p1 = peak.p_line
+
+    xref = 'x' if not row or row == 1 else f'x{row}'
+    yref = 'y' if not row or row == 1 else f'y{row}'
+
     fig.add_shape(
         type='line',
         x0=p0[0], y0=p0[1],
         x1=p1[0], y1=p1[1],
+        xref=xref, yref=yref,
         name=f'baseline:{peak.peak_id}',
         line=dict(color=line_color, width=2, dash='dot'),
         editable=True,
     )
+
+    add_kw = dict(row=row, col=1) if row else {}
     fig.add_trace(go.Scatter(
         x=[p0[0], p1[0]],
         y=[p0[1], p1[1]],
@@ -100,44 +107,38 @@ def add_selected_baseline_handle(fig, peak):
         hoverinfo='skip',
         showlegend=False,
         meta='peak_overlay',
-    ))
+    ), **add_kw)
 
 
-def overlay_peaks_on_figure(all_peaks, figure, time_arr, signal_arr, selected_peak_id=None):
-    """Rebuild the current figure, adding all peak overlays.
-
-    Parameters
-    ----------
-    all_peaks : list
-        List of peak objects from peak_service.get_peaks().
-    figure : dict or Figure
-        The current Plotly figure to overlay peaks on.
-    time_arr : array-like
-        Time values from the chromatogram.
-    signal_arr : array-like
-        Signal values from the chromatogram.
-    selected_peak_id : str, optional
-        ID of the currently selected peak for highlighting.
-
-    Returns
-    -------
-    go.Figure
-        Figure with peak overlays added.
-    """
-    import plotly.graph_objects as go
-
-    fig = go.Figure(figure) if isinstance(figure, dict) else (
-        go.Figure(figure) if figure else go.Figure()
-    )
-
-    # Remove old peak traces (identified by meta tag)
+def cleanup_peak_traces(fig):
+    """Remove all existing peak overlay traces and shapes from the figure."""
     fig.data = [t for t in fig.data if not (hasattr(t, 'meta') and t.meta == 'peak_overlay')]
-    # Clear drawn/editable shapes before adding the selected peak's baseline.
     fig.layout.shapes = ()
     fig.update_layout(uirevision='main-plot')
 
+
+def add_peak_traces(fig, all_peaks, time_arr, signal_arr, selected_peak_id=None, row=None):
+    """Add peak overlay traces to the figure.
+
+    Parameters
+    ----------
+    fig : go.Figure
+        The figure to add peaks to.
+    all_peaks : list
+        Peak objects from peak_service.get_peaks().
+    time_arr, signal_arr : array-like
+        Chromatogram data for interpolation.
+    selected_peak_id : str, optional
+        Currently selected peak for highlighting.
+    row : int, optional
+        Subplot row (1-based). When set, traces go to that row.
+    """
+    import plotly.graph_objects as go
+
     if not all_peaks:
-        return fig
+        return
+
+    add_kw = dict(row=row, col=1) if row else {}
 
     for i, peak in enumerate(all_peaks):
         is_selected = peak.peak_id == selected_peak_id
@@ -157,7 +158,7 @@ def overlay_peaks_on_figure(all_peaks, figure, time_arr, signal_arr, selected_pe
                 customdata=[peak.peak_id] * len(poly_x),
                 hoverinfo='skip',
                 showlegend=False, meta='peak_overlay',
-            ))
+            ), **add_kw)
             if has_custom_label:
                 fig.add_trace(go.Scatter(
                     x=[peak.rt],
@@ -169,9 +170,9 @@ def overlay_peaks_on_figure(all_peaks, figure, time_arr, signal_arr, selected_pe
                     hoverinfo='skip',
                     showlegend=False,
                     meta='peak_overlay',
-                ))
+                ), **add_kw)
             if is_selected:
-                add_selected_baseline_handle(fig, peak)
+                add_selected_baseline_handle(fig, peak, row=row)
 
         elif has_custom_label:
             marker_y = _y_curve(time_arr, signal_arr, peak.rt)
@@ -185,8 +186,22 @@ def overlay_peaks_on_figure(all_peaks, figure, time_arr, signal_arr, selected_pe
                 hovertemplate=f'{peak.name} ({peak.source})<br>RT: {peak.rt:.3f} min<br>Area: {peak.area:.1f}<extra></extra>',
                 showlegend=False,
                 meta='peak_overlay',
-            ))
+            ), **add_kw)
 
+
+def overlay_peaks_on_figure(all_peaks, figure, time_arr, signal_arr, selected_peak_id=None):
+    """Rebuild the current figure, adding all peak overlays.
+
+    Backward-compatible wrapper: cleans up old traces, then adds new ones.
+    """
+    import plotly.graph_objects as go
+
+    fig = go.Figure(figure) if isinstance(figure, dict) else (
+        go.Figure(figure) if figure else go.Figure()
+    )
+
+    cleanup_peak_traces(fig)
+    add_peak_traces(fig, all_peaks, time_arr, signal_arr, selected_peak_id)
     return fig
 
 

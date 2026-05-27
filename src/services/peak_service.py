@@ -63,6 +63,25 @@ class PeakService:
         # file_id -> list of Peak objects
         self._peaks: Dict[str, List[Peak]] = {}
         self._color_index: int = 0
+        self._aliases: Dict[str, str] = {}
+        self._imported_files: set = set()
+
+    def register_alias(self, alias_id: str, canonical_id: str) -> None:
+        """Map a bundle/alias ID to the canonical file UUID used as peak key.
+
+        If peaks already exist under the alias key, they get moved to the
+        canonical key so everything stays consolidated.
+        """
+        if alias_id != canonical_id:
+            self._aliases[alias_id] = canonical_id
+            if alias_id in self._peaks:
+                self._peaks.setdefault(canonical_id, []).extend(
+                    self._peaks.pop(alias_id)
+                )
+
+    def _resolve(self, file_id: str) -> str:
+        """Resolve an alias to the canonical peak storage key."""
+        return self._aliases.get(file_id, file_id)
 
     # ------------------------------------------------------------------
     # Color cycling
@@ -145,6 +164,7 @@ class PeakService:
             distance=3,
         )
 
+        file_id = self._resolve(file_id)
         peaks: List[Peak] = []
         existing_non_detected = [p for p in self._peaks.get(file_id, []) if p.source != 'detected']
         dt = np.median(np.diff(time_axis)) if time_axis.size > 1 else 1.0
@@ -216,14 +236,102 @@ class PeakService:
         return peaks
 
     # ------------------------------------------------------------------
+    # Boundary estimation from chromatogram signal
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _estimate_peak_shape(
+        time_axis: np.ndarray,
+        signal: np.ndarray,
+        rt: float,
+    ) -> Optional[dict]:
+        """Estimate peak boundaries and polygon from chromatogram data.
+
+        Walks left/right from the apex until the signal drops below 1% of
+        peak height, then builds a filled polygon with a y=0 baseline.
+
+        Returns None if the RT is out of range or no valid peak shape found.
+        """
+        if rt < time_axis[0] or rt > time_axis[-1]:
+            return None
+
+        local_apex = int(np.argmin(np.abs(time_axis - rt)))
+        apex_rt = float(time_axis[local_apex])
+        apex_height = float(signal[local_apex])
+        if apex_height <= 0:
+            return None
+
+        floor = apex_height * 0.05
+
+        # Walk left: stop at valley (signal starts rising) or floor
+        left = local_apex
+        while left > 1:
+            if signal[left - 1] > signal[left]:
+                break
+            if signal[left] < floor:
+                break
+            left -= 1
+
+        # Walk right: stop at valley (signal starts rising) or floor
+        right = local_apex
+        while right < len(signal) - 2:
+            if signal[right + 1] > signal[right]:
+                break
+            if signal[right] < floor:
+                break
+            right += 1
+
+        rt_start = float(time_axis[left])
+        rt_end = float(time_axis[right])
+
+        mask = (time_axis >= rt_start) & (time_axis <= rt_end)
+        xs = time_axis[mask]
+        ys = signal[mask]
+        if len(xs) < 2:
+            return None
+
+        y_left = float(ys[0])
+        y_right = float(ys[-1])
+        baseline = y_left + (y_right - y_left) * (xs - xs[0]) / (xs[-1] - xs[0])
+        diff = ys - baseline
+        area = float(np.trapz(np.maximum(diff, 0), xs))
+        height = float(diff.max())
+
+        baseline_clamped = np.minimum(baseline, ys)
+        poly_x = np.concatenate([xs, xs[::-1]]).tolist()
+        poly_y = np.concatenate([ys, baseline_clamped[::-1]]).tolist()
+        p_line = [(rt_start, y_left), (rt_end, y_right)]
+
+        return dict(
+            apex_rt=apex_rt,
+            apex_height=apex_height,
+            rt_start=rt_start,
+            rt_end=rt_end,
+            area=area,
+            height=height,
+            width=rt_end - rt_start,
+            poly_x=poly_x,
+            poly_y=poly_y,
+            p_line=p_line,
+            q1=(rt_start, y_left),
+            q2=(rt_end, y_right),
+        )
+
+    # ------------------------------------------------------------------
     # Instrument peak import
     # ------------------------------------------------------------------
 
     def import_instrument_peaks(
         self, file_id: str, parsed_results: List[dict],
         sample_name: str = "",
+        time_axis: Optional[np.ndarray] = None,
+        signal: Optional[np.ndarray] = None,
     ) -> List[Peak]:
         """Import peaks parsed from instrument integration results.
+
+        When time_axis and signal are provided, boundaries and polygons are
+        estimated from the chromatogram so imported peaks are fully editable
+        — identical to manually drawn peaks.
 
         Parameters
         ----------
@@ -231,36 +339,66 @@ class PeakService:
             Identifier for the source file/bundle.
         parsed_results : list of dict
             Each dict has keys like 'peak_number', 'peak_name',
-            'retention_time', 'area', 'height', 'relative_area',
-            'relative_height'.
+            'retention_time', 'area', 'height'.
         sample_name : str
             Human-readable sample label.
-
-        Returns
-        -------
-        List[Peak]
-            Stored peaks.
+        time_axis, signal : ndarray, optional
+            Chromatogram arrays for boundary estimation.
         """
+        fid = self._resolve(file_id)
+
+        if fid in self._imported_files:
+            return self._peaks.get(fid, [])
+        self._imported_files.add(fid)
+
+        has_signal = time_axis is not None and signal is not None
+        if has_signal:
+            time_axis = np.asarray(time_axis, dtype=float)
+            signal = np.asarray(signal, dtype=float)
+
         peaks: List[Peak] = []
         for r in parsed_results:
             rt = r.get('retention_time', 0.0)
-            peak = Peak(
-                peak_id=str(uuid.uuid4()),
-                file_id=file_id,
-                name=r.get('peak_name', '') or f"Peak {r.get('peak_number', len(peaks)+1)}",
-                rt=rt,
-                rt_start=rt,       # instrument results don't give boundaries
-                rt_end=rt,
-                area=r.get('area', 0.0),
-                height=r.get('height', 0.0),
-                width=0.0,
-                color=self._next_color(),
-                source='imported',
-            )
+            name = r.get('peak_name', '') or f"Peak {r.get('peak_number', len(peaks)+1)}"
+
+            shape = self._estimate_peak_shape(time_axis, signal, rt) if has_signal else None
+
+            if shape:
+                peak = Peak(
+                    peak_id=str(uuid.uuid4()),
+                    file_id=fid,
+                    name=name,
+                    rt=shape['apex_rt'],
+                    rt_start=shape['rt_start'],
+                    rt_end=shape['rt_end'],
+                    area=r.get('area', shape['area']),
+                    height=r.get('height', shape['height']),
+                    width=shape['width'],
+                    color=self._next_color(),
+                    source='imported',
+                    poly_x=shape['poly_x'],
+                    poly_y=shape['poly_y'],
+                    p_line=shape['p_line'],
+                    q1=shape['q1'],
+                    q2=shape['q2'],
+                )
+            else:
+                peak = Peak(
+                    peak_id=str(uuid.uuid4()),
+                    file_id=fid,
+                    name=name,
+                    rt=rt,
+                    rt_start=rt,
+                    rt_end=rt,
+                    area=r.get('area', 0.0),
+                    height=r.get('height', 0.0),
+                    width=0.0,
+                    color=self._next_color(),
+                    source='imported',
+                )
             peaks.append(peak)
-        # Replace only imported peaks, keep manual/detected
-        existing = [p for p in self._peaks.get(file_id, []) if p.source != 'imported']
-        self._peaks[file_id] = peaks + existing
+
+        self._peaks[fid] = peaks
         return peaks
 
     # ------------------------------------------------------------------
@@ -340,6 +478,7 @@ class PeakService:
         area = self.calculate_peak_area(signal, time_axis, rt_start, rt_end)
         width = rt_end - rt_start
 
+        file_id = self._resolve(file_id)
         existing = self._peaks.get(file_id, [])
         peak_number = len(existing) + 1
 
@@ -383,13 +522,12 @@ class PeakService:
         If a manual peak with a very close apex already exists, it is updated
         instead of creating a duplicate.
         """
+        file_id = self._resolve(file_id)
         existing = self._peaks.get(file_id, [])
 
         line_x_min = min(p_line[0][0], p_line[1][0])
         line_x_max = max(p_line[0][0], p_line[1][0])
         for p in existing:
-            if p.source not in ('manual', 'detected'):
-                continue
             p_width = p.rt_end - p.rt_start
             overlap = max(0, min(line_x_max, p.rt_end) - max(line_x_min, p.rt_start))
             if (p_width > 0 and overlap / p_width > 0.5) or abs(p.rt - apex_x) < 0.05:
@@ -429,15 +567,42 @@ class PeakService:
         self._peaks.setdefault(file_id, []).append(peak)
         return peak
 
+    def clear_peaks(self, file_id: str) -> None:
+        """Remove all peaks and aliases for a file.
+
+        Searches by resolved ID, raw ID, and any alias that points to
+        either — covers bundle IDs, main-file UUIDs, and everything
+        in between.
+        """
+        fid = self._resolve(file_id)
+        ids_to_remove = {file_id, fid}
+        for alias, canonical in list(self._aliases.items()):
+            if alias in ids_to_remove or canonical in ids_to_remove:
+                ids_to_remove.add(alias)
+                ids_to_remove.add(canonical)
+        for rid in ids_to_remove:
+            self._peaks.pop(rid, None)
+            self._aliases.pop(rid, None)
+            self._imported_files.discard(rid)
+
+    def clear_all_peaks(self) -> None:
+        """Remove every peak and alias. Used when all files are deleted."""
+        self._peaks.clear()
+        self._aliases.clear()
+        self._imported_files.clear()
+        self._color_index = 0
+
     def clear_manual_peaks(self, file_id: str) -> None:
         """Remove all manual baseline peaks for a file."""
-        if file_id in self._peaks:
-            self._peaks[file_id] = [p for p in self._peaks[file_id] if p.source != 'manual']
+        fid = self._resolve(file_id)
+        if fid in self._peaks:
+            self._peaks[fid] = [p for p in self._peaks[fid] if p.source != 'manual']
 
     def clear_detected_peaks(self, file_id: str) -> None:
         """Remove all auto-detected peaks for a file."""
-        if file_id in self._peaks:
-            self._peaks[file_id] = [p for p in self._peaks[file_id] if p.source != 'detected']
+        fid = self._resolve(file_id)
+        if fid in self._peaks:
+            self._peaks[fid] = [p for p in self._peaks[fid] if p.source != 'detected']
 
     # ------------------------------------------------------------------
     # CRUD helpers
@@ -445,20 +610,31 @@ class PeakService:
 
     def remove_peak(self, file_id: str, peak_id: str) -> bool:
         """Remove a peak by ID. Returns True if found and removed."""
-        peaks = self._peaks.get(file_id)
+        fid = self._resolve(file_id)
+        peaks = self._peaks.get(fid)
         if peaks is None:
             return False
         before = len(peaks)
-        self._peaks[file_id] = [p for p in peaks if p.peak_id != peak_id]
-        return len(self._peaks[file_id]) < before
+        self._peaks[fid] = [p for p in peaks if p.peak_id != peak_id]
+        return len(self._peaks[fid]) < before
 
     def rename_peak(self, file_id: str, peak_id: str, new_name: str) -> bool:
-        """Rename a peak. Returns True if found."""
-        for p in self._peaks.get(file_id, []):
+        """Rename a peak and propagate to all peaks in the same group."""
+        fid = self._resolve(file_id)
+        target = None
+        for p in self._peaks.get(fid, []):
             if p.peak_id == peak_id:
                 p.name = new_name
-                return True
-        return False
+                target = p
+                break
+        if target is None:
+            return False
+        if target.group_id:
+            for pks in self._peaks.values():
+                for p in pks:
+                    if p.group_id == target.group_id:
+                        p.name = new_name
+        return True
 
     def set_peak_color(
         self,
@@ -468,7 +644,8 @@ class PeakService:
         opacity: Optional[float] = None,
     ) -> bool:
         """Update the display color (and optionally opacity) of a peak."""
-        for p in self._peaks.get(file_id, []):
+        fid = self._resolve(file_id)
+        for p in self._peaks.get(fid, []):
             if p.peak_id == peak_id:
                 p.color = color
                 if opacity is not None:
@@ -478,7 +655,13 @@ class PeakService:
 
     def get_peaks(self, file_id: str) -> List[Peak]:
         """Return all peaks for a given file."""
-        return list(self._peaks.get(file_id, []))
+        fid = self._resolve(file_id)
+        result = list(self._peaks.get(fid, []))
+        if not result and file_id != fid:
+            import logging
+            logging.getLogger('geckoplotter.baseline').debug(
+                f"get_peaks: resolved {file_id} -> {fid}, found {len(result)} peaks. _peaks keys={list(self._peaks.keys())[:5]}")
+        return result
 
     def get_all_peaks(self) -> Dict[str, List[Peak]]:
         """Return all peaks keyed by file_id."""
@@ -504,8 +687,12 @@ class PeakService:
             group_id -> list of peaks in that group.
         """
         all_peaks: List[Peak] = []
-        for pks in self._peaks.values():
-            all_peaks.extend(pks)
+        peak_file_map: Dict[str, str] = {}
+        for file_id, pks in self._peaks.items():
+            resolved = self._resolve(file_id)
+            for p in pks:
+                all_peaks.append(p)
+                peak_file_map[p.peak_id] = resolved
 
         if not all_peaks:
             return {}
@@ -516,9 +703,12 @@ class PeakService:
         current_group: List[Peak] = [all_peaks[0]]
 
         for peak in all_peaks[1:]:
-            # Compare to the mean RT of the current group
             group_mean_rt = np.mean([p.rt for p in current_group])
-            if abs(peak.rt - group_mean_rt) <= rt_window:
+            same_file_as_existing = any(
+                peak_file_map.get(peak.peak_id) == peak_file_map.get(p.peak_id)
+                for p in current_group
+            )
+            if abs(peak.rt - group_mean_rt) <= rt_window and not same_file_as_existing:
                 current_group.append(peak)
             else:
                 groups.append(current_group)
@@ -526,9 +716,19 @@ class PeakService:
         groups.append(current_group)
 
         result: Dict[str, List[Peak]] = {}
+        used_colors: set = set()
         for i, group in enumerate(groups):
-            gid = f"group_{i + 1}"
-            color = OKABE_ITO_PALETTE[i % len(OKABE_ITO_PALETTE)]
+            mean_rt = float(np.mean([p.rt for p in group]))
+            gid = f"compound_rt{mean_rt:.1f}"
+            color_idx = hash(round(mean_rt, 1)) % len(OKABE_ITO_PALETTE)
+            if OKABE_ITO_PALETTE[color_idx] in used_colors:
+                for offset in range(1, len(OKABE_ITO_PALETTE)):
+                    candidate = (color_idx + offset) % len(OKABE_ITO_PALETTE)
+                    if OKABE_ITO_PALETTE[candidate] not in used_colors:
+                        color_idx = candidate
+                        break
+            color = OKABE_ITO_PALETTE[color_idx]
+            used_colors.add(color)
             for peak in group:
                 peak.group_id = gid
                 peak.color = color
@@ -638,7 +838,7 @@ class PeakService:
 
     def peaks_to_table(self, file_id: str) -> pd.DataFrame:
         """Return a user-facing peak table for a file (combined sources)."""
-        peaks = self._peaks.get(file_id, [])
+        peaks = self._peaks.get(self._resolve(file_id), [])
         if not peaks:
             return pd.DataFrame()
         total_area = sum(max(float(p.area or 0.0), 0.0) for p in peaks)
@@ -647,6 +847,7 @@ class PeakService:
         for i, p in enumerate(sorted(peaks, key=lambda pk: pk.rt), start=1):
             rows.append({
                 'No.': i,
+                'peak_id': p.peak_id,
                 'Peak Name': p.name,
                 'RT (min)': round(p.rt, 3),
                 'Area': round(p.area, 1),

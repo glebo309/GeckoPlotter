@@ -115,17 +115,22 @@ app.layout = html.Div(
         dcc.Store(id='pub-data-store'),  # Store for publication plotter data
         dcc.Store(id='pub-plot-figure'),  # Store for the publication plot figure
         dcc.Store(id='pub-plot-trigger'),  # Trigger to update main plot
+        dcc.Store(id='custom-plot-figures', data={}),  # Maps custom tab_id → figure dict
+        dcc.Store(id='custom-plot-counter', data=0),  # Auto-incrementing counter for plot names
+        dcc.Store(id='tab-rename-event', data=None),  # {tab_id, new_label} from JS
         dcc.Store(id='plot-export-data'),  # Export data from publication plot
         dcc.Store(id='peak-shared-selections', data={}),  # Shared selections for peak-analysis tab
         dcc.Store(id='cross-shared-selections', data={}),  # Shared selections for across-samples tab
         dcc.Store(id='peak-table-store', data=None),  # Mirror of peak-table data (JSON split) — always in layout
         dcc.Store(id='cross-sample-table-store', data=None),  # Mirror of cross-sample-table data (JSON split) — always in layout
-        dcc.Dropdown(id='peak-group-selector', style={'display': 'none'}),  # Placeholder for dynamically created dropdown
+        dcc.Dropdown(id='peak-group-selector', style={'display': 'none'}),
+        html.Div(dcc.Slider(id='retention-time-slider', value=0.2, min=0.05, max=1.0, step=0.05), style={'display': 'none'}),
         # Baseline integration stores (p-line drawing)
         dcc.Store(id='baseline-mode', data='navigate'),  # 'draw' | 'edit' | 'navigate'
         dcc.Store(id='selected-peak-idx', data=None),  # Index of peak being edited
         dcc.Store(id='clear-shapes-trigger', data=0),  # Counter to trigger shape clearing
         dcc.Store(id='peak-change-trigger', data=0),  # Counter to refresh tables/overlays after peak edits
+        dcc.Store(id='peak-name-persist-trigger', data=None),
         dcc.Store(id='plot-peak-click-store', data=None),  # Browser-side peak hit-test selection
         dcc.Store(id='manual-draw-line-store', data=None),  # Browser-side custom integration line
         dcc.Store(id='interaction-action-store', data=None),  # Last action for future undo/redo
@@ -136,6 +141,8 @@ app.layout = html.Div(
         dcc.Store(id='tab-file-memory', data={}),  # Maps tab_id → last selected file_id
         dcc.Store(id='tab-panel-memory', data={}),  # Maps tab_id → last active bottom panel
         dcc.Store(id='tab-zoom-memory', data={}),  # Maps tab_id → saved zoom ranges
+        dcc.Store(id='file-order', data={}),  # Per-group file ordering {group_id: {sort_dir: 'asc'|'desc'|null, order: [id, ...]}}
+        dcc.Store(id='file-reorder-event', data=None),  # JS drag-and-drop event {group_id, order: [id, ...]}
         html.Button(id='plot-empty-click-trigger', n_clicks=0, style={'display': 'none'}),
         html.Div(id='clear-transient-shapes-output', style={'display': 'none'}),
         html.Div(id='selected-shapes-sync-output', style={'display': 'none'}),
@@ -274,6 +281,7 @@ app.layout = html.Div(
                                                 html.Div(
                                                     id='pub-plotter-container',
                                                     className='toolbox-tab-content active',
+                                                    style={'padding': '10px', 'overflowY': 'auto', 'maxHeight': 'calc(100% - 40px)'},
                                                     children=create_axis_mapper_layout(),
                                                 ),
                                                 # Plot Settings Tab
@@ -295,7 +303,7 @@ app.layout = html.Div(
                                                                 id='pt-layout-mode',
                                                                 options=[
                                                                     {'label': ' Superposed', 'value': 'overlay'},
-                                                                    {'label': ' Separate plots', 'value': 'stacked'},
+                                                                    {'label': ' Subplots', 'value': 'stacked'},
                                                                 ],
                                                                 value='overlay', inline=True,
                                                                 style={'fontSize': '12px', 'marginBottom': '10px'},
@@ -695,7 +703,6 @@ app.layout = html.Div(
                                                     id='main-plot-loading',
                                                     type='circle',
                                                     color='#ff6b35',
-                                                    delay_show=350,
                                                     parent_className='loading-wrapper',
                                                     children=dcc.Graph(
                                                         id='main-plot',
@@ -752,6 +759,7 @@ app.layout = html.Div(
                                                     html.Button("Across Samples", id="across-samples-tab", className="tab-button", n_clicks=0, style={'display': 'inline-block', 'marginRight': '10px'}),
                                                     html.Button("Metadata", id="metadata-tab", className="tab-button", n_clicks=0, style={'display': 'inline-block', 'marginRight': '10px'}),
                                                     html.Button("Calibration", id="calibration-tab", className="tab-button", n_clicks=0, style={'display': 'inline-block', 'marginRight': '10px'}),
+                                                    html.Button("MS Viewer", id="ms-viewer-tab", className="tab-button", n_clicks=0, style={'display': 'inline-block', 'marginRight': '10px'}),
                                                 ], className="tab-header", style={
                                                     'display': 'flex',
                                                     'borderBottom': '1px solid #e0e0e0',
@@ -782,6 +790,7 @@ app.layout = html.Div(
                                                                     data=[],
                                                                     cell_selectable=True,
                                                                     column_selectable='single',
+                                                                    sort_action='native',
                                                                     style_table={'display': 'none'},
                                                                 ),
                                                                 html.Div(
@@ -835,6 +844,21 @@ app.layout = html.Div(
                                                         'overflowY': 'auto'
                                                     }, children=[
                                                         html.Div(id='across-samples-container', children=[
+                                                            html.Div([
+                                                                dcc.Input(id='group-label-input', type='text',
+                                                                          placeholder='Group label...',
+                                                                          style={'width': '120px', 'padding': '3px 6px',
+                                                                                 'fontSize': '11px', 'border': '1px solid #ccc',
+                                                                                 'borderRadius': '3px'}),
+                                                                html.Button('Apply to selected', id='apply-group-btn',
+                                                                            style={'padding': '3px 8px', 'fontSize': '11px',
+                                                                                   'marginLeft': '4px', 'cursor': 'pointer'}),
+                                                                html.Button('Clear groups', id='clear-groups-btn',
+                                                                            style={'padding': '3px 8px', 'fontSize': '11px',
+                                                                                   'marginLeft': '4px', 'cursor': 'pointer',
+                                                                                   'color': '#999'}),
+                                                            ], style={'display': 'flex', 'alignItems': 'center',
+                                                                      'gap': '2px', 'marginBottom': '6px', 'padding': '4px 0'}),
                                                             # cross-sample-table: data updated in-place by tab_callbacks
                                                             dash_table.DataTable(
                                                                 id='cross-sample-table',
@@ -842,6 +866,7 @@ app.layout = html.Div(
                                                                 editable=True,
                                                                 cell_selectable=True,
                                                                 column_selectable='single',
+                                                                row_selectable='multi',
                                                                 row_deletable=True,
                                                                 sort_action='native',
                                                                 style_table={'display': 'none'},
@@ -980,7 +1005,75 @@ app.layout = html.Div(
                                                                                 'marginTop': '8px'}),
                                                             ]),
                                                         ])
-                                                    ])
+                                                    ]),
+
+                                                    # MS Viewer Tab
+                                                    html.Div(id="ms-viewer-content", className="tab-content", style={
+                                                        'display': 'none',
+                                                        'padding': '15px',
+                                                        'height': '100%',
+                                                        'overflowY': 'auto'
+                                                    }, children=[
+                                                        html.Div([
+                                                            html.Div([
+                                                                dcc.Graph(id='ms-spectrum-graph',
+                                                                          figure=go.Figure(layout=go.Layout(
+                                                                              template='plotly_white',
+                                                                              margin=dict(l=50, r=20, t=30, b=40),
+                                                                              xaxis=dict(visible=False),
+                                                                              yaxis=dict(visible=False),
+                                                                              annotations=[dict(
+                                                                                  text='Click on the chromatogram to view a mass spectrum',
+                                                                                  xref='paper', yref='paper',
+                                                                                  x=0.5, y=0.5, showarrow=False,
+                                                                                  font=dict(size=13, color='#999'),
+                                                                              )])),
+                                                                          responsive=True,
+                                                                          style={'width': '100%', 'height': '250px'}),
+                                                                html.Div(id='ms-spectrum-info',
+                                                                         style={'fontSize': '12px', 'padding': '6px 8px',
+                                                                                'backgroundColor': '#f8f9fa',
+                                                                                'borderRadius': '4px', 'marginTop': '4px',
+                                                                                'minHeight': '20px'}),
+                                                            ]),
+                                                            html.Div([
+                                                                html.Div('EIC Extraction', style={
+                                                                    'fontWeight': 'bold', 'fontSize': '13px',
+                                                                    'marginBottom': '8px', 'marginTop': '12px'}),
+                                                                html.Div([
+                                                                    html.Div([
+                                                                        html.Label('Target m/z', className='form-label'),
+                                                                        dcc.Input(id='eic-mz-input', type='number',
+                                                                                  placeholder='e.g. 294.1',
+                                                                                  className='form-input',
+                                                                                  style={'width': '100%'}),
+                                                                    ], style={'flex': '2'}),
+                                                                    html.Div([
+                                                                        html.Label('Tolerance', className='form-label'),
+                                                                        dcc.Input(id='eic-tolerance-input', type='number',
+                                                                                  value=0.5, step=0.1,
+                                                                                  className='form-input',
+                                                                                  style={'width': '100%'}),
+                                                                    ], style={'flex': '1'}),
+                                                                    html.Div([
+                                                                        html.Button('Extract', id='eic-extract-btn',
+                                                                                    className='btn btn-primary',
+                                                                                    style={'marginTop': '20px', 'width': '100%'}),
+                                                                    ], style={'flex': '1'}),
+                                                                    html.Div([
+                                                                        html.Button('Clear', id='eic-clear-btn',
+                                                                                    className='btn',
+                                                                                    style={'marginTop': '20px', 'width': '100%'}),
+                                                                    ], style={'flex': '0.5'}),
+                                                                ], style={'display': 'flex', 'gap': '8px',
+                                                                          'alignItems': 'flex-start'}),
+                                                                html.Div(id='eic-active-list', style={
+                                                                    'marginTop': '8px', 'display': 'flex',
+                                                                    'flexWrap': 'wrap', 'gap': '4px'}),
+                                                            ], style={'padding': '10px', 'backgroundColor': '#f8f9fa',
+                                                                      'borderRadius': '6px'}),
+                                                        ])
+                                                    ]),
                                                 ], style={'flex': '1', 'overflow': 'hidden'})
                                             ],
                                         ),
@@ -1032,6 +1125,7 @@ from callbacks.tab_callbacks import register_tab_callbacks
 from callbacks.table_editor_callbacks import register_table_editor_callbacks
 from callbacks.context_callbacks import register_context_callbacks
 from callbacks.plot_settings_callbacks import register_plot_settings_callbacks
+from callbacks.lcms_callbacks import register_lcms_callbacks
 
 register_upload_callbacks(app, data_manager)
 register_clear_callbacks(app, data_manager)
@@ -1046,6 +1140,7 @@ register_baseline_callbacks(app, data_manager)
 register_export_callbacks(app, data_manager)
 register_calibration_callbacks(app, data_manager)
 register_plot_settings_callbacks(app, data_manager)
+register_lcms_callbacks(app, data_manager)
 
 def _toolbox_content_style(tab_name: str, active_tab: str) -> dict:
     """Return the correct style for a toolbox tab content container."""
@@ -1158,10 +1253,11 @@ clientside_callback(
      Input('peak-analysis-tab', 'n_clicks'),
      Input('across-samples-tab', 'n_clicks'),
      Input('metadata-tab', 'n_clicks'),
-     Input('calibration-tab', 'n_clicks')],
+     Input('calibration-tab', 'n_clicks'),
+     Input('ms-viewer-tab', 'n_clicks')],
     prevent_initial_call=True,
 )
-def update_active_tab(_, __, ___, ____, _____):
+def update_active_tab(_, __, ___, ____, _____, ______):
     """Update active-tab from the clicked analysis tab button."""
     ctx = dash.callback_context
     if not ctx.triggered:
@@ -1174,6 +1270,7 @@ def update_active_tab(_, __, ___, ____, _____):
         'across-samples-tab': 'across-samples',
         'metadata-tab': 'metadata',
         'calibration-tab': 'calibration',
+        'ms-viewer-tab': 'ms-viewer',
     }
     return tab_map.get(triggered_id, dash.no_update)
 
@@ -1184,11 +1281,13 @@ def update_active_tab(_, __, ___, ____, _____):
      Output('across-samples-tab', 'className'),
      Output('metadata-tab', 'className'),
      Output('calibration-tab', 'className'),
+     Output('ms-viewer-tab', 'className'),
      Output('data-overview-content', 'style'),
      Output('peak-analysis-content', 'style'),
      Output('across-samples-content', 'style'),
      Output('metadata-content', 'style'),
-     Output('calibration-content', 'style')],
+     Output('calibration-content', 'style'),
+     Output('ms-viewer-content', 'style')],
     Input('active-tab', 'data'),
 )
 def sync_active_tab_ui(active_tab):
@@ -1200,11 +1299,13 @@ def sync_active_tab_ui(active_tab):
         'tab-button active' if selected_tab == 'across-samples' else 'tab-button',
         'tab-button active' if selected_tab == 'metadata' else 'tab-button',
         'tab-button active' if selected_tab == 'calibration' else 'tab-button',
+        'tab-button active' if selected_tab == 'ms-viewer' else 'tab-button',
         _analysis_content_style('data-overview', selected_tab),
         _analysis_content_style('peak-analysis', selected_tab),
         _analysis_content_style('across-samples', selected_tab),
         _analysis_content_style('metadata', selected_tab),
         _analysis_content_style('calibration', selected_tab),
+        _analysis_content_style('ms-viewer', selected_tab),
     )
 
 
@@ -1219,7 +1320,7 @@ def derive_view_mode(active_tab_id, tabs):
     if not active_tab_id or not tabs:
         return 'raw'
     tab = next((t for t in tabs if t['id'] == active_tab_id), None)
-    if tab and tab.get('type') == 'analysis':
+    if tab and tab.get('type') in ('analysis', 'custom'):
         return 'analysis'
     return 'raw'
 
@@ -1273,4 +1374,4 @@ def update_status(files):
 if __name__ == '__main__':
     log.info("Starting GeckoPlotter V2...")
     log.info("Upload TXT chromatograms or CSV UV-Vis files to get started!")
-    app.run(debug=True, port=8052)
+    app.run(debug=True, port=8053)

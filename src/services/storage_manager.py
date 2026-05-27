@@ -563,12 +563,6 @@ class DataManager:
                 metadata['uv_b_max_intensity'] = comp_meta.get('max_intensity')
 
         bundle['metadata'] = metadata
-        bundle_key = f"{base_name}_LCMS_BUNDLE"
-        self.loaded_data[bundle_key] = {
-            'type': 'lcms_bundle',
-            'bundle_data': bundle,
-            'metadata': metadata,
-        }
 
     def get_loaded_data(self) -> Dict[str, Dict[str, Any]]:
         """Get all loaded data."""
@@ -673,14 +667,9 @@ class DataManager:
         # STEP 2: Get all bundle tree items and mark ALL their children as bundled
         bundle_items = self.bundle_manager.get_bundle_tree_items()
         for bundle_item in bundle_items:
-            # Store bundle data for clicking
             bundle = self.bundle_manager.get_bundle_by_id(bundle_item['id'])
             if bundle and bundle.main_file:
                 main_file_id = bundle.main_file.get('id')
-                if main_file_id in self.loaded_data:
-                    self.loaded_data[bundle_item['id']] = self.loaded_data[main_file_id]
-                    log.debug(f"Stored bundle data for: {bundle_item['id']}")
-                
                 # Mark ALL files in this bundle as bundled
                 bundled_file_ids.add(main_file_id)
                 log.debug(f"Marked main file {main_file_id} as bundled")
