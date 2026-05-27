@@ -706,7 +706,6 @@ app.layout = html.Div(
                                                     id='main-plot-loading',
                                                     type='circle',
                                                     color='#ff6b35',
-                                                    delay_show=350,
                                                     parent_className='loading-wrapper',
                                                     children=dcc.Graph(
                                                         id='main-plot',
@@ -763,6 +762,7 @@ app.layout = html.Div(
                                                     html.Button("Across Samples", id="across-samples-tab", className="tab-button", n_clicks=0, style={'display': 'inline-block', 'marginRight': '10px'}),
                                                     html.Button("Metadata", id="metadata-tab", className="tab-button", n_clicks=0, style={'display': 'inline-block', 'marginRight': '10px'}),
                                                     html.Button("Calibration", id="calibration-tab", className="tab-button", n_clicks=0, style={'display': 'inline-block', 'marginRight': '10px'}),
+                                                    html.Button("MS Viewer", id="ms-viewer-tab", className="tab-button", n_clicks=0, style={'display': 'inline-block', 'marginRight': '10px'}),
                                                 ], className="tab-header", style={
                                                     'display': 'flex',
                                                     'borderBottom': '1px solid #e0e0e0',
@@ -1008,7 +1008,75 @@ app.layout = html.Div(
                                                                                 'marginTop': '8px'}),
                                                             ]),
                                                         ])
-                                                    ])
+                                                    ]),
+
+                                                    # MS Viewer Tab
+                                                    html.Div(id="ms-viewer-content", className="tab-content", style={
+                                                        'display': 'none',
+                                                        'padding': '15px',
+                                                        'height': '100%',
+                                                        'overflowY': 'auto'
+                                                    }, children=[
+                                                        html.Div([
+                                                            html.Div([
+                                                                dcc.Graph(id='ms-spectrum-graph',
+                                                                          figure=go.Figure(layout=go.Layout(
+                                                                              template='plotly_white',
+                                                                              margin=dict(l=50, r=20, t=30, b=40),
+                                                                              xaxis=dict(visible=False),
+                                                                              yaxis=dict(visible=False),
+                                                                              annotations=[dict(
+                                                                                  text='Click on the chromatogram to view a mass spectrum',
+                                                                                  xref='paper', yref='paper',
+                                                                                  x=0.5, y=0.5, showarrow=False,
+                                                                                  font=dict(size=13, color='#999'),
+                                                                              )])),
+                                                                          responsive=True,
+                                                                          style={'width': '100%', 'height': '250px'}),
+                                                                html.Div(id='ms-spectrum-info',
+                                                                         style={'fontSize': '12px', 'padding': '6px 8px',
+                                                                                'backgroundColor': '#f8f9fa',
+                                                                                'borderRadius': '4px', 'marginTop': '4px',
+                                                                                'minHeight': '20px'}),
+                                                            ]),
+                                                            html.Div([
+                                                                html.Div('EIC Extraction', style={
+                                                                    'fontWeight': 'bold', 'fontSize': '13px',
+                                                                    'marginBottom': '8px', 'marginTop': '12px'}),
+                                                                html.Div([
+                                                                    html.Div([
+                                                                        html.Label('Target m/z', className='form-label'),
+                                                                        dcc.Input(id='eic-mz-input', type='number',
+                                                                                  placeholder='e.g. 294.1',
+                                                                                  className='form-input',
+                                                                                  style={'width': '100%'}),
+                                                                    ], style={'flex': '2'}),
+                                                                    html.Div([
+                                                                        html.Label('Tolerance', className='form-label'),
+                                                                        dcc.Input(id='eic-tolerance-input', type='number',
+                                                                                  value=0.5, step=0.1,
+                                                                                  className='form-input',
+                                                                                  style={'width': '100%'}),
+                                                                    ], style={'flex': '1'}),
+                                                                    html.Div([
+                                                                        html.Button('Extract', id='eic-extract-btn',
+                                                                                    className='btn btn-primary',
+                                                                                    style={'marginTop': '20px', 'width': '100%'}),
+                                                                    ], style={'flex': '1'}),
+                                                                    html.Div([
+                                                                        html.Button('Clear', id='eic-clear-btn',
+                                                                                    className='btn',
+                                                                                    style={'marginTop': '20px', 'width': '100%'}),
+                                                                    ], style={'flex': '0.5'}),
+                                                                ], style={'display': 'flex', 'gap': '8px',
+                                                                          'alignItems': 'flex-start'}),
+                                                                html.Div(id='eic-active-list', style={
+                                                                    'marginTop': '8px', 'display': 'flex',
+                                                                    'flexWrap': 'wrap', 'gap': '4px'}),
+                                                            ], style={'padding': '10px', 'backgroundColor': '#f8f9fa',
+                                                                      'borderRadius': '6px'}),
+                                                        ])
+                                                    ]),
                                                 ], style={'flex': '1', 'overflow': 'hidden'})
                                             ],
                                         ),
@@ -1060,6 +1128,7 @@ from callbacks.tab_callbacks import register_tab_callbacks
 from callbacks.table_editor_callbacks import register_table_editor_callbacks
 from callbacks.context_callbacks import register_context_callbacks
 from callbacks.plot_settings_callbacks import register_plot_settings_callbacks
+from callbacks.lcms_callbacks import register_lcms_callbacks
 
 register_upload_callbacks(app, data_manager)
 register_clear_callbacks(app, data_manager)
@@ -1074,6 +1143,7 @@ register_baseline_callbacks(app, data_manager)
 register_export_callbacks(app, data_manager)
 register_calibration_callbacks(app, data_manager)
 register_plot_settings_callbacks(app, data_manager)
+register_lcms_callbacks(app, data_manager)
 
 def _toolbox_content_style(tab_name: str, active_tab: str) -> dict:
     """Return the correct style for a toolbox tab content container."""
@@ -1186,10 +1256,11 @@ clientside_callback(
      Input('peak-analysis-tab', 'n_clicks'),
      Input('across-samples-tab', 'n_clicks'),
      Input('metadata-tab', 'n_clicks'),
-     Input('calibration-tab', 'n_clicks')],
+     Input('calibration-tab', 'n_clicks'),
+     Input('ms-viewer-tab', 'n_clicks')],
     prevent_initial_call=True,
 )
-def update_active_tab(_, __, ___, ____, _____):
+def update_active_tab(_, __, ___, ____, _____, ______):
     """Update active-tab from the clicked analysis tab button."""
     ctx = dash.callback_context
     if not ctx.triggered:
@@ -1202,6 +1273,7 @@ def update_active_tab(_, __, ___, ____, _____):
         'across-samples-tab': 'across-samples',
         'metadata-tab': 'metadata',
         'calibration-tab': 'calibration',
+        'ms-viewer-tab': 'ms-viewer',
     }
     return tab_map.get(triggered_id, dash.no_update)
 
@@ -1212,11 +1284,13 @@ def update_active_tab(_, __, ___, ____, _____):
      Output('across-samples-tab', 'className'),
      Output('metadata-tab', 'className'),
      Output('calibration-tab', 'className'),
+     Output('ms-viewer-tab', 'className'),
      Output('data-overview-content', 'style'),
      Output('peak-analysis-content', 'style'),
      Output('across-samples-content', 'style'),
      Output('metadata-content', 'style'),
-     Output('calibration-content', 'style')],
+     Output('calibration-content', 'style'),
+     Output('ms-viewer-content', 'style')],
     Input('active-tab', 'data'),
 )
 def sync_active_tab_ui(active_tab):
@@ -1228,11 +1302,13 @@ def sync_active_tab_ui(active_tab):
         'tab-button active' if selected_tab == 'across-samples' else 'tab-button',
         'tab-button active' if selected_tab == 'metadata' else 'tab-button',
         'tab-button active' if selected_tab == 'calibration' else 'tab-button',
+        'tab-button active' if selected_tab == 'ms-viewer' else 'tab-button',
         _analysis_content_style('data-overview', selected_tab),
         _analysis_content_style('peak-analysis', selected_tab),
         _analysis_content_style('across-samples', selected_tab),
         _analysis_content_style('metadata', selected_tab),
         _analysis_content_style('calibration', selected_tab),
+        _analysis_content_style('ms-viewer', selected_tab),
     )
 
 
@@ -1329,4 +1405,4 @@ def update_status(files):
 if __name__ == '__main__':
     log.info("Starting GeckoPlotter V2...")
     log.info("Upload TXT chromatograms or CSV UV-Vis files to get started!")
-    app.run(debug=True, port=8052)
+    app.run(debug=True, port=8053)

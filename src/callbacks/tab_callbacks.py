@@ -360,9 +360,7 @@ def register_tab_callbacks(app: dash.Dash, data_manager) -> None:
         if not selected_peak_id or not active_file or not loaded_files:
             raise dash.exceptions.PreventUpdate
 
-        from callbacks.baseline_callbacks import resolve_peak_file_id
-        peak_fid = resolve_peak_file_id(data_manager, active_file)
-        peaks = data_manager.peak_service.get_peaks(peak_fid)
+        peaks = data_manager.peak_service.get_peaks(active_file)
         selected = next((p for p in peaks if p.peak_id == selected_peak_id), None)
         if not selected:
             raise dash.exceptions.PreventUpdate

@@ -1,13 +1,13 @@
 # GeckoPlotter V2 — Roadmap
 
-_Updated 2026-05-24_
+_Updated 2026-05-27_
 
 This is the single source of truth for what's done, what's next, and what's planned.
 Start every new session by reading this file.
 
 ## Current State
 
-### What Works (as of 2026-05-24)
+### What Works (as of 2026-05-27)
 - **Ingestion pipeline**: format-agnostic, preset-based detection, StandardizedResult output
 - **Multi-tab plot workspace**: each data type auto-creates its own tab on upload
 - **Unified context**: tab = group = full context (file selector, bottom panel, zoom all follow)
@@ -29,6 +29,10 @@ Start every new session by reading this file.
 - Stage 3 heuristic always returns GENERIC; only presets assign specific categories
 - Per-file UI state saved/restored via `context_callbacks.py`
 
+### In-Progress (2026-05-27, separate branch — merge pending)
+- **Format-agnostic integration**: `get_chromatogram_arrays` → `get_xy_arrays` using `metadata['auto_x']`/`metadata['auto_y']` from pipeline. Integration now works on any X/Y data (spectra, kinetics, generic CSV), not just chromatograms.
+- **Bundle cleanup**: bundles are UI-only; `active-file` is always a real file UUID, no more synthetic `loaded_data[bundle_id]` entries. `resolve_peak_file_id` removed.
+
 ---
 
 ## Active Sprint: Data Selector + Plot Context
@@ -47,63 +51,98 @@ Start every new session by reading this file.
 
 ---
 
-## Backlog (from user feedback 2026-05-24)
+## Backlog — User Priorities (confirmed 2026-05-27)
 
-### 1. Color system cleanup
+### 1. Right-click context menu
+- On peak: Delete peak, "Select in All Chromatograms" (auto-integrate matching peak across files)
+- On plot background: zoom to region, add baseline point, export region
+- On file tree: Move to group, Plot separately, rename
+- Implementation: `dash-mantine-components` Menu + clientside callback intercepting `contextmenu` events, `preventDefault()`, positioned absolutely
+- Priority: **HIGH** (UX multiplier — unlocks many interactions)
+
+### 2. Peak deconvolution (EMG via lmfit)
+- Resolve co-eluting/overlapping peaks using Exponentially Modified Gaussian fitting
+- Library: `lmfit` (v1.3.4, installed) with `ExponentialGaussianModel`
+- Algorithm: user clicks approximate peak centers → lmfit fits composite EMG model → individual peak areas calculated
+- EMG is the only model needed (handles both symmetric and tailing peaks — gamma→0 = Gaussian)
+- UX: "Deconvolve" mode button in toolbox (like Draw/Navigate), click to place peak markers, hit Deconvolve
+- Sandbox prototype: `../deconvolution_sandbox/app.py` (port 8060) — tested, R²>0.999 on synthetic data
+- Fitting engine is ~40 lines, pure numpy/lmfit, ready to drop into a `DeconvolutionService`
+- Priority: **HIGH** (major differentiator, solves the #1 chromatography pain point)
+
+### 3. Calibration UI
+- CalibrationService already exists (`services/calibration_service.py`) with data model
+- Previous Streamlit version had working calibration (linear, polynomial, cubic)
+- Rebuild with: multi-point table, weighted regression (1/x, 1/x²), force-through-origin, residual plot
+- Add LOD/LOQ calculation (ICH Q2: LOD = 3.3·Sy/slope, LOQ = 10·Sy/slope)
+- Add ISTD mode (divide analyte area by IS area before regression)
+- Priority: **HIGH** (enables quantitative analysis)
+
+### 4. Undo/redo
+- Track peak additions, deletions, baseline changes, deconvolution actions
+- Essential for interactive analysis — exploring different integration strategies
+- Priority: **HIGH**
+
+### 5. Color system cleanup
 - Colors are inconsistent and change when files are added
-- Legend shows multiple entries that shouldn't be there (screenshot shows duplicate traces)
+- Legend shows multiple entries that shouldn't be there
 - Fix: stable color assignment per file/trace, not re-indexed on every render
 - Priority: **HIGH** (visual quality)
 
-### 2. Integration on spectral/any data
-- Allow peak integration on any X/Y data, not just chromatograms
-- Integration tools should be format-agnostic (same as vision principle)
-- Priority: **HIGH** (core feature)
+### 6. Chromeleon imported peaks
+- Convert imported peaks to same format as manual peaks
+- User can "adopt" Chromeleon peaks → they become editable GeckoPlotter peaks
+- Priority: **HIGH** (data continuity)
 
-### 3. Subfolders / grouping for same-type data
-- Problem: two sets of kinetics data (different substrates) → both go to same "Kinetics" tab
-- Need: subfolders or sub-groups within a tab, or ability to split into separate tabs
-- Possible approach: drag file to "New Group" area, or right-click → "Plot Separately"
-- Priority: **MEDIUM**
-
-### 4. Keyboard shortcuts
+### 7. Keyboard shortcuts
 - Backspace/Delete: delete selected peak
 - Arrow keys: navigate plot (pan/zoom or cycle through peaks)
 - Priority: **MEDIUM**
 
-### 5. Right-click context menu
-- On peak: Delete peak, "Select in All Chromatograms" (auto-integrate matching peak across files)
-- On file: Move to group, Plot separately, etc.
+### 8. Subfolders / grouping for same-type data
+- Problem: two sets of kinetics data (different substrates) → both go to same tab
+- Need: sub-groups within a tab, or ability to split into separate tabs
 - Priority: **MEDIUM**
 
-### 6. Chromeleon imported peaks
-- Currently ignored / separate from manual peaks
-- Need: convert imported peaks to same format as manual peaks
-- User can "adopt" Chromeleon peaks → they become editable GeckoPlotter peaks
-- Should behave identically to manually integrated peaks after conversion
-- Priority: **HIGH** (data continuity)
-
-### 7. Legend control
-- Movable legend (drag to reposition)
-- Legend position persistent across renders and tab switches
-- Clean up: no phantom entries, no duplicate traces
+### 9. Legend control
+- Movable legend, persistent position, no phantom entries
 - Priority: **MEDIUM**
 
-### 8. Subplot file ordering
-- File order in file selector determines subplot order
-- Requires: drag-and-drop reordering in file selector
-- Subplot positions update from file selector order
-- Integration must work on ALL subplots, not just the first/main one
-- File selection in tree should NOT change which subplot is active (all visible)
+### 10. Subplot file ordering
+- Drag-and-drop reordering in file selector → subplot order
+- Integration must work on ALL subplots
 - Priority: **MEDIUM**
 
-### 9. Tab rename
-- User can rename tab labels (currently auto-generated from data type)
+### 11. Tab rename
+- User can rename tab labels (currently auto-generated)
 - Priority: **LOW**
 
-### 10. Drag-and-drop between groups
-- Drag file from one group to another → creates new tab or moves to existing
+### 12. Drag-and-drop between groups
+- Drag file from one group to another
 - Priority: **LOW**
+
+---
+
+## Explicitly Not Planned
+
+- System Suitability Testing (plates, tailing factor, resolution) — not needed for this use case
+- Peak purity assessment — requires DAD/PDA data, not relevant
+
+---
+
+## Future Phases
+
+### Report Generation + FAIR Data Export (later)
+- Jinja2 HTML template → PDF via weasyprint
+- Template: sample info header, chromatogram figure, integration table, calibration plot
+- Combine with FAIR Data Package (Phase 8 from CONTINUATION_PLAN.md)
+- One-click Zenodo-ready ZIP with figures in paper format
+- See `CONTINUATION_PLAN.md` for full FAIR spec
+
+### Service Integration (Phase 3)
+- Make DataManager own all services (Peak, Integration, Calibration, etc.)
+- Replace legacy persistence with persistence service
+- Route all state through registry/service boundaries
 
 ---
 
@@ -127,23 +166,7 @@ Start every new session by reading this file.
 - Bundle component files excluded from tab creation
 - Upload auto-switches to new file's tab
 
----
-
-## Future Phases (from CONTINUATION_PLAN.md)
-
-### FAIR Data Package Integration (Phase 8)
-- Project-level metadata store (authors, license, funding, DOIs)
-- Per-file experimental metadata (sample ID, enzyme, substrate, conditions)
-- Figure registry and provenance tracking
-- One-click Zenodo-ready ZIP export with compliance checker
-- See `CONTINUATION_PLAN.md` for full spec
-
-### Service Integration (Phase 3)
-- Make DataManager own all services (Peak, Integration, Calibration, etc.)
-- Replace legacy persistence with persistence service
-- Route all state through registry/service boundaries
-
-### Calibration and Advanced Analysis (Phase 6)
-- Calibration tab using CalibrationService
-- Sample-level peak property editing
-- LC-MS advanced tools
+### Format-Agnostic Integration ✓ (2026-05-27, merge pending)
+- `get_xy_arrays` replaces `get_chromatogram_arrays` — uses pipeline metadata
+- Bundle IDs removed from `loaded_data` — active-file is always a real UUID
+- `resolve_peak_file_id` eliminated
