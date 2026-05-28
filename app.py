@@ -123,8 +123,6 @@ app.layout = html.Div(
         dcc.Store(id='cross-shared-selections', data={}),  # Shared selections for across-samples tab
         dcc.Store(id='peak-table-store', data=None),  # Mirror of peak-table data (JSON split) — always in layout
         dcc.Store(id='cross-sample-table-store', data=None),  # Mirror of cross-sample-table data (JSON split) — always in layout
-        dcc.Dropdown(id='peak-group-selector', style={'display': 'none'}),
-        html.Div(dcc.Slider(id='retention-time-slider', value=0.2, min=0.05, max=1.0, step=0.05), style={'display': 'none'}),
         # Baseline integration stores (p-line drawing)
         dcc.Store(id='baseline-mode', data='navigate'),  # 'draw' | 'edit' | 'navigate'
         dcc.Store(id='selected-peak-idx', data=None),  # Index of peak being edited
@@ -855,8 +853,24 @@ app.layout = html.Div(
                                                                                'color': '#999'}),
                                                         ], style={'display': 'flex', 'alignItems': 'center',
                                                                   'gap': '2px', 'marginBottom': '6px', 'padding': '4px 0'}),
-                                                        # cross-sample-table: MUST live outside across-samples-container
-                                                        # so it survives children replacement by update_across_samples_tab
+                                                        # Static components that survive across-samples-container
+                                                        # children replacement by update_across_samples_tab
+                                                        html.Div(id='peak-group-selector-wrapper', style={'display': 'none'}, children=[
+                                                            html.Label("Select Peak Group to Compare:",
+                                                                       style={'fontWeight': 'bold', 'marginBottom': '5px',
+                                                                              'marginTop': '15px', 'display': 'block', 'fontSize': '14px'}),
+                                                            dcc.Dropdown(id='peak-group-selector', value=0,
+                                                                         style={'marginBottom': '15px'}),
+                                                        ]),
+                                                        html.Div(id='retention-slider-wrapper', style={'display': 'none'}, children=[
+                                                            html.Label("Peak Matching Time Window (min):",
+                                                                       style={'fontWeight': 'bold', 'marginBottom': '5px',
+                                                                              'display': 'block', 'fontSize': '14px'}),
+                                                            dcc.Slider(id='retention-time-slider', min=0.05, max=1.0,
+                                                                       step=0.05, value=0.2,
+                                                                       marks={0.05: '0.05', 0.2: '0.2', 0.5: '0.5', 1.0: '1.0'},
+                                                                       tooltip={"placement": "bottom", "always_visible": True}),
+                                                        ]),
                                                         dash_table.DataTable(
                                                             id='cross-sample-table',
                                                             columns=[], data=[],

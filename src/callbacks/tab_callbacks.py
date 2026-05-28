@@ -186,7 +186,11 @@ def register_tab_callbacks(app: dash.Dash, data_manager) -> None:
          Output('cross-sample-table-store', 'data', allow_duplicate=True),
          Output('cross-sample-table', 'data', allow_duplicate=True),
          Output('cross-sample-table', 'columns', allow_duplicate=True),
-         Output('cross-sample-table', 'style_table', allow_duplicate=True)],
+         Output('cross-sample-table', 'style_table', allow_duplicate=True),
+         Output('peak-group-selector', 'options', allow_duplicate=True),
+         Output('peak-group-selector', 'value', allow_duplicate=True),
+         Output('peak-group-selector-wrapper', 'style'),
+         Output('retention-slider-wrapper', 'style')],
         [Input('loaded-files', 'data'),
          Input('peak-change-trigger', 'data')],
         prevent_initial_call=True
@@ -197,21 +201,25 @@ def register_tab_callbacks(app: dash.Dash, data_manager) -> None:
         NOTE: This does NOT depend on active-file — it's shared across all samples.
         It only rebuilds when files are added/removed (loaded-files changes).
         """
-        empty_table = ([], [], {'display': 'none'})
+        HIDE = {'display': 'none'}
+        SHOW_BLOCK = {'display': 'block', 'marginTop': '15px', 'padding': '10px',
+                      'backgroundColor': '#f8f9fa', 'borderRadius': '4px'}
+        empty_table = ([], [], HIDE)
+        empty_controls = ([], None, HIDE, HIDE)
 
         if not loaded_files:
             return (html.P("Load multiple bundles to compare peaks across samples",
                          style={'color': '#666', 'textAlign': 'center', 'padding': '20px'}),
-                    None, *empty_table)
+                    None, *empty_table, *empty_controls)
 
         bundles_with_peaks = _collect_bundles_with_peaks(data_manager, loaded_files)
 
         if len(bundles_with_peaks) < 2:
             return (html.P("Load at least 2 bundles with integration data to compare peaks",
                          style={'color': '#666', 'textAlign': 'center', 'padding': '20px'}),
-                    None, *empty_table)
+                    None, *empty_table, *empty_controls)
 
-        content, initial_json = create_across_samples_comparison_with_slider(bundles_with_peaks)
+        content, initial_json, group_options = create_across_samples_comparison_with_slider(bundles_with_peaks)
 
         table_data, table_cols, table_style = empty_table
         if initial_json:
@@ -228,7 +236,11 @@ def register_tab_callbacks(app: dash.Dash, data_manager) -> None:
             table_data = df.to_dict('records')
             table_style = {'overflowX': 'auto'}
 
-        return content, initial_json, table_data, table_cols, table_style
+        selector_style = {'display': 'block'} if group_options else HIDE
+        slider_style = SHOW_BLOCK
+
+        return (content, initial_json, table_data, table_cols, table_style,
+                group_options, 0, selector_style, slider_style)
 
     # Handle peak group selection dropdown — updates cross-sample-table DATA
     # in-place (not replacing the component) so selections are preserved.
@@ -575,46 +587,21 @@ def group_peaks_by_retention_time(all_peaks, time_window=0.2):
     return peak_groups
 
 
-def create_across_samples_comparison_with_slider(bundles_with_peaks: List[Dict[str, Any]]) -> html.Div:
-    """Create across samples peak comparison with retention time slider."""
-    
-    # Collect all peaks from all bundles
-    all_peaks = []
-    for bundle_data in bundles_with_peaks:
-        bundle = bundle_data['bundle']
-        peaks = bundle_data['peaks']
-        for peak in peaks:
-            peak_info = {
-                'sample_name': bundle.name,
-                'peak_number': peak.get('peak_number', 0),
-                'peak_name': peak.get('peak_name', ''),
-                'retention_time': peak.get('retention_time', 0),
-                'area': peak.get('area', 0),
-                'height': peak.get('height', 0),
-                'relative_area': peak.get('relative_area', 0),
-                'relative_height': peak.get('relative_height', 0),
-            }
-            all_peaks.append(peak_info)
-    
-    # Default time window
+def create_across_samples_comparison_with_slider(bundles_with_peaks: List[Dict[str, Any]]):
+    """Create across samples peak comparison content and dropdown options.
+
+    Returns (content, initial_json, group_options).
+    The peak-group-selector and retention-time-slider live in the static
+    layout; this function only returns data for them.
+    """
+    all_peaks = _collect_all_peaks(bundles_with_peaks)
+
     default_time_window = 0.2
-    
-    # Group peaks by retention time
     peak_groups = group_peaks_by_retention_time(all_peaks, default_time_window)
-    
-    # Filter out groups with only one peak (no comparison possible)
     comparison_groups = [group for group in peak_groups if len(group) > 1]
-    single_peaks = [group[0] for group in peak_groups if len(group) == 1]
-    
-    # Create the interface - COMPACT VERSION
-    components = []
-    
-    # 1. FIRST: Group selector and slider (the cross-sample-table lives in the
-    #    static layout and is populated by update_selected_peak_group callback)
+
+    group_options = []
     if comparison_groups:
-        
-        # 2. SECOND: Group selector (compact)
-        group_options = []
         for i, group in enumerate(comparison_groups):
             avg_time = sum(p['retention_time'] for p in group) / len(group)
             samples = sorted(set(p['sample_name'] for p in group))
@@ -623,42 +610,12 @@ def create_across_samples_comparison_with_slider(bundles_with_peaks: List[Dict[s
                 'label': f"Group {i+1}: {avg_time:.2f} min - Found in {len(group)} samples ({samples_str})",
                 'value': i
             })
-        
-        components.append(html.Div([
-            html.Label("Select Peak Group to Compare:", 
-                      style={'fontWeight': 'bold', 'marginBottom': '5px', 'marginTop': '15px', 'display': 'block', 'fontSize': '14px'}),
-            dcc.Dropdown(
-                id='peak-group-selector',
-                options=group_options,
-                value=0,
-                style={'marginBottom': '15px'}
-            )
-        ]))
-    else:
-        components.append(html.P("No peak groups found with the current time window. Try increasing the time window.",
-                               style={'color': '#666', 'textAlign': 'center', 'padding': '20px'}))
-    
-    # 3. THIRD: Time window slider (compact)
-    components.append(html.Div([
-        html.Label("Peak Matching Time Window (min):", 
-                  style={'fontWeight': 'bold', 'marginBottom': '5px', 'display': 'block', 'fontSize': '14px'}),
-        dcc.Slider(
-            id='retention-time-slider',
-            min=0.05,
-            max=1.0,
-            step=0.05,
-            value=default_time_window,
-            marks={
-                0.05: '0.05',
-                0.2: '0.2',
-                0.5: '0.5',
-                1.0: '1.0'
-            },
-            tooltip={"placement": "bottom", "always_visible": True}
-        )
-    ], style={'marginTop': '15px', 'padding': '10px', 'backgroundColor': '#f8f9fa', 'borderRadius': '4px'}))
-    
-    # Return both the layout and the initial JSON for the store
+
+    content = html.Div()
+    if not comparison_groups:
+        content = html.P("No peak groups found with the current time window. Try increasing the time window.",
+                         style={'color': '#666', 'textAlign': 'center', 'padding': '20px'})
+
     initial_json = None
     if comparison_groups:
         default_df = cross_sample_group_to_dataframe(comparison_groups[0])
@@ -666,7 +623,7 @@ def create_across_samples_comparison_with_slider(bundles_with_peaks: List[Dict[s
             default_df.insert(0, '_row_id', range(len(default_df)))
         initial_json = default_df.to_json(orient='split')
 
-    return html.Div(components), initial_json
+    return content, initial_json, group_options
 
 
 
