@@ -127,8 +127,7 @@ def get_xy_arrays(data_manager, file_id):
         bundle = data_manager.get_bundle_by_id(file_id)
         if bundle and bundle.main_file:
             main_id = bundle.main_file.get('id')
-            log.debug(f"get_chromatogram_arrays: registering alias {file_id} -> {main_id}")
-            data_manager.peak_service.register_alias(file_id, main_id)
+            log.debug(f"get_chromatogram_arrays: falling back from bundle {file_id} to main file {main_id}")
             file_data = data_manager.get_data_by_id(main_id)
     if file_data is None:
         return None, None

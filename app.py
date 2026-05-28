@@ -24,7 +24,7 @@ log = logging.getLogger(__name__)
 logging.getLogger('werkzeug').setLevel(logging.ERROR)
 
 # Import our modular components
-from services.storage_manager import DataManager
+from services.data_store import DataStore
 from callbacks.upload_callbacks import register_upload_callbacks, register_clear_callbacks
 from callbacks.viz_callbacks import register_viz_callbacks
 from callbacks.file_tree_callbacks import register_file_tree_callbacks
@@ -41,8 +41,8 @@ app = dash.Dash(__name__, suppress_callback_exceptions=True, assets_folder='src/
 app.config.suppress_callback_exceptions = True
 app.title = 'GeckoPlotter'
 
-# Global data manager
-data_manager = DataManager()
+# Global data store (Bundle-first architecture)
+data_manager = DataStore()
 
 # Type icons for file tree
 TYPE_ICONS = {
@@ -702,41 +702,35 @@ app.layout = html.Div(
                                         html.Div(
                                             className='panel-content viz-container',
                                             children=[
-                                                dcc.Loading(
-                                                    id='main-plot-loading',
-                                                    type='circle',
-                                                    color='#ff6b35',
-                                                    parent_className='loading-wrapper',
-                                                    children=dcc.Graph(
-                                                        id='main-plot',
-                                                        figure=go.Figure(
-                                                            layout=go.Layout(
-                                                                xaxis={'visible': False},
-                                                                yaxis={'visible': False},
-                                                                template='plotly_white',
-                                                                dragmode='zoom',
-                                                                uirevision='main-plot',
-                                                                autosize=True,
-                                                                margin=dict(l=50, r=20, t=30, b=40),
-                                                                annotations=[dict(
-                                                                    text='Upload files to start visualizing data',
-                                                                    xref='paper', yref='paper',
-                                                                    x=0.5, y=0.5, showarrow=False,
-                                                                    font=dict(size=16, color='#999'),
-                                                                )],
-                                                            )
-                                                        ),
-                                                        responsive=True,
-                                                        style={'width': '100%', 'height': '100%'},
-                                                        config={
-                                                            'responsive': True,
-                                                            'displayModeBar': False,
-                                                            'displaylogo': False,
-                                                            'doubleClick': 'reset+autosize',
-                                                            'scrollZoom': True,
-                                                            'edits': {'shapePosition': True},
-                                                        },
-                                                    )
+                                                dcc.Graph(
+                                                    id='main-plot',
+                                                    figure=go.Figure(
+                                                        layout=go.Layout(
+                                                            xaxis={'visible': False},
+                                                            yaxis={'visible': False},
+                                                            template='plotly_white',
+                                                            dragmode='zoom',
+                                                            uirevision='main-plot',
+                                                            autosize=True,
+                                                            margin=dict(l=50, r=20, t=30, b=40),
+                                                            annotations=[dict(
+                                                                text='Upload files to start visualizing data',
+                                                                xref='paper', yref='paper',
+                                                                x=0.5, y=0.5, showarrow=False,
+                                                                font=dict(size=16, color='#999'),
+                                                            )],
+                                                        )
+                                                    ),
+                                                    responsive=True,
+                                                    style={'width': '100%', 'height': '100%'},
+                                                    config={
+                                                        'responsive': True,
+                                                        'displayModeBar': False,
+                                                        'displaylogo': False,
+                                                        'doubleClick': 'reset+autosize',
+                                                        'scrollZoom': True,
+                                                        'edits': {'shapePosition': True},
+                                                    },
                                                 )
                                             ],
                                         ),
@@ -846,40 +840,41 @@ app.layout = html.Div(
                                                         'height': '100%',
                                                         'overflowY': 'auto'
                                                     }, children=[
+                                                        html.Div([
+                                                            dcc.Input(id='group-label-input', type='text',
+                                                                      placeholder='Group label...',
+                                                                      style={'width': '120px', 'padding': '3px 6px',
+                                                                             'fontSize': '11px', 'border': '1px solid #ccc',
+                                                                             'borderRadius': '3px'}),
+                                                            html.Button('Apply to selected', id='apply-group-btn',
+                                                                        style={'padding': '3px 8px', 'fontSize': '11px',
+                                                                               'marginLeft': '4px', 'cursor': 'pointer'}),
+                                                            html.Button('Clear groups', id='clear-groups-btn',
+                                                                        style={'padding': '3px 8px', 'fontSize': '11px',
+                                                                               'marginLeft': '4px', 'cursor': 'pointer',
+                                                                               'color': '#999'}),
+                                                        ], style={'display': 'flex', 'alignItems': 'center',
+                                                                  'gap': '2px', 'marginBottom': '6px', 'padding': '4px 0'}),
+                                                        # cross-sample-table: MUST live outside across-samples-container
+                                                        # so it survives children replacement by update_across_samples_tab
+                                                        dash_table.DataTable(
+                                                            id='cross-sample-table',
+                                                            columns=[], data=[],
+                                                            editable=True,
+                                                            cell_selectable=True,
+                                                            column_selectable='single',
+                                                            row_selectable='multi',
+                                                            row_deletable=True,
+                                                            sort_action='native',
+                                                            style_table={'display': 'none'},
+                                                            style_cell={'textAlign': 'center', 'padding': '6px', 'fontSize': '11px', 'fontFamily': 'monospace', 'minWidth': '80px', 'whiteSpace': 'normal'},
+                                                            style_header={'backgroundColor': '#37474F', 'color': 'white', 'fontWeight': '600', 'fontSize': '11px', 'padding': '10px', 'cursor': 'pointer', 'textDecoration': 'underline dotted', 'textUnderlineOffset': '3px'},
+                                                            style_header_conditional=[{'if': {'column_id': '_row_id'}, 'display': 'none'}],
+                                                            style_data={'border': '1px solid #e0e0e0'},
+                                                            style_cell_conditional=[{'if': {'column_id': '_row_id'}, 'display': 'none'}],
+                                                            style_data_conditional=[{'if': {'column_id': '_row_id'}, 'display': 'none'}],
+                                                        ),
                                                         html.Div(id='across-samples-container', children=[
-                                                            html.Div([
-                                                                dcc.Input(id='group-label-input', type='text',
-                                                                          placeholder='Group label...',
-                                                                          style={'width': '120px', 'padding': '3px 6px',
-                                                                                 'fontSize': '11px', 'border': '1px solid #ccc',
-                                                                                 'borderRadius': '3px'}),
-                                                                html.Button('Apply to selected', id='apply-group-btn',
-                                                                            style={'padding': '3px 8px', 'fontSize': '11px',
-                                                                                   'marginLeft': '4px', 'cursor': 'pointer'}),
-                                                                html.Button('Clear groups', id='clear-groups-btn',
-                                                                            style={'padding': '3px 8px', 'fontSize': '11px',
-                                                                                   'marginLeft': '4px', 'cursor': 'pointer',
-                                                                                   'color': '#999'}),
-                                                            ], style={'display': 'flex', 'alignItems': 'center',
-                                                                      'gap': '2px', 'marginBottom': '6px', 'padding': '4px 0'}),
-                                                            # cross-sample-table: data updated in-place by tab_callbacks
-                                                            dash_table.DataTable(
-                                                                id='cross-sample-table',
-                                                                columns=[], data=[],
-                                                                editable=True,
-                                                                cell_selectable=True,
-                                                                column_selectable='single',
-                                                                row_selectable='multi',
-                                                                row_deletable=True,
-                                                                sort_action='native',
-                                                                style_table={'display': 'none'},
-                                                                style_cell={'textAlign': 'center', 'padding': '6px', 'fontSize': '11px', 'fontFamily': 'monospace', 'minWidth': '80px', 'whiteSpace': 'normal'},
-                                                                style_header={'backgroundColor': '#37474F', 'color': 'white', 'fontWeight': '600', 'fontSize': '11px', 'padding': '10px', 'cursor': 'pointer', 'textDecoration': 'underline dotted', 'textUnderlineOffset': '3px'},
-                                                                style_header_conditional=[{'if': {'column_id': '_row_id'}, 'display': 'none'}],
-                                                                style_data={'border': '1px solid #e0e0e0'},
-                                                                style_cell_conditional=[{'if': {'column_id': '_row_id'}, 'display': 'none'}],
-                                                                style_data_conditional=[{'if': {'column_id': '_row_id'}, 'display': 'none'}],
-                                                            ),
                                                             html.P("Load multiple bundles to compare peaks across samples",
                                                                   style={'color': '#666', 'textAlign': 'center', 'padding': '20px'})
                                                         ])
@@ -1405,4 +1400,4 @@ def update_status(files):
 if __name__ == '__main__':
     log.info("Starting GeckoPlotter V2...")
     log.info("Upload TXT chromatograms or CSV UV-Vis files to get started!")
-    app.run(debug=True, port=8053)
+    app.run(debug=True, port=8052)

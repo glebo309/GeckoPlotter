@@ -13,7 +13,7 @@ import os
 from typing import List, Dict, Any
 
 from dash.exceptions import PreventUpdate
-from services.storage_manager import DataManager
+from services.data_store import DataStore as DataManager
 
 log = logging.getLogger(__name__)
 

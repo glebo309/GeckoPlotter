@@ -14,7 +14,7 @@ from dash import Input, Output, State, html, dash_table, Patch
 import numpy as np
 import pandas as pd
 from services.plot_manager import PlotManager
-from services.storage_manager import DataManager
+from services.data_store import DataStore as DataManager
 from components.data_table_editor import create_data_table_editor
 from components.publication_plot import create_publication_plot
 from callbacks.peak_overlay import overlay_peaks_on_figure, patch_figure_with_peaks, rgba, FILL_COLORS, cleanup_peak_traces, add_peak_traces
@@ -362,17 +362,8 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
         if not loaded_files:
             return [], None
 
-        bundled_component_ids = set()
-        for b in data_manager.bundle_manager.bundles.values():
-            if b.main_file:
-                bundled_component_ids.add(b.main_file.get('id'))
-            for af in b.auxiliary_files:
-                bundled_component_ids.add(af.get('id'))
-
         seen_groups = set()
         for fid, fdata in data_manager.loaded_data.items():
-            if fid in bundled_component_ids:
-                continue
             sr = fdata.get('standardized')
             if sr is None:
                 continue

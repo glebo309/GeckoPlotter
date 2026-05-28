@@ -47,34 +47,26 @@ def register_tab_callbacks(app: dash.Dash, data_manager) -> None:
         if not active_file_id:
             return [], [], HIDE, None
 
-        bundle = data_manager.bundle_manager.get_bundle_by_id(active_file_id)
+        bundle = data_manager.get_bundle(active_file_id)
 
         try:
-            if bundle and loaded_files:
-                integration_file = None
-                for file_record in loaded_files:
-                    file_name = file_record.get('name', '')
-                    if (bundle.base_name in file_name and
-                        'integration' in file_name.lower() and
-                        file_name.endswith('.txt')):
-                        integration_file = file_record
-                        break
-
-                if integration_file:
-                    from services.storage_manager import _decode_content
-                    from callbacks.baseline_callbacks import get_chromatogram_arrays
-                    raw_content = _decode_content(integration_file['encoded']).decode('utf-8')
-                    integration_results = parse_integration_results(raw_content)
-                    if integration_results:
-                        time_arr, signal_arr = get_chromatogram_arrays(data_manager, active_file_id)
-                        data_manager.peak_service.import_instrument_peaks(
-                            file_id=active_file_id,
-                            parsed_results=integration_results,
-                            sample_name=bundle.base_name,
-                            time_axis=time_arr,
-                            signal=signal_arr,
-                        )
-                        data_manager.peak_service.group_peaks_across_samples()
+            if bundle and bundle.has_integration_data():
+                peaks_exist = data_manager.peak_service.get_peaks(active_file_id)
+                if not peaks_exist:
+                    text = bundle.get_integration_text()
+                    if text:
+                        integration_results = parse_integration_results(text)
+                        if integration_results:
+                            time_arr, signal_arr = data_manager.get_xy_arrays(active_file_id)
+                            if time_arr is not None:
+                                data_manager.peak_service.import_instrument_peaks(
+                                    file_id=active_file_id,
+                                    parsed_results=integration_results,
+                                    sample_name=bundle.name,
+                                    time_axis=time_arr,
+                                    signal=signal_arr,
+                                )
+                                data_manager.peak_service.group_peaks_across_samples()
 
             df = data_manager.peak_service.peaks_to_table(active_file_id)
             if df.empty:
@@ -191,7 +183,10 @@ def register_tab_callbacks(app: dash.Dash, data_manager) -> None:
 
     @app.callback(
         [Output('across-samples-container', 'children'),
-         Output('cross-sample-table-store', 'data', allow_duplicate=True)],
+         Output('cross-sample-table-store', 'data', allow_duplicate=True),
+         Output('cross-sample-table', 'data', allow_duplicate=True),
+         Output('cross-sample-table', 'columns', allow_duplicate=True),
+         Output('cross-sample-table', 'style_table', allow_duplicate=True)],
         [Input('loaded-files', 'data'),
          Input('peak-change-trigger', 'data')],
         prevent_initial_call=True
@@ -202,23 +197,38 @@ def register_tab_callbacks(app: dash.Dash, data_manager) -> None:
         NOTE: This does NOT depend on active-file — it's shared across all samples.
         It only rebuilds when files are added/removed (loaded-files changes).
         """
+        empty_table = ([], [], {'display': 'none'})
 
         if not loaded_files:
             return (html.P("Load multiple bundles to compare peaks across samples",
                          style={'color': '#666', 'textAlign': 'center', 'padding': '20px'}),
-                    None)
+                    None, *empty_table)
 
         bundles_with_peaks = _collect_bundles_with_peaks(data_manager, loaded_files)
 
         if len(bundles_with_peaks) < 2:
             return (html.P("Load at least 2 bundles with integration data to compare peaks",
                          style={'color': '#666', 'textAlign': 'center', 'padding': '20px'}),
-                    None)
+                    None, *empty_table)
 
-        # Create across samples comparison with slider + selectable table
         content, initial_json = create_across_samples_comparison_with_slider(bundles_with_peaks)
 
-        return content, initial_json
+        table_data, table_cols, table_style = empty_table
+        if initial_json:
+            import io as _io
+            df = pd.read_json(_io.StringIO(initial_json), orient='split')
+            hidden = {'_row_id'}
+            table_cols = [
+                {"name": col, "id": col,
+                 "editable": col not in hidden,
+                 "selectable": col not in hidden,
+                 "deletable": False, "renamable": False}
+                for col in df.columns
+            ]
+            table_data = df.to_dict('records')
+            table_style = {'overflowX': 'auto'}
+
+        return content, initial_json, table_data, table_cols, table_style
 
     # Handle peak group selection dropdown — updates cross-sample-table DATA
     # in-place (not replacing the component) so selections are preserved.
@@ -575,7 +585,7 @@ def create_across_samples_comparison_with_slider(bundles_with_peaks: List[Dict[s
         peaks = bundle_data['peaks']
         for peak in peaks:
             peak_info = {
-                'sample_name': bundle.base_name,
+                'sample_name': bundle.name,
                 'peak_number': peak.get('peak_number', 0),
                 'peak_name': peak.get('peak_name', ''),
                 'retention_time': peak.get('retention_time', 0),
@@ -599,16 +609,9 @@ def create_across_samples_comparison_with_slider(bundles_with_peaks: List[Dict[s
     # Create the interface - COMPACT VERSION
     components = []
     
-    # 1. FIRST: Selectable DataTable for the default group (Cross-Sample % pre-selected)
+    # 1. FIRST: Group selector and slider (the cross-sample-table lives in the
+    #    static layout and is populated by update_selected_peak_group callback)
     if comparison_groups:
-        default_df = cross_sample_group_to_dataframe(comparison_groups[0])
-        components.append(html.Div(id='selected-group-display', children=[
-            create_data_table_editor(
-                default_df,
-                table_id='cross-sample-table',
-                default_selected_columns=['Cross-Sample (%)'],
-            )
-        ]))
         
         # 2. SECOND: Group selector (compact)
         group_options = []
@@ -830,33 +833,31 @@ def _collect_bundles_with_peaks(data_manager, loaded_files):
     and persistence work through the service layer.
     """
     bundles_with_peaks = []
-    for bundle_id, bundle in data_manager.bundle_manager.bundles.items():
-        integration_file = None
-        for file_record in loaded_files:
-            file_name = file_record.get('name', '')
-            if (bundle.base_name in file_name and
-                'integration' in file_name.lower() and
-                file_name.endswith('.txt')):
-                integration_file = file_record
-                break
-        if integration_file:
-            try:
-                from services.storage_manager import _decode_content
-                from callbacks.baseline_callbacks import get_chromatogram_arrays
-                raw_content = _decode_content(integration_file['encoded']).decode('utf-8')
-                results = parse_integration_results(raw_content)
-                if results:
-                    time_arr, signal_arr = get_chromatogram_arrays(data_manager, bundle_id)
-                    data_manager.peak_service.import_instrument_peaks(
-                        file_id=bundle_id,
-                        parsed_results=results,
-                        sample_name=bundle.base_name,
-                        time_axis=time_arr,
-                        signal=signal_arr,
-                    )
-                    data_manager.peak_service.group_peaks_across_samples()
-            except Exception:
-                continue
+    for bundle_id in list(data_manager.loaded_data.keys()):
+        bundle = data_manager.get_bundle(bundle_id)
+        if not bundle:
+            continue
+
+        if bundle.has_integration_data():
+            peaks_exist = data_manager.peak_service.get_peaks(bundle_id)
+            if not peaks_exist:
+                try:
+                    text = bundle.get_integration_text()
+                    if text:
+                        results = parse_integration_results(text)
+                        if results:
+                            time_arr, signal_arr = data_manager.get_xy_arrays(bundle_id)
+                            if time_arr is not None:
+                                data_manager.peak_service.import_instrument_peaks(
+                                    file_id=bundle_id,
+                                    parsed_results=results,
+                                    sample_name=bundle.name,
+                                    time_axis=time_arr,
+                                    signal=signal_arr,
+                                )
+                                data_manager.peak_service.group_peaks_across_samples()
+                except Exception:
+                    continue
 
         service_peaks = data_manager.peak_service.get_peaks(bundle_id)
         if service_peaks:
@@ -885,7 +886,7 @@ def _collect_all_peaks(bundles_with_peaks):
         bundle = bd['bundle']
         for peak in bd['peaks']:
             all_peaks.append({
-                'sample_name': bundle.base_name,
+                'sample_name': bundle.name,
                 'peak_number': peak.get('peak_number', 0),
                 'peak_name': peak.get('peak_name', ''),
                 'retention_time': peak.get('retention_time', 0),

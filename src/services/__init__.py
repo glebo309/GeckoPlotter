@@ -2,12 +2,8 @@
 # GeckoPlotter V2 - Services Package
 # =============================================================================
 
-from .storage_manager import (
-    create_file_records,
-    merge_records,
-    summarize_records,
-    DataManager
-)
+from .data_store import DataStore, Bundle, Component, ComponentRole, BundleType
+from .bundling_service import assign_bundles
 from .integration_service import IntegrationService, IntegrationSettings, ProcessedSignal
 from .persistence import ProjectPersistence
 from .peak_service import Peak, PeakService
@@ -17,11 +13,9 @@ from .export_service import ExportService
 from .lcms_service import LCMSService
 
 __all__ = [
-    # Data ingestion
-    'create_file_records',
-    'merge_records',
-    'summarize_records',
-    'DataManager',
+    # Data store
+    'DataStore', 'Bundle', 'Component', 'ComponentRole', 'BundleType',
+    'assign_bundles',
     # Domain services
     'Peak', 'PeakService',
     'CalibrationModel', 'CalibrationPoint', 'CalibrationService',

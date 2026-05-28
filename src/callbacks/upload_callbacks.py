@@ -32,118 +32,104 @@ def register_upload_callbacks(app: dash.Dash, data_manager) -> None:
     def handle_file_upload(contents_list: List[str], filenames: List[str],
                           last_modified_list: List[int], existing_files: List[Dict[str, Any]],
                           render_counter) -> tuple:
-        """Handle file upload and processing.
+        """Handle file upload via Bundle-first pipeline.
 
-        Sets active-file and loaded-files; the tab system auto-creates
-        plot tabs from the data types and master_render builds the plot.
+        1. Decode + parse each file via ingestion pipeline
+        2. Group into Bundles via BundlingService
+        3. Register Bundles in DataStore
+        4. Auto-import peaks from Integration.txt components
         """
-
         if not contents_list or not filenames:
             return (dash.no_update,) * 7
 
         try:
-            data_manager.bundle_manager.clear_bundles()
+            import base64
+            import tempfile
+            from ingestion import ingest_file
+            from services.bundling_service import assign_bundles
 
-            from services.storage_manager import create_file_records
-            new_records = create_file_records(contents_list, filenames, last_modified_list)
-
-            success_count = 0
+            parsed_files = []
             failed_names = set()
-            for record in new_records:
+
+            for contents, fname in zip(contents_list, filenames):
                 try:
-                    file_data = data_manager.load_file_data(record)
-                    if file_data:
-                        log.debug(f"Successfully loaded {record['name']}")
-                        success_count += 1
-                    else:
-                        log.warning(f"Skipping unsupported file: {record['name']}")
-                        failed_names.add(record['name'])
+                    _, encoded = contents.split(",", 1)
+                    raw_bytes = base64.b64decode(encoded)
+
+                    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=f"_{fname}")
+                    tmp.write(raw_bytes)
+                    tmp.close()
+                    data_manager.temp_files.append(tmp.name)
+
+                    sr = ingest_file(tmp.name, fname)
+                    if sr is None:
+                        log.warning(f"Pipeline could not parse {fname}")
+                        failed_names.add(fname)
+                        continue
+
+                    parsed_files.append((fname, raw_bytes, sr))
                 except Exception as e:
-                    log.error(f"Error loading {record['name']}: {str(e)}")
-                    failed_names.add(record['name'])
+                    log.error(f"Error parsing {fname}: {e}")
+                    failed_names.add(fname)
 
-            merged_files = []
-            existing_names = set()
+            if not parsed_files:
+                return (dash.no_update,) * 7
 
-            for f in (existing_files or []):
-                fname = f.get('name')
-                if fname and fname not in existing_names:
-                    merged_files.append(f)
-                    existing_names.add(fname)
+            new_bundles = assign_bundles(parsed_files)
 
-            for record in new_records:
-                fname = record.get('name')
-                if fname in failed_names:
-                    continue
-                if fname and fname not in existing_names:
-                    merged_files.append(record)
-                    existing_names.add(fname)
-                else:
-                    log.warning(f"Skipping duplicate file: {fname}")
+            last_bundle_id = None
+            for bundle in new_bundles:
+                data_manager.add_bundle(bundle)
+                last_bundle_id = bundle.bundle_id
+                log.debug(f"Created bundle '{bundle.name}' ({bundle.bundle_type.value}) "
+                          f"with {len(bundle.component_list)} components")
 
-            log.debug(f"Merged files: {len(merged_files)} total ({len(existing_names)} unique names)")
+                if bundle.has_integration_data():
+                    _auto_import_peaks(data_manager, bundle)
 
-            bundled_items = data_manager.get_bundled_tree_items(merged_files)
+            loaded_files = data_manager.get_loaded_files_list()
 
-            new_ids = [r.get('id') for r in new_records if r.get('name') not in failed_names]
-            auto_active_file = dash.no_update
+            auto_active_file = last_bundle_id or dash.no_update
             auto_table = dash.no_update
-            file_data = None
-
-            if bundled_items and new_ids:
-                last_new_id = new_ids[-1]
-                last_file_id = last_new_id
-                bundle = data_manager.get_bundle_by_id(last_new_id)
-                if not bundle:
-                    for b in data_manager.bundle_manager.bundles.values():
-                        if b.main_file and b.main_file.get('id') == last_new_id:
-                            last_file_id = b.bundle_id
-                            break
-                        if any(af.get('id') == last_new_id for af in b.auxiliary_files):
-                            last_file_id = b.bundle_id
-                            break
-
-                if last_file_id:
-                    auto_active_file = last_file_id
-                    main_file_id = last_file_id.split('|')[0] if '|' in last_file_id else last_file_id
-                    file_data = data_manager.get_data_by_id(main_file_id)
-                    if file_data:
-                        try:
-                            from callbacks.viz_callbacks import create_data_table, create_bundle_data_table
-                            bundle = data_manager.get_bundle_by_id(main_file_id)
-                            if bundle:
-                                auto_table = create_bundle_data_table(bundle, file_data, data_manager)
-                            else:
-                                auto_table = create_data_table(file_data)
-                        except Exception:
-                            log.exception("Error building metadata table")
-
-            tree_items = render_file_tree_with_bundles_selected(merged_files, data_manager, auto_active_file)
-
             table_editor = None
             pub_data = None
-            if auto_active_file and auto_active_file != dash.no_update and file_data:
-                from callbacks.viz_callbacks import prepare_table_data
-                from components.data_table_editor import create_data_table_editor
 
-                table_data = prepare_table_data(file_data, file_id=auto_active_file)
-                sheet_names = file_data.get('metadata', {}).get('sheet_names')
-                active_sheet = file_data.get('metadata', {}).get('active_sheet')
-                table_editor = create_data_table_editor(
-                    table_data, table_id='pub-table',
-                    sheet_names=sheet_names, active_sheet=active_sheet,
-                )
-                pub_data = table_data.to_json(orient='split') if table_data is not None else None
+            if auto_active_file and auto_active_file != dash.no_update:
+                file_data = data_manager.get_data_by_id(auto_active_file)
+                if file_data:
+                    try:
+                        from callbacks.viz_callbacks import create_data_table, create_bundle_data_table
+                        bundle = data_manager.get_bundle(auto_active_file)
+                        if bundle and bundle.bundle_type.value != 'generic':
+                            compat = data_manager.get_bundle_by_id(auto_active_file)
+                            auto_table = create_bundle_data_table(compat, file_data, data_manager)
+                        else:
+                            auto_table = create_data_table(file_data)
+                    except Exception:
+                        log.exception("Error building metadata table")
 
-            if success_count > 0:
-                log.debug(f"Successfully uploaded {success_count} files!")
+                    from callbacks.viz_callbacks import prepare_table_data
+                    from components.data_table_editor import create_data_table_editor
 
-            return merged_files, tree_items, auto_active_file, auto_table, table_editor, pub_data, (render_counter or 0) + 1
+                    table_data = prepare_table_data(file_data, file_id=auto_active_file)
+                    sheet_names = file_data.get('metadata', {}).get('sheet_names')
+                    active_sheet = file_data.get('metadata', {}).get('active_sheet')
+                    table_editor = create_data_table_editor(
+                        table_data, table_id='pub-table',
+                        sheet_names=sheet_names, active_sheet=active_sheet,
+                    )
+                    pub_data = table_data.to_json(orient='split') if table_data is not None else None
+
+            tree_items = render_file_tree_with_bundles_selected(
+                loaded_files, data_manager, auto_active_file)
+
+            log.debug(f"Upload complete: {len(new_bundles)} bundles from {len(parsed_files)} files")
+            return (loaded_files, tree_items, auto_active_file, auto_table,
+                    table_editor, pub_data, (render_counter or 0) + 1)
 
         except Exception as e:
             log.exception(f"Upload failed: {str(e)}")
             return (dash.no_update,) * 7
-
 
     @app.callback(
         [Output('loaded-files', 'data', allow_duplicate=True),
@@ -164,6 +150,33 @@ def register_upload_callbacks(app: dash.Dash, data_manager) -> None:
         if not contents_list or not filenames:
             return (dash.no_update,) * 7
         return handle_file_upload(contents_list, filenames, last_modified_list, existing_files, render_counter)
+
+
+def _auto_import_peaks(data_manager, bundle):
+    """Import peaks from a Chromeleon Integration.txt component."""
+    try:
+        from callbacks.tab_callbacks import parse_integration_results
+        text = bundle.get_integration_text()
+        if not text:
+            return
+
+        parsed = parse_integration_results(text)
+        if not parsed:
+            return
+
+        time_arr, signal_arr = data_manager.get_xy_arrays(bundle.bundle_id)
+        if time_arr is None:
+            return
+
+        data_manager.peak_service.import_instrument_peaks(
+            file_id=bundle.bundle_id,
+            parsed_results=parsed,
+            time_axis=time_arr,
+            signal=signal_arr,
+        )
+        log.debug(f"Auto-imported {len(parsed)} peaks for bundle '{bundle.name}'")
+    except Exception as e:
+        log.warning(f"Could not auto-import peaks for '{bundle.name}': {e}")
 
 
 def render_file_tree_with_bundles(records: List[dict], data_manager) -> List[html.Div]:

@@ -15,7 +15,7 @@ import pandas as pd
 import plotly.graph_objects as go
 
 if TYPE_CHECKING:
-    from services.storage_manager import DataManager
+    from services.data_store import DataStore as DataManager
 
 
 class ExportService:

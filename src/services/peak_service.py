@@ -63,25 +63,7 @@ class PeakService:
         # file_id -> list of Peak objects
         self._peaks: Dict[str, List[Peak]] = {}
         self._color_index: int = 0
-        self._aliases: Dict[str, str] = {}
         self._imported_files: set = set()
-
-    def register_alias(self, alias_id: str, canonical_id: str) -> None:
-        """Map a bundle/alias ID to the canonical file UUID used as peak key.
-
-        If peaks already exist under the alias key, they get moved to the
-        canonical key so everything stays consolidated.
-        """
-        if alias_id != canonical_id:
-            self._aliases[alias_id] = canonical_id
-            if alias_id in self._peaks:
-                self._peaks.setdefault(canonical_id, []).extend(
-                    self._peaks.pop(alias_id)
-                )
-
-    def _resolve(self, file_id: str) -> str:
-        """Resolve an alias to the canonical peak storage key."""
-        return self._aliases.get(file_id, file_id)
 
     # ------------------------------------------------------------------
     # Color cycling
@@ -164,7 +146,6 @@ class PeakService:
             distance=3,
         )
 
-        file_id = self._resolve(file_id)
         peaks: List[Peak] = []
         existing_non_detected = [p for p in self._peaks.get(file_id, []) if p.source != 'detected']
         dt = np.median(np.diff(time_axis)) if time_axis.size > 1 else 1.0
@@ -345,7 +326,7 @@ class PeakService:
         time_axis, signal : ndarray, optional
             Chromatogram arrays for boundary estimation.
         """
-        fid = self._resolve(file_id)
+        fid = file_id
 
         if fid in self._imported_files:
             return self._peaks.get(fid, [])
@@ -478,7 +459,6 @@ class PeakService:
         area = self.calculate_peak_area(signal, time_axis, rt_start, rt_end)
         width = rt_end - rt_start
 
-        file_id = self._resolve(file_id)
         existing = self._peaks.get(file_id, [])
         peak_number = len(existing) + 1
 
@@ -522,7 +502,6 @@ class PeakService:
         If a manual peak with a very close apex already exists, it is updated
         instead of creating a duplicate.
         """
-        file_id = self._resolve(file_id)
         existing = self._peaks.get(file_id, [])
 
         line_x_min = min(p_line[0][0], p_line[1][0])
@@ -568,39 +547,25 @@ class PeakService:
         return peak
 
     def clear_peaks(self, file_id: str) -> None:
-        """Remove all peaks and aliases for a file.
-
-        Searches by resolved ID, raw ID, and any alias that points to
-        either — covers bundle IDs, main-file UUIDs, and everything
-        in between.
-        """
-        fid = self._resolve(file_id)
-        ids_to_remove = {file_id, fid}
-        for alias, canonical in list(self._aliases.items()):
-            if alias in ids_to_remove or canonical in ids_to_remove:
-                ids_to_remove.add(alias)
-                ids_to_remove.add(canonical)
-        for rid in ids_to_remove:
-            self._peaks.pop(rid, None)
-            self._aliases.pop(rid, None)
-            self._imported_files.discard(rid)
+        """Remove all peaks for a bundle."""
+        self._peaks.pop(file_id, None)
+        self._imported_files.discard(file_id)
 
     def clear_all_peaks(self) -> None:
-        """Remove every peak and alias. Used when all files are deleted."""
+        """Remove every peak. Used when all files are deleted."""
         self._peaks.clear()
-        self._aliases.clear()
         self._imported_files.clear()
         self._color_index = 0
 
     def clear_manual_peaks(self, file_id: str) -> None:
         """Remove all manual baseline peaks for a file."""
-        fid = self._resolve(file_id)
+        fid = file_id
         if fid in self._peaks:
             self._peaks[fid] = [p for p in self._peaks[fid] if p.source != 'manual']
 
     def clear_detected_peaks(self, file_id: str) -> None:
         """Remove all auto-detected peaks for a file."""
-        fid = self._resolve(file_id)
+        fid = file_id
         if fid in self._peaks:
             self._peaks[fid] = [p for p in self._peaks[fid] if p.source != 'detected']
 
@@ -610,7 +575,7 @@ class PeakService:
 
     def remove_peak(self, file_id: str, peak_id: str) -> bool:
         """Remove a peak by ID. Returns True if found and removed."""
-        fid = self._resolve(file_id)
+        fid = file_id
         peaks = self._peaks.get(fid)
         if peaks is None:
             return False
@@ -620,7 +585,7 @@ class PeakService:
 
     def rename_peak(self, file_id: str, peak_id: str, new_name: str) -> bool:
         """Rename a peak and propagate to all peaks in the same group."""
-        fid = self._resolve(file_id)
+        fid = file_id
         target = None
         for p in self._peaks.get(fid, []):
             if p.peak_id == peak_id:
@@ -644,7 +609,7 @@ class PeakService:
         opacity: Optional[float] = None,
     ) -> bool:
         """Update the display color (and optionally opacity) of a peak."""
-        fid = self._resolve(file_id)
+        fid = file_id
         for p in self._peaks.get(fid, []):
             if p.peak_id == peak_id:
                 p.color = color
@@ -655,13 +620,7 @@ class PeakService:
 
     def get_peaks(self, file_id: str) -> List[Peak]:
         """Return all peaks for a given file."""
-        fid = self._resolve(file_id)
-        result = list(self._peaks.get(fid, []))
-        if not result and file_id != fid:
-            import logging
-            logging.getLogger('geckoplotter.baseline').debug(
-                f"get_peaks: resolved {file_id} -> {fid}, found {len(result)} peaks. _peaks keys={list(self._peaks.keys())[:5]}")
-        return result
+        return list(self._peaks.get(file_id, []))
 
     def get_all_peaks(self) -> Dict[str, List[Peak]]:
         """Return all peaks keyed by file_id."""
@@ -689,10 +648,9 @@ class PeakService:
         all_peaks: List[Peak] = []
         peak_file_map: Dict[str, str] = {}
         for file_id, pks in self._peaks.items():
-            resolved = self._resolve(file_id)
             for p in pks:
                 all_peaks.append(p)
-                peak_file_map[p.peak_id] = resolved
+                peak_file_map[p.peak_id] = file_id
 
         if not all_peaks:
             return {}
@@ -838,7 +796,7 @@ class PeakService:
 
     def peaks_to_table(self, file_id: str) -> pd.DataFrame:
         """Return a user-facing peak table for a file (combined sources)."""
-        peaks = self._peaks.get(self._resolve(file_id), [])
+        peaks = self._peaks.get(file_id, [])
         if not peaks:
             return pd.DataFrame()
         total_area = sum(max(float(p.area or 0.0), 0.0) for p in peaks)
