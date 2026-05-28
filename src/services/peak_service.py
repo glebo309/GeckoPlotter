@@ -18,12 +18,11 @@ from scipy.signal import find_peaks
 # Okabe-Ito colorblind-friendly palette
 OKABE_ITO_PALETTE = [
     "#E69F00",  # orange
-    "#56B4E9",  # sky blue
-    "#009E73",  # bluish green
-    "#F0E442",  # yellow
     "#0072B2",  # blue
+    "#009E73",  # bluish green
     "#D55E00",  # vermillion
     "#CC79A7",  # reddish purple
+    "#F0E442",  # yellow
 ]
 
 
@@ -60,10 +59,10 @@ class PeakService:
     """Domain service for peak detection, storage, and cross-sample analysis."""
 
     def __init__(self) -> None:
-        # file_id -> list of Peak objects
         self._peaks: Dict[str, List[Peak]] = {}
         self._color_index: int = 0
         self._imported_files: set = set()
+        self._group_colors: Dict[str, str] = {}
 
     # ------------------------------------------------------------------
     # Color cycling
@@ -556,6 +555,7 @@ class PeakService:
         self._peaks.clear()
         self._imported_files.clear()
         self._color_index = 0
+        self._group_colors.clear()
 
     def clear_manual_peaks(self, file_id: str) -> None:
         """Remove all manual baseline peaks for a file."""
@@ -674,18 +674,24 @@ class PeakService:
         groups.append(current_group)
 
         result: Dict[str, List[Peak]] = {}
-        used_colors: set = set()
+        used_colors: set = set(self._group_colors.values())
         for i, group in enumerate(groups):
             mean_rt = float(np.mean([p.rt for p in group]))
             gid = f"compound_rt{mean_rt:.1f}"
-            color_idx = hash(round(mean_rt, 1)) % len(OKABE_ITO_PALETTE)
-            if OKABE_ITO_PALETTE[color_idx] in used_colors:
-                for offset in range(1, len(OKABE_ITO_PALETTE)):
-                    candidate = (color_idx + offset) % len(OKABE_ITO_PALETTE)
-                    if OKABE_ITO_PALETTE[candidate] not in used_colors:
-                        color_idx = candidate
-                        break
-            color = OKABE_ITO_PALETTE[color_idx]
+
+            if gid in self._group_colors:
+                color = self._group_colors[gid]
+            else:
+                color_idx = hash(round(mean_rt, 1)) % len(OKABE_ITO_PALETTE)
+                if OKABE_ITO_PALETTE[color_idx] in used_colors:
+                    for offset in range(1, len(OKABE_ITO_PALETTE)):
+                        candidate = (color_idx + offset) % len(OKABE_ITO_PALETTE)
+                        if OKABE_ITO_PALETTE[candidate] not in used_colors:
+                            color_idx = candidate
+                            break
+                color = OKABE_ITO_PALETTE[color_idx]
+                self._group_colors[gid] = color
+
             used_colors.add(color)
             for peak in group:
                 peak.group_id = gid
