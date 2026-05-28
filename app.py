@@ -142,6 +142,10 @@ app.layout = html.Div(
         dcc.Store(id='tab-zoom-memory', data={}),  # Maps tab_id → saved zoom ranges
         dcc.Store(id='file-order', data={}),  # Per-group file ordering {group_id: {sort_dir: 'asc'|'desc'|null, order: [id, ...]}}
         dcc.Store(id='file-reorder-event', data=None),  # JS drag-and-drop event {group_id, order: [id, ...]}
+        dcc.Store(id='keyboard-delete-trigger', data=0),  # Counter bumped by JS on Backspace/Delete keypress
+        dcc.Store(id='hidden-files', data=[]),  # List of hidden file IDs for CSS dimming
+        dcc.Store(id='group-collapse-state', data={}),  # {group_id: bool} collapse state
+        dcc.Store(id='group-move-event', data=None),  # {file_id, source_group, target_group|null}
         html.Button(id='plot-empty-click-trigger', n_clicks=0, style={'display': 'none'}),
         html.Div(id='clear-transient-shapes-output', style={'display': 'none'}),
         html.Div(id='selected-shapes-sync-output', style={'display': 'none'}),

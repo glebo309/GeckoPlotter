@@ -47,7 +47,7 @@ def assign_bundles(parsed_files: List[ParsedFile]) -> List[Bundle]:
         bundle_type, base_name = _bundle_identity(filename, standardized)
         if base_name is None:
             fallback_index += 1
-            base_name = standardized.sample_name or _display_name(filename)
+            base_name = _display_name(filename)
             group_key = (bundle_type, f"{base_name}:{fallback_index}")
         else:
             group_key = (bundle_type, base_name)

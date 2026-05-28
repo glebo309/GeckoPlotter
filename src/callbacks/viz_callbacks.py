@@ -91,13 +91,19 @@ def _get_x_axis_name(metadata, fdata):
     return 'unknown'
 
 
-def _get_overlay_group(metadata, fdata):
+def _get_overlay_group(metadata, fdata, file_id=None, dm=None):
     """Return composite key (source_category, x_axis) for overlay grouping.
 
     Files overlay when they share both the same source type AND the same
     X-axis name.  This prevents e.g. a chromatogram (Time vs mAU) from
     mixing with a generic CSV that also has a Time column.
+
+    If the file has a group override (from cross-group drag-drop), use that.
     """
+    if file_id and dm and hasattr(dm, 'group_overrides'):
+        override = dm.group_overrides.get(file_id)
+        if override:
+            return override
     return (_get_source_category(metadata, fdata),
             _get_x_axis_name(metadata, fdata))
 
@@ -115,7 +121,7 @@ def _get_active_file_group(dm, active_file_id):
     if not fdata:
         return None
     metadata = fdata.get('metadata', {})
-    return _get_overlay_group(metadata, fdata)
+    return _get_overlay_group(metadata, fdata, file_id=active_file_id, dm=dm)
 
 
 
@@ -242,7 +248,7 @@ def _collect_visible_files(dm, active_file_id=None, loaded_files=None, target_gr
         if fdata.get('standardized') is None:
             continue
         metadata = fdata.get('metadata', {})
-        group = _get_overlay_group(metadata, fdata)
+        group = _get_overlay_group(metadata, fdata, file_id=fid, dm=dm)
         log.debug(f"{fid}: group={group}, name={fdata.get('record', {}).get('name', '?')}")
         candidates.append((fid, fdata, metadata, group))
 
@@ -368,7 +374,7 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
             if sr is None:
                 continue
             metadata = fdata.get('metadata', {})
-            group = _get_overlay_group(metadata, fdata)
+            group = _get_overlay_group(metadata, fdata, file_id=fid, dm=data_manager)
             seen_groups.add(group)
 
         new_tabs = []
@@ -390,8 +396,20 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
                 new_tabs.append(t)
 
         new_tab_ids = {t['id'] for t in new_tabs}
+        existing_ids = {t['id'] for t in existing_tabs}
+        just_created = [t['id'] for t in new_tabs
+                        if t['id'] not in existing_ids and t.get('type') != 'custom']
 
-        if active_file:
+        if just_created:
+            if active_file:
+                file_group = _get_active_file_group(data_manager, active_file)
+                if file_group and _tab_id_from_group(file_group) in just_created:
+                    next_active = _tab_id_from_group(file_group)
+                else:
+                    next_active = just_created[0]
+            else:
+                next_active = just_created[0]
+        elif active_file:
             file_group = _get_active_file_group(data_manager, active_file)
             if file_group and _tab_id_from_group(file_group) in new_tab_ids:
                 next_active = _tab_id_from_group(file_group)

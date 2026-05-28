@@ -238,7 +238,7 @@ def render_file_tree_with_bundles_selected(records: List[dict], data_manager, ac
             ungrouped.append(item)
             continue
         metadata = fdata.get('metadata', {})
-        group = _get_overlay_group(metadata, fdata)
+        group = _get_overlay_group(metadata, fdata, file_id=file_id, dm=data_manager)
         tid = _tab_id_from_group(group)
         if tid not in groups:
             groups[tid] = {'label': _tab_label_from_group(group), 'items': []}
@@ -374,7 +374,6 @@ def render_bundle_item_selected(bundle_item: dict, is_selected: bool = False, da
             
             # Bundle content (clickable for selection)
             html.Div([
-                html.Span(bundle_icon, style={'marginRight': '6px', 'fontSize': '11px', 'flexShrink': '0'}),
                 html.Span(os.path.splitext(bundle_item.get('name', ''))[0], style={
                     'fontWeight': '600', 'overflow': 'hidden', 'textOverflow': 'ellipsis',
                     'whiteSpace': 'nowrap', 'flex': '1',
@@ -409,7 +408,7 @@ def render_bundle_item_selected(bundle_item: dict, is_selected: bool = False, da
                     className='tree-action-btn',
                     style={
                         'background': 'none', 'border': 'none', 'cursor': 'pointer',
-                        'padding': '0', 'fontSize': '11px', 'opacity': '0.6',
+                        'padding': '0', 'fontSize': '11px',
                         'width': '18px', 'height': '18px',
                         'display': 'flex', 'alignItems': 'center', 'justifyContent': 'center',
                     }
@@ -421,7 +420,7 @@ def render_bundle_item_selected(bundle_item: dict, is_selected: bool = False, da
                     className='tree-action-btn',
                     style={
                         'background': 'none', 'border': 'none', 'cursor': 'pointer',
-                        'padding': '0', 'fontSize': '11px', 'opacity': '0.4',
+                        'padding': '0', 'fontSize': '11px',
                         'width': '18px', 'height': '18px',
                         'display': 'flex', 'alignItems': 'center', 'justifyContent': 'center',
                     }
@@ -666,7 +665,7 @@ def render_individual_file_item_selected(item: dict, is_selected: bool = False, 
                     className='tree-action-btn',
                     style={
                         'background': 'none', 'border': 'none', 'cursor': 'pointer',
-                        'padding': '0', 'fontSize': '11px', 'opacity': '0.6',
+                        'padding': '0', 'fontSize': '11px',
                         'width': '18px', 'height': '18px',
                         'display': 'flex', 'alignItems': 'center', 'justifyContent': 'center',
                     }
@@ -678,7 +677,7 @@ def render_individual_file_item_selected(item: dict, is_selected: bool = False, 
                     className='tree-action-btn',
                     style={
                         'background': 'none', 'border': 'none', 'cursor': 'pointer',
-                        'padding': '0', 'fontSize': '11px', 'opacity': '0.4',
+                        'padding': '0', 'fontSize': '11px',
                         'width': '18px', 'height': '18px',
                         'display': 'flex', 'alignItems': 'center', 'justifyContent': 'center',
                     }

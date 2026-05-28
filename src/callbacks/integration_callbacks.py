@@ -93,7 +93,8 @@ def register_integration_callbacks(app: dash.Dash, data_manager) -> None:
             extension_factor=settings.extension_factor,
         )
 
-        data_manager.peak_service.group_peaks_across_samples()
+        data_manager.peak_service.group_peaks_across_samples(
+            file_overlay_map=data_manager.build_file_overlay_map())
         log.debug(f"Detected {len(peaks)} peaks for {active_file}")
         return (trigger_counter or 0) + 1
 
@@ -111,6 +112,7 @@ def register_integration_callbacks(app: dash.Dash, data_manager) -> None:
             return dash.no_update
 
         data_manager.peak_service.clear_detected_peaks(active_file)
-        data_manager.peak_service.group_peaks_across_samples()
+        data_manager.peak_service.group_peaks_across_samples(
+            file_overlay_map=data_manager.build_file_overlay_map())
         log.debug(f"Cleared peaks for {active_file}")
         return (trigger_counter or 0) + 1

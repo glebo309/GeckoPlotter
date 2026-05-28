@@ -62,7 +62,8 @@ class PeakService:
         self._peaks: Dict[str, List[Peak]] = {}
         self._color_index: int = 0
         self._imported_files: set = set()
-        self._group_colors: Dict[str, str] = {}
+        # Nested: overlay_group -> compound_gid -> color
+        self._group_colors: Dict[str, Dict[str, str]] = {}
 
     # ------------------------------------------------------------------
     # Color cycling
@@ -555,7 +556,7 @@ class PeakService:
         self._peaks.clear()
         self._imported_files.clear()
         self._color_index = 0
-        self._group_colors.clear()
+        self._group_colors.clear()  # clears entire nested dict
 
     def clear_manual_peaks(self, file_id: str) -> None:
         """Remove all manual baseline peaks for a file."""
@@ -631,7 +632,9 @@ class PeakService:
     # ------------------------------------------------------------------
 
     def group_peaks_across_samples(
-        self, rt_window: float = 0.2
+        self,
+        rt_window: float = 0.2,
+        file_overlay_map: Optional[Dict[str, str]] = None,
     ) -> Dict[str, List[Peak]]:
         """
         Group peaks from all loaded files by retention time proximity.
@@ -639,6 +642,19 @@ class PeakService:
         Peaks whose apex RTs fall within *rt_window* minutes of each other
         are considered the same compound across samples. Each group receives
         a shared ``group_id`` and a consistent color.
+
+        Color cycling is scoped per overlay group so that each plot tab
+        starts from color[0] independently.
+
+        Parameters
+        ----------
+        rt_window : float
+            Maximum RT difference (minutes) to merge peaks into a group.
+        file_overlay_map : dict, optional
+            Maps file_id -> overlay group key string. Files that share an
+            overlay group (i.e. the same plot tab) get independent color
+            cycling.  When *None*, all files share a single color scope
+            (legacy behaviour).
 
         Returns
         -------
@@ -655,48 +671,70 @@ class PeakService:
         if not all_peaks:
             return {}
 
-        all_peaks.sort(key=lambda p: p.rt)
-
-        groups: List[List[Peak]] = []
-        current_group: List[Peak] = [all_peaks[0]]
-
-        for peak in all_peaks[1:]:
-            group_mean_rt = np.mean([p.rt for p in current_group])
-            same_file_as_existing = any(
-                peak_file_map.get(peak.peak_id) == peak_file_map.get(p.peak_id)
-                for p in current_group
-            )
-            if abs(peak.rt - group_mean_rt) <= rt_window and not same_file_as_existing:
-                current_group.append(peak)
-            else:
-                groups.append(current_group)
-                current_group = [peak]
-        groups.append(current_group)
+        # ── Partition peaks by overlay group ──────────────────────────
+        overlay_buckets: Dict[str, List[Peak]] = {}
+        for p in all_peaks:
+            fid = peak_file_map[p.peak_id]
+            og = file_overlay_map.get(fid, '') if file_overlay_map else ''
+            overlay_buckets.setdefault(og, []).append(p)
 
         result: Dict[str, List[Peak]] = {}
-        used_colors: set = set(self._group_colors.values())
-        for i, group in enumerate(groups):
-            mean_rt = float(np.mean([p.rt for p in group]))
-            gid = f"compound_rt{mean_rt:.1f}"
 
-            if gid in self._group_colors:
-                color = self._group_colors[gid]
-            else:
-                color_idx = hash(round(mean_rt, 1)) % len(OKABE_ITO_PALETTE)
-                if OKABE_ITO_PALETTE[color_idx] in used_colors:
-                    for offset in range(1, len(OKABE_ITO_PALETTE)):
-                        candidate = (color_idx + offset) % len(OKABE_ITO_PALETTE)
-                        if OKABE_ITO_PALETTE[candidate] not in used_colors:
-                            color_idx = candidate
-                            break
-                color = OKABE_ITO_PALETTE[color_idx]
-                self._group_colors[gid] = color
+        for og_key, og_peaks in overlay_buckets.items():
+            og_peaks.sort(key=lambda p: p.rt)
 
-            used_colors.add(color)
-            for peak in group:
-                peak.group_id = gid
-                peak.color = color
-            result[gid] = group
+            # RT-proximity grouping within this overlay group
+            groups: List[List[Peak]] = []
+            current_group: List[Peak] = [og_peaks[0]]
+
+            for peak in og_peaks[1:]:
+                group_mean_rt = np.mean([p.rt for p in current_group])
+                same_file_as_existing = any(
+                    peak_file_map.get(peak.peak_id) == peak_file_map.get(p.peak_id)
+                    for p in current_group
+                )
+                if abs(peak.rt - group_mean_rt) <= rt_window and not same_file_as_existing:
+                    current_group.append(peak)
+                else:
+                    groups.append(current_group)
+                    current_group = [peak]
+            groups.append(current_group)
+
+            # Per-overlay-group color namespace
+            og_colors = self._group_colors.setdefault(og_key, {})
+            # Build used_colors only from gids that still exist;
+            # stale entries are pruned below.
+            active_gids: set = set()
+            used_colors: set = set()
+
+            for group in groups:
+                mean_rt = float(np.mean([p.rt for p in group]))
+                gid = f"compound_rt{mean_rt:.1f}"
+                active_gids.add(gid)
+
+                if gid in og_colors:
+                    color = og_colors[gid]
+                else:
+                    color_idx = hash(round(mean_rt, 1)) % len(OKABE_ITO_PALETTE)
+                    if OKABE_ITO_PALETTE[color_idx] in used_colors:
+                        for offset in range(1, len(OKABE_ITO_PALETTE)):
+                            candidate = (color_idx + offset) % len(OKABE_ITO_PALETTE)
+                            if OKABE_ITO_PALETTE[candidate] not in used_colors:
+                                color_idx = candidate
+                                break
+                    color = OKABE_ITO_PALETTE[color_idx]
+                    og_colors[gid] = color
+
+                used_colors.add(color)
+                for peak in group:
+                    peak.group_id = gid
+                    peak.color = color
+                result[gid] = group
+
+            # Prune stale gids so removed peaks free up colors
+            stale = [k for k in og_colors if k not in active_gids]
+            for k in stale:
+                del og_colors[k]
 
         return result
 
@@ -879,6 +917,7 @@ class PeakService:
         """Serialize all peak data for persistence (JSON-compatible)."""
         return {
             "color_index": self._color_index,
+            "group_colors": self._group_colors,  # nested dict, JSON-safe
             "peaks": {
                 fid: [asdict(p) for p in pks]
                 for fid, pks in self._peaks.items()
@@ -888,6 +927,13 @@ class PeakService:
     def deserialize(self, data: dict) -> None:
         """Restore peak data from a previously serialized dict."""
         self._color_index = data.get("color_index", 0)
+        # Support both old flat format and new nested format
+        raw_gc = data.get("group_colors", {})
+        if raw_gc and isinstance(next(iter(raw_gc.values()), None), str):
+            # Old flat format {gid: color} -> migrate to nested under ''
+            self._group_colors = {'': raw_gc}
+        else:
+            self._group_colors = raw_gc
         self._peaks.clear()
         for fid, peak_dicts in data.get("peaks", {}).items():
             self._peaks[fid] = [Peak(**d) for d in peak_dicts]

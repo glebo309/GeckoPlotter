@@ -403,7 +403,8 @@ def register_baseline_callbacks(app: dash.Dash, data_manager) -> None:
                 )
                 log.debug(f"Added peak RT={res['apex_x']:.3f}, area={res['area']:.1f}")
 
-            data_manager.peak_service.group_peaks_across_samples()
+            data_manager.peak_service.group_peaks_across_samples(
+                file_overlay_map=data_manager.build_file_overlay_map())
             from services.plot_settings_service import DEFAULT_PLOT_SETTINGS
             _s = {**DEFAULT_PLOT_SETTINGS, **(plot_settings or {})}
             if _s.get('layout_mode') == 'stacked':
@@ -715,7 +716,8 @@ def register_baseline_callbacks(app: dash.Dash, data_manager) -> None:
                 data_manager.peak_service.remove_peak(peak_fid, selected_peak_id)
             else:
                 data_manager.peak_service.clear_manual_peaks(peak_fid)
-            data_manager.peak_service.group_peaks_across_samples()
+            data_manager.peak_service.group_peaks_across_samples(
+                file_overlay_map=data_manager.build_file_overlay_map())
             if _is_stacked(plot_settings):
                 return dash.no_update, None, (peak_counter or 0) + 1, (render_counter or 0) + 1
             time_arr, signal_arr = _get_chrom(active_file)
@@ -724,6 +726,49 @@ def register_baseline_callbacks(app: dash.Dash, data_manager) -> None:
                     data_manager.peak_service.get_peaks(peak_fid), current_figure, time_arr, signal_arr
                 )
                 return fig_patch, None, (peak_counter or 0) + 1, dash.no_update
+        return current_figure, None, (peak_counter or 0) + 1, dash.no_update
+
+    # ── Keyboard Delete/Backspace → remove selected peak ─────────────
+
+    @app.callback(
+        [Output('main-plot', 'figure', allow_duplicate=True),
+         Output('selected-peak-idx', 'data', allow_duplicate=True),
+         Output('peak-change-trigger', 'data', allow_duplicate=True),
+         Output('render-trigger', 'data', allow_duplicate=True)],
+        Input('keyboard-delete-trigger', 'data'),
+        [State('selected-peak-idx', 'data'),
+         State('active-file', 'data'),
+         State('main-plot', 'figure'),
+         State('peak-change-trigger', 'data'),
+         State('current-plot-settings', 'data'),
+         State('render-trigger', 'data'),
+         State('view-mode', 'data')],
+        prevent_initial_call=True,
+    )
+    def delete_peak_via_keyboard(trigger, selected_peak_id, active_file,
+                                 current_figure, peak_counter, plot_settings,
+                                 render_counter, view_mode):
+        """Delete the currently selected peak when Backspace/Delete is pressed."""
+        if not trigger or not selected_peak_id or not active_file:
+            raise PreventUpdate
+
+        peak_fid = active_file
+        log.debug(f"keyboard delete: peak_fid={peak_fid}, selected={selected_peak_id}")
+        data_manager.peak_service.remove_peak(peak_fid, selected_peak_id)
+        data_manager.peak_service.group_peaks_across_samples(
+            file_overlay_map=data_manager.build_file_overlay_map())
+
+        if _is_stacked(plot_settings):
+            return dash.no_update, None, (peak_counter or 0) + 1, (render_counter or 0) + 1
+
+        time_arr, signal_arr = _get_chrom(active_file)
+        if time_arr is not None:
+            fig_patch = patch_figure_with_peaks(
+                data_manager.peak_service.get_peaks(peak_fid),
+                current_figure, time_arr, signal_arr,
+            )
+            return fig_patch, None, (peak_counter or 0) + 1, dash.no_update
+
         return current_figure, None, (peak_counter or 0) + 1, dash.no_update
 
     # ── Peak count indicator in toolbox ───────────────────────────────

@@ -744,16 +744,26 @@ button[id*="collapse-btn"]:active {
     border-bottom: 1px solid #e0e0e0;
 }
 
-/* Drag-and-drop file reordering */
+/* Drag-and-drop file reordering (pointer-event based) */
 .draggable-file-item {
     cursor: grab;
-    transition: opacity 0.15s, border-color 0.15s;
+    transition: opacity 0.15s;
+    user-select: none;
 }
-.draggable-file-item:active {
-    cursor: grabbing;
+
+/* Group header collapse/expand */
+.file-group-header {
+    cursor: pointer;
+    user-select: none;
 }
-.draggable-file-item.drag-over {
-    border-top: 2px solid #ff6b35;
+.file-group-header:hover {
+    background-color: #f8f8f8;
+}
+
+/* Cross-group drop target highlight */
+.file-group-header.drop-target {
+    background-color: #fff5f0 !important;
+    border-bottom: 2px solid #ff6b35 !important;
 }
 
 /* Baseline integration button active state */

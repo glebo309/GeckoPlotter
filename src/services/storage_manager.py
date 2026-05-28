@@ -671,6 +671,8 @@ class DataManager:
             bundle = self.bundle_manager.get_bundle_by_id(bundle_item['id'])
             if bundle and bundle.main_file:
                 main_file_id = bundle.main_file.get('id')
+                if main_file_id in self.loaded_data:
+                    self.loaded_data[bundle_item['id']] = self.loaded_data[main_file_id]
                 # Mark ALL files in this bundle as bundled
                 bundled_file_ids.add(main_file_id)
                 log.debug(f"Marked main file {main_file_id} as bundled")

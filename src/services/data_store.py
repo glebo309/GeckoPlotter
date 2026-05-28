@@ -462,6 +462,19 @@ class DataStore:
                 return self.remove_bundle(bundle.bundle_id)
         return None
 
+    def build_file_overlay_map(self) -> Dict[str, str]:
+        """Build {file_id: overlay_group_key_string} for peak color scoping."""
+        from callbacks.viz_callbacks import _get_overlay_group, _tab_id_from_group
+        result = {}
+        for bid, bundle in self._bundles.items():
+            entry = self.get_data_by_id(bid)
+            if not entry:
+                continue
+            metadata = entry.get('metadata', {})
+            group = _get_overlay_group(metadata, entry, file_id=bid, dm=self)
+            result[bid] = _tab_id_from_group(group)
+        return result
+
     def persist_file_state(self, file_id):
         pass
 

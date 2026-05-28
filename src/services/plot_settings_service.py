@@ -307,7 +307,7 @@ class PlotSettingsService:
         grid_dash = _DASH_MAP.get(settings.grid_style, 'solid')
 
         axis_common_x = dict(
-            title_text=settings.x_label,
+            title=dict(text=settings.x_label, standoff=20),
             showgrid=settings.show_grid_x,
             griddash=grid_dash,
             type=settings.x_scale,
@@ -317,7 +317,7 @@ class PlotSettingsService:
             **tick_cfg,
         )
         axis_common_y = dict(
-            title_text=settings.y_label,
+            title=dict(text=settings.y_label, standoff=20),
             showgrid=settings.show_grid_y,
             griddash=grid_dash,
             type=settings.y_scale,

@@ -195,11 +195,6 @@ def register_file_tree_callbacks(app: dash.Dash, data_manager: DataManager) -> N
             if lcms_bundle:
                 files_to_remove.append(file_id)
 
-            for fid in files_to_remove:
-                if fid in data_manager.loaded_data:
-                    del data_manager.loaded_data[fid]
-            if file_id in data_manager.loaded_data:
-                del data_manager.loaded_data[file_id]
             if lcms_bundle:
                 data_manager.remove_lcms_bundle(bundle_base_name)
 
@@ -228,8 +223,7 @@ def register_file_tree_callbacks(app: dash.Dash, data_manager: DataManager) -> N
                     lcms_bundle['records'].pop(file_id, None)
                 lcms_bundle.setdefault('components', {}).pop(file_id, None)
 
-            if file_id in data_manager.loaded_data:
-                del data_manager.loaded_data[file_id]
+            data_manager.remove_bundle(file_id)
 
             updated_files = [f for f in current_files if f.get('id') != file_id]
 
@@ -255,9 +249,8 @@ def register_file_tree_callbacks(app: dash.Dash, data_manager: DataManager) -> N
             delattr(data_manager, '_last_processed_files')
         if hasattr(data_manager, '_last_tree_items'):
             delattr(data_manager, '_last_tree_items')
-        if not parent_to_expand:
-            data_manager.bundle_manager.clear_bundles()
-            data_manager.peak_service.clear_all_peaks()
+
+        updated_files = data_manager.get_loaded_files_list()
 
         from callbacks.upload_callbacks import render_file_tree_with_bundles
         tree_items = render_file_tree_with_bundles(updated_files, data_manager)
@@ -274,22 +267,25 @@ def register_file_tree_callbacks(app: dash.Dash, data_manager: DataManager) -> N
                 active_was_deleted = True
 
         if active_was_deleted or not updated_files:
+            new_active = updated_files[0]['id'] if updated_files else None
             table_editor = create_data_table_editor(None, table_id='pub-table')
             pub_data = None
             pub_sel = get_empty_selections()
         else:
+            new_active = active_file_id
             table_editor = dash.no_update
             pub_data = dash.no_update
             pub_sel = dash.no_update
 
-        return (updated_files, tree_items, (render_counter or 0) + 1, active_file_id,
+        return (updated_files, tree_items, (render_counter or 0) + 1, new_active,
                 html.Div("Select a file to view data details", style={'color': '#666', 'padding': '20px'}),
                 table_editor, pub_data, pub_sel)
 
     @app.callback(
         [Output({'type': 'visibility-btn', 'index': dash.dependencies.ALL}, 'children'),
          Output({'type': 'visibility-btn', 'index': dash.dependencies.ALL}, 'style'),
-         Output('render-trigger', 'data', allow_duplicate=True)],
+         Output('render-trigger', 'data', allow_duplicate=True),
+         Output('hidden-files', 'data')],
         Input({'type': 'visibility-btn', 'index': dash.dependencies.ALL}, 'n_clicks'),
         [State({'type': 'visibility-btn', 'index': dash.dependencies.ALL}, 'children'),
          State({'type': 'visibility-btn', 'index': dash.dependencies.ALL}, 'id'),
@@ -297,8 +293,8 @@ def register_file_tree_callbacks(app: dash.Dash, data_manager: DataManager) -> N
         prevent_initial_call=True
     )
     def handle_visibility_toggles(n_clicks_list, current_icons, button_ids, render_counter):
-        """Handle visibility toggles — update buttons and bump render-trigger
-        so master_render rebuilds the plot."""
+        """Handle visibility toggles — update buttons, bump render-trigger,
+        and publish hidden file IDs for CSS dimming (no tree re-render)."""
         if not any(n_clicks_list):
             raise PreventUpdate
 
@@ -363,13 +359,16 @@ def register_file_tree_callbacks(app: dash.Dash, data_manager: DataManager) -> N
 
         new_icons = []
         new_styles = []
+        hidden_ids = []
 
         try:
             for i, button_id in enumerate(button_ids):
                 button_file_id = button_id['index']
                 button_visible = data_manager.visibility_state.get(button_file_id, True)
                 button_icon = '👁' if button_visible else '🚫'
-                button_opacity = '1.0' if button_visible else '0.5'
+
+                if not button_visible:
+                    hidden_ids.append(button_file_id)
 
                 new_icons.append(button_icon)
                 new_styles.append({
@@ -378,7 +377,6 @@ def register_file_tree_callbacks(app: dash.Dash, data_manager: DataManager) -> N
                     'cursor': 'pointer',
                     'padding': '0 4px',
                     'fontSize': '14px',
-                    'opacity': button_opacity,
                     'width': '24px',
                     'height': '24px',
                     'display': 'flex',
@@ -390,7 +388,7 @@ def register_file_tree_callbacks(app: dash.Dash, data_manager: DataManager) -> N
             log.error(f"Error updating button arrays: {e}")
             raise PreventUpdate
 
-        return new_icons, new_styles, (render_counter or 0) + 1
+        return new_icons, new_styles, (render_counter or 0) + 1, hidden_ids
 
     @app.callback(
         Output('file-tree', 'children', allow_duplicate=True),
@@ -402,6 +400,11 @@ def register_file_tree_callbacks(app: dash.Dash, data_manager: DataManager) -> N
     )
     def sync_file_tree_selection(active_file_id, loaded_files, active_plot_tab, file_order):
         """Re-render the file tree grouped by overlay type, highlighting the active group."""
+        ctx = dash.callback_context
+        trigger = ctx.triggered[0]['prop_id'].rsplit('.', 1)[0] if ctx.triggered else ''
+        if trigger == 'file-order':
+            raise PreventUpdate
+
         from callbacks.upload_callbacks import render_file_tree_with_bundles_selected
 
         records = loaded_files or []
@@ -410,13 +413,18 @@ def register_file_tree_callbacks(app: dash.Dash, data_manager: DataManager) -> N
             file_order=file_order or {})
 
     @app.callback(
-        Output('file-order', 'data', allow_duplicate=True),
+        [Output('file-order', 'data', allow_duplicate=True),
+         Output('file-tree', 'children', allow_duplicate=True)],
         Input({'type': 'group-sort-btn', 'index': dash.ALL}, 'n_clicks'),
-        State('file-order', 'data'),
+        [State('file-order', 'data'),
+         State('loaded-files', 'data'),
+         State('active-file', 'data'),
+         State('active-plot-tab', 'data')],
         prevent_initial_call=True
     )
-    def toggle_group_sort(n_clicks_list, file_order):
+    def toggle_group_sort(n_clicks_list, file_order, loaded_files, active_file, active_plot_tab):
         """Toggle sort direction when a group sort button is clicked."""
+        from callbacks.upload_callbacks import render_file_tree_with_bundles_selected
         ctx = dash.callback_context
         if not ctx.triggered or not any(n_clicks_list):
             raise PreventUpdate
@@ -433,19 +441,31 @@ def register_file_tree_callbacks(app: dash.Dash, data_manager: DataManager) -> N
 
         file_order = dict(file_order or {})
         current = file_order.get(group_id, {})
+        had_custom_order = 'order' in current
         current_dir = current.get('sort_dir', 'asc')
-        new_dir = 'desc' if current_dir == 'asc' else 'asc'
+        if had_custom_order:
+            new_dir = 'asc'
+        else:
+            new_dir = 'desc' if current_dir == 'asc' else 'asc'
         file_order[group_id] = {'sort_dir': new_dir}
-        return file_order
+        tree = render_file_tree_with_bundles_selected(
+            loaded_files or [], data_manager, active_file,
+            active_plot_tab=active_plot_tab, file_order=file_order)
+        return file_order, tree
 
     @app.callback(
-        Output('file-order', 'data', allow_duplicate=True),
+        [Output('file-order', 'data', allow_duplicate=True),
+         Output('file-tree', 'children', allow_duplicate=True)],
         Input('file-reorder-event', 'data'),
-        State('file-order', 'data'),
+        [State('file-order', 'data'),
+         State('loaded-files', 'data'),
+         State('active-file', 'data'),
+         State('active-plot-tab', 'data')],
         prevent_initial_call=True
     )
-    def handle_drag_reorder(event, file_order):
-        """Update file order when user drags files to reorder."""
+    def handle_drag_reorder(event, file_order, loaded_files, active_file, active_plot_tab):
+        """Update file order and re-render tree when user drags files to reorder."""
+        from callbacks.upload_callbacks import render_file_tree_with_bundles_selected
         if not event or not event.get('group_id') or not event.get('order'):
             raise PreventUpdate
         file_order = dict(file_order or {})
@@ -453,9 +473,46 @@ def register_file_tree_callbacks(app: dash.Dash, data_manager: DataManager) -> N
             'sort_dir': file_order.get(event['group_id'], {}).get('sort_dir', 'asc'),
             'order': event['order'],
         }
-        return file_order
+        tree = render_file_tree_with_bundles_selected(
+            loaded_files or [], data_manager, active_file,
+            active_plot_tab=active_plot_tab, file_order=file_order)
+        return file_order, tree
+
+    # -- Cross-group drag-drop: move file to different group / create new group --
+    @app.callback(
+        [Output('loaded-files', 'data', allow_duplicate=True),
+         Output('render-trigger', 'data', allow_duplicate=True)],
+        Input('group-move-event', 'data'),
+        [State('loaded-files', 'data'),
+         State('render-trigger', 'data')],
+        prevent_initial_call=True
+    )
+    def handle_group_move(event, loaded_files, render_counter):
+        """Move a file/bundle to a different overlay group (or create a new one)."""
+        if not event or not event.get('file_id') or not event.get('source_group'):
+            raise PreventUpdate
+
+        file_id = event['file_id']
+        target_group = event.get('target_group')
+
+        if not hasattr(data_manager, 'group_overrides'):
+            data_manager.group_overrides = {}
+
+        if target_group:
+            parts = target_group.replace('tab-', '', 1).rsplit('_', 1)
+            if len(parts) == 2:
+                cat, x_axis = parts
+            else:
+                cat, x_axis = target_group, 'X'
+            data_manager.group_overrides[file_id] = (cat, x_axis)
+        else:
+            data_manager.group_overrides[file_id] = (f'custom_{file_id[:8]}', 'X')
+
+        return loaded_files, (render_counter or 0) + 1
 
     # Store collapse states in data manager
     if not hasattr(data_manager, 'collapse_state'):
         data_manager.collapse_state = {}
+    if not hasattr(data_manager, 'group_overrides'):
+        data_manager.group_overrides = {}
 

@@ -66,7 +66,8 @@ def register_tab_callbacks(app: dash.Dash, data_manager) -> None:
                                     time_axis=time_arr,
                                     signal=signal_arr,
                                 )
-                                data_manager.peak_service.group_peaks_across_samples()
+                                data_manager.peak_service.group_peaks_across_samples(
+                                    file_overlay_map=data_manager.build_file_overlay_map())
 
             df = data_manager.peak_service.peaks_to_table(active_file_id)
             if df.empty:
@@ -123,7 +124,8 @@ def register_tab_callbacks(app: dash.Dash, data_manager) -> None:
                 ps.rename_peak(active_file_id, matched.peak_id, new_name)
                 changed = True
         if changed:
-            ps.group_peaks_across_samples()
+            ps.group_peaks_across_samples(
+                file_overlay_map=data_manager.build_file_overlay_map())
         log.debug(f"[persist_peak_names] changed={changed}")
         return {'ts': str(changed)} if changed else dash.no_update
 
@@ -177,7 +179,8 @@ def register_tab_callbacks(app: dash.Dash, data_manager) -> None:
                 ps.rename_peak(bid, pid, new_name)
                 changed = True
         if changed:
-            ps.group_peaks_across_samples()
+            ps.group_peaks_across_samples(
+                file_overlay_map=data_manager.build_file_overlay_map())
         log.debug(f"[persist_cross_sample] changed={changed}")
         return {'ts': str(changed)} if changed else dash.no_update
 
@@ -812,7 +815,8 @@ def _collect_bundles_with_peaks(data_manager, loaded_files):
                                     time_axis=time_arr,
                                     signal=signal_arr,
                                 )
-                                data_manager.peak_service.group_peaks_across_samples()
+                                data_manager.peak_service.group_peaks_across_samples(
+                                    file_overlay_map=data_manager.build_file_overlay_map())
                 except Exception:
                     continue
 
