@@ -49,9 +49,12 @@ def _snap_to_local_max(x, y, clicked_x):
 
 
 def _find_peak(data_manager, file_id, peak_id):
-    """Look up a Peak by ID from the peak service."""
-    return next((p for p in data_manager.peak_service.get_peaks(file_id)
-                 if p.peak_id == peak_id), None)
+    """Look up a Peak by ID. Searches all files so subplot mode works."""
+    for fid, peaks in data_manager.peak_service.get_all_peaks().items():
+        for p in peaks:
+            if p.peak_id == peak_id:
+                return fid, p
+    return None, None
 
 
 def _build_results_display(payload):
@@ -176,7 +179,7 @@ def register_deconvolution_callbacks(app: dash.Dash, data_manager) -> None:
             if not button_clicks:
                 raise PreventUpdate
 
-        peak = _find_peak(data_manager, active_file, selected_peak_id) if active_file and selected_peak_id else None
+        peak_fid, peak = _find_peak(data_manager, active_file, selected_peak_id) if selected_peak_id else (None, None)
 
         close_menu = False if from_context else dash.no_update
         no = dash.no_update
@@ -185,12 +188,12 @@ def register_deconvolution_callbacks(app: dash.Dash, data_manager) -> None:
             msg = html.Div(text, style={'fontSize': '11px', 'color': color})
             return no, no, no, msg, _BTN_HIDE, _BTN_HIDE, no, close_menu, no, no
 
-        if not selected_peak_id or not active_file:
+        if not selected_peak_id:
             return fail('Select a peak first.', '#888')
         if peak is None:
             return fail('Peak not found. Select a peak first.')
 
-        x_region, y_region = _extract_peak_region(data_manager, active_file, peak)
+        x_region, y_region = _extract_peak_region(data_manager, peak_fid, peak)
         if x_region is None or len(x_region) < 10:
             return fail('Peak region too narrow for deconvolution.')
 
@@ -206,7 +209,7 @@ def register_deconvolution_callbacks(app: dash.Dash, data_manager) -> None:
         # Right-click: auto-accept immediately, no preview step.
         if from_context:
             result = deserialize_result(payload)
-            n = _apply_deconv(data_manager, result, active_file, selected_peak_id)
+            n = _apply_deconv(data_manager, result, peak_fid, selected_peak_id)
             if not n:
                 return fail('Deconvolution produced no peaks.')
             log.debug(f"deconvolute (auto, right-click): {n} sub-peaks")
@@ -234,17 +237,17 @@ def register_deconvolution_callbacks(app: dash.Dash, data_manager) -> None:
         prevent_initial_call=True,
     )
     def marker_click_and_refit(click, markers, active_file, selected_peak_id, mode, render_counter):
-        if mode != 'deconvolve' or not click or not active_file or not selected_peak_id:
+        if mode != 'deconvolve' or not click or not selected_peak_id:
             raise PreventUpdate
         clicked_x = click.get('x')
         if clicked_x is None:
             raise PreventUpdate
 
-        peak = _find_peak(data_manager, active_file, selected_peak_id)
+        peak_fid, peak = _find_peak(data_manager, active_file, selected_peak_id)
         if peak is None:
             raise PreventUpdate
 
-        x_region, y_region = _extract_peak_region(data_manager, active_file, peak)
+        x_region, y_region = _extract_peak_region(data_manager, peak_fid, peak)
         if x_region is None:
             raise PreventUpdate
 
@@ -301,11 +304,12 @@ def register_deconvolution_callbacks(app: dash.Dash, data_manager) -> None:
         prevent_initial_call=True,
     )
     def accept(n_clicks, result_payload, active_file, selected_peak_id, peak_counter, render_counter):
-        if not n_clicks or not result_payload or not active_file:
+        if not n_clicks or not result_payload:
             raise PreventUpdate
 
+        peak_fid, _ = _find_peak(data_manager, active_file, selected_peak_id) if selected_peak_id else (active_file, None)
         result = deserialize_result(result_payload)
-        n = _apply_deconv(data_manager, result, active_file, selected_peak_id)
+        n = _apply_deconv(data_manager, result, peak_fid or active_file, selected_peak_id)
         if not n:
             raise PreventUpdate
         log.debug(f"accept: replaced peak {selected_peak_id} with {n} sub-peaks")

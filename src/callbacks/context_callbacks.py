@@ -27,17 +27,16 @@ def register_context_callbacks(app, data_manager):
     def load_file_ui_state(active_file, current_tab):
         """Load persisted UI state when the active file changes.
 
-        If the user is on a shared tab (peak-analysis, across-samples),
-        keep the current tab unchanged.
+        The table panel (active-tab) is managed by restore_panel_on_tab_switch
+        based on which plot tab is active, so we never override it here.
         Plot settings hydration is handled by plot_settings_callbacks.
         """
         state = data_manager.get_file_state(active_file)
-        on_shared_tab = current_tab in ('peak-analysis', 'across-samples')
 
         return (
             state,
-            current_tab if on_shared_tab else state.get('active_tab', 'data-overview'),
-            dash.no_update if on_shared_tab else state.get('toolbox_tab', 'pub-plotter'),
+            dash.no_update,
+            state.get('toolbox_tab', 'pub-plotter'),
             state.get('dev_settings', {'show': False}),
         )
 
