@@ -4,6 +4,7 @@ Covers the extended add_baseline_peak (deconvolved peaks tagged + never
 clobbering siblings) and cross-sample grouping by deconv_group tag.
 """
 
+from callbacks.baseline_callbacks import _find_peak_file_id
 from services.peak_service import PeakService
 
 
@@ -25,6 +26,22 @@ def _add_deconv(svc, file_id, rt, tag, rt_start=None, rt_end=None):
         deconv_group=tag,
         fit_params={"sigma": 0.1, "gamma": 0.2, "amplitude": 500.0},
     )
+
+
+def test_find_peak_file_id_finds_selected_peak_across_files():
+    svc = PeakService()
+    svc.add_baseline_peak(
+        file_id="subplot_a", area=10, height=5, apex_x=1.0,
+        poly_x=[0.9, 1.0, 1.1, 0.9], poly_y=[0, 5, 0, 0],
+        p_line=[(0.9, 0), (1.1, 0)], q1=(0.9, 0), q2=(1.1, 0),
+    )
+    selected = svc.add_baseline_peak(
+        file_id="subplot_b", area=12, height=6, apex_x=2.0,
+        poly_x=[1.9, 2.0, 2.1, 1.9], poly_y=[0, 6, 0, 0],
+        p_line=[(1.9, 0), (2.1, 0)], q1=(1.9, 0), q2=(2.1, 0),
+    )
+
+    assert _find_peak_file_id(svc, selected.peak_id) == "subplot_b"
 
 
 class TestAddBaselinePeakDeconv:

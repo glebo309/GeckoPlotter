@@ -37,6 +37,16 @@ if not log.handlers:
     log.setLevel(logging.DEBUG)
 
 
+def _find_peak_file_id(peak_service, peak_id):
+    """Return the file id that owns ``peak_id``, or None."""
+    if not peak_id:
+        return None
+    for fid, peaks in peak_service.get_all_peaks().items():
+        if any(p.peak_id == peak_id for p in peaks):
+            return fid
+    return None
+
+
 # ---------------------------------------------------------------------------
 # Math helpers (ported from old DashPlotter baseline_integration_callbacks.py)
 # ---------------------------------------------------------------------------
@@ -752,8 +762,12 @@ def register_baseline_callbacks(app: dash.Dash, data_manager) -> None:
         if not trigger or not selected_peak_id or not active_file:
             raise PreventUpdate
 
-        peak_fid = active_file
-        log.debug(f"keyboard delete: peak_fid={peak_fid}, selected={selected_peak_id}")
+        peak_fid = _find_peak_file_id(data_manager.peak_service, selected_peak_id)
+        if peak_fid is None:
+            log.debug(f"keyboard delete: selected peak not found: {selected_peak_id}")
+            raise PreventUpdate
+
+        log.debug(f"keyboard delete: peak_fid={peak_fid}, active={active_file}, selected={selected_peak_id}")
         data_manager.peak_service.remove_peak(peak_fid, selected_peak_id)
         data_manager.peak_service.group_peaks_across_samples(
             file_overlay_map=data_manager.build_file_overlay_map())
