@@ -72,14 +72,14 @@ def register_calibration_callbacks(app: dash.Dash, data_manager) -> None:
     # ── Create Model ──────────────────────────────────────────────────
 
     @app.callback(
-        [Output('cal-active-model', 'options'),
+        [Output('cal-active-model', 'data'),
          Output('cal-active-model', 'value'),
          Output('cal-standards-table', 'children', allow_duplicate=True)],
         Input('cal-create-btn', 'n_clicks'),
         [State('cal-analyte-name', 'value'),
          State('cal-units', 'value'),
          State('cal-fit-type', 'value'),
-         State('cal-force-zero', 'value'),
+         State('cal-force-zero', 'checked'),
          State('cal-peak-group', 'value')],
         prevent_initial_call=True,
     )
@@ -91,7 +91,7 @@ def register_calibration_callbacks(app: dash.Dash, data_manager) -> None:
             analyte_name=analyte_name,
             group_id=peak_group or '',
             fit_type=fit_type or 'linear',
-            force_zero='zero' in (force_zero or []),
+            force_zero=bool(force_zero),
             units=units or '',
         )
         log.debug(f"Created calibration model: {model.analyte_name} ({model.model_id})")
@@ -127,7 +127,7 @@ def register_calibration_callbacks(app: dash.Dash, data_manager) -> None:
     @app.callback(
         [Output('cal-curve-graph', 'figure'),
          Output('cal-results-info', 'children'),
-         Output('cal-active-model', 'options', allow_duplicate=True)],
+         Output('cal-active-model', 'data', allow_duplicate=True)],
         Input('cal-fit-btn', 'n_clicks'),
         State('cal-active-model', 'value'),
         prevent_initial_call=True,
