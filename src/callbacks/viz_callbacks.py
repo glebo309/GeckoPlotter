@@ -1116,10 +1116,14 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
         elif active_file:
             _ov_time, _ov_signal = get_xy_arrays(data_manager, active_file)
             if _ov_time is not None:
+                all_peaks = data_manager.peak_service.get_peaks(active_file)
+                if baseline_mode == 'deconvolve' and selected_peak_id:
+                    peaks_to_render = [p for p in all_peaks if p.peak_id != selected_peak_id]
+                else:
+                    peaks_to_render = all_peaks
                 figure = overlay_peaks_on_figure(
-                    data_manager.peak_service.get_peaks(active_file),
+                    peaks_to_render,
                     figure, _ov_time, _ov_signal, selected_peak_id)
-                # Deconvolution preview: markers + fitted curves before accept.
                 if baseline_mode == 'deconvolve':
                     from callbacks.peak_overlay import add_deconv_overlays
                     add_deconv_overlays(

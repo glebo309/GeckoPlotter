@@ -242,16 +242,22 @@ def add_deconv_overlays(fig, markers, deconv_payload, time_arr, signal_arr, row=
 
     # ── Fitted components + composite (preview before accept) ──
     if deconv_payload:
-        x = deconv_payload.get('x') or []
+        x = deconv_payload.get('render_x') or deconv_payload.get('x') or []
+        baseline = deconv_payload.get('render_baseline') or [0] * len(x)
         for comp in deconv_payload.get('components', []):
             color = DECONV_COLORS[comp['index'] % len(DECONV_COLORS)]
+            curve = comp.get('render_curve') or comp.get('curve')
+            y_bottom = comp.get('render_stack_bottom') or baseline
+            y_top = comp.get('render_stack_top') or [c + b for c, b in zip(curve, baseline)]
             fig.add_trace(go.Scatter(
-                x=x, y=comp['curve'], mode='lines',
+                x=list(x) + list(x)[::-1],
+                y=list(y_top) + list(y_bottom)[::-1],
+                mode='lines',
                 line=dict(color=color, width=1.5),
-                fill='tozeroy', fillcolor=rgba(color, 0.12),
+                fill='toself', fillcolor=rgba(color, 0.12),
                 hoverinfo='skip', showlegend=False, meta='deconv_overlay',
             ), **add_kw)
-        best_fit = deconv_payload.get('best_fit')
+        best_fit = deconv_payload.get('render_best_fit') or deconv_payload.get('best_fit')
         if best_fit is not None:
             fig.add_trace(go.Scatter(
                 x=x, y=best_fit, mode='lines',

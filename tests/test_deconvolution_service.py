@@ -125,6 +125,39 @@ class TestFitPeaks:
         svc = DeconvolutionService()
         assert svc.fit_peaks(x, y, []) is None
 
+    def test_narrow_rt_window_allows_fast_emg_tails(self):
+        """Regression: gamma bounds must work in narrow chromatogram windows."""
+        x = np.linspace(6.20, 6.60, 1000)
+        y = (
+            _emg(x, amplitude=7.0, center=6.34, sigma=0.009, gamma=40.0)
+            + _emg(x, amplitude=9.0, center=6.42, sigma=0.012, gamma=45.0)
+        )
+        svc = DeconvolutionService()
+        centers = svc.auto_detect_centers(x, y, prominence=0.05)
+        result = svc.fit_peaks(x, y, centers)
+
+        assert result is not None
+        assert len(result.components) == 2
+        assert result.r_squared > 0.99
+        assert min(c.gamma for c in result.components) > 10.0
+
+    def test_narrow_offset_region_fits_actual_signal_floor(self):
+        """The selected p-line is only a crop; fit uses the signal's own floor."""
+        x = np.linspace(6.28, 6.56, 300)
+        y = (
+            8.0
+            + _emg(x, amplitude=3.5, center=6.36, sigma=0.018, gamma=35.0)
+            + _emg(x, amplitude=7.0, center=6.45, sigma=0.012, gamma=45.0)
+        )
+        svc = DeconvolutionService()
+        centers = svc.auto_detect_centers(x, y, prominence=0.05)
+        result = svc.fit_peaks(x, y, centers)
+
+        assert result is not None
+        assert len(result.components) == 2
+        assert result.r_squared > 0.99
+        assert result.baseline[0] == pytest.approx(8.0, abs=0.2)
+
 
 class TestResultToPeaks:
     def test_converts_components_to_peaks(self, two_peak_chromatogram):
@@ -162,6 +195,75 @@ class TestResultToPeaks:
         assert p.poly_x[0] == p.poly_x[-1]
         # baseline leg sits at y=0
         assert min(p.poly_y) == pytest.approx(0.0, abs=1e-9)
+
+    def test_accepted_polygon_matches_fit_region(self, two_peak_chromatogram):
+        x, y, _ = two_peak_chromatogram
+        svc = DeconvolutionService()
+        result = svc.fit_peaks(x, y, [(6.0, 1000.0), (10.0, 700.0)])
+        peaks = svc.result_to_peaks(result, file_id="f1", region_rt=8.0)
+        p = peaks[0]
+
+        assert p.rt_start == pytest.approx(float(result.x[0]))
+        assert p.rt_end == pytest.approx(float(result.x[-1]))
+        assert len(p.poly_x) == max(result.x.size, 800) * 2
+
+    def test_serialized_preview_contains_smooth_render_curves(self, two_peak_chromatogram):
+        x, y, _ = two_peak_chromatogram
+        svc = DeconvolutionService()
+        result = svc.fit_peaks(x[::20], y[::20], [(6.0, 1000.0), (10.0, 700.0)])
+        payload = serialize_result(result)
+
+        assert len(payload["render_x"]) == 800
+        assert len(payload["render_best_fit"]) == 800
+        for comp in payload["components"]:
+            assert len(comp["render_curve"]) == 800
+
+    def test_hybrid_fill_uses_measured_curve_on_clean_outer_sides(self):
+        x = np.linspace(6.30, 6.56, 500)
+        y = (
+            _emg(x, amplitude=3.0, center=6.36, sigma=0.018, gamma=35.0)
+            + _emg(x, amplitude=8.0, center=6.45, sigma=0.014, gamma=45.0)
+        )
+        svc = DeconvolutionService()
+        result = svc.fit_peaks(x, y, [(6.36, 80.0), (6.45, 200.0)])
+        payload = serialize_result(result)
+        render_x = np.asarray(payload["render_x"], dtype=float)
+        first = payload["components"][0]
+        second = payload["components"][1]
+        first_top = np.asarray(first["render_stack_top"], dtype=float)
+        second_top = np.asarray(second["render_stack_top"], dtype=float)
+        measured = np.interp(render_x, result.x, result.best_fit + result.residuals)
+        baseline = np.asarray(payload["render_baseline"], dtype=float)
+        measured_top = np.maximum(measured, baseline)
+
+        first_clean_side = render_x <= result.components[0].center
+        second_clean_side = render_x >= result.components[1].center
+        np.testing.assert_allclose(first_top[first_clean_side], measured_top[first_clean_side], rtol=1e-6, atol=1e-6)
+        np.testing.assert_allclose(second_top[second_clean_side], measured_top[second_clean_side], rtol=1e-6, atol=1e-6)
+
+    def test_hybrid_fill_keeps_fitted_curve_on_overlap_sides(self):
+        x = np.linspace(6.30, 6.56, 500)
+        y = (
+            _emg(x, amplitude=3.0, center=6.36, sigma=0.018, gamma=35.0)
+            + _emg(x, amplitude=8.0, center=6.45, sigma=0.014, gamma=45.0)
+        )
+        svc = DeconvolutionService()
+        result = svc.fit_peaks(x, y, [(6.36, 80.0), (6.45, 200.0)])
+        payload = serialize_result(result)
+        render_x = np.asarray(payload["render_x"], dtype=float)
+        first = payload["components"][0]
+        second = payload["components"][1]
+        first_top = np.asarray(first["render_stack_top"], dtype=float)
+        second_top = np.asarray(second["render_stack_top"], dtype=float)
+        first_curve = np.asarray(first["render_curve"], dtype=float)
+        second_curve = np.asarray(second["render_curve"], dtype=float)
+        baseline = np.asarray(payload["render_baseline"], dtype=float)
+        midpoint = (result.components[0].center + result.components[1].center) / 2.0
+
+        first_overlap_side = render_x >= midpoint
+        second_overlap_side = render_x <= midpoint
+        np.testing.assert_allclose(first_top[first_overlap_side], first_curve[first_overlap_side] + baseline[first_overlap_side], rtol=1e-6, atol=1e-6)
+        np.testing.assert_allclose(second_top[second_overlap_side], second_curve[second_overlap_side] + baseline[second_overlap_side], rtol=1e-6, atol=1e-6)
 
 
 class TestResultSerialization:
