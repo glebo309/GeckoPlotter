@@ -6,6 +6,8 @@
     'use strict';
 
     var state = null;
+    var pending = null;
+    var DRAG_THRESHOLD = 5;
     var LINE_CLASS = 'drag-drop-line';
 
     function getSiblings(container) {
@@ -32,11 +34,24 @@
         var siblings = getSiblings(container);
         if (siblings.length < 2) return;
 
-        var rect = el.getBoundingClientRect();
-        var idx = siblings.indexOf(el);
-        var ids = siblings.map(function(s) { return s.getAttribute('data-file-id'); });
+        pending = {
+            el: el,
+            container: container,
+            siblings: siblings,
+            startX: e.clientX,
+            startY: e.clientY,
+        };
 
-        // Floating clone
+        document.addEventListener('pointermove', onPointerMove);
+        document.addEventListener('pointerup', onPointerUp);
+    }
+
+    function startDrag(p) {
+        var el = p.el;
+        var rect = el.getBoundingClientRect();
+        var idx = p.siblings.indexOf(el);
+        var ids = p.siblings.map(function(s) { return s.getAttribute('data-file-id'); });
+
         var clone = el.cloneNode(true);
         clone.className = 'drag-clone';
         clone.style.cssText = [
@@ -50,7 +65,6 @@
         ].join(';');
         document.body.appendChild(clone);
 
-        // Collapse source
         el.style.transition = 'max-height 0.15s ease, margin 0.15s ease, padding 0.15s ease, opacity 0.1s ease';
         el.style.maxHeight = '0';
         el.style.overflow = 'hidden';
@@ -63,22 +77,26 @@
         state = {
             srcEl: el,
             clone: clone,
-            container: container,
-            siblings: siblings,
+            container: p.container,
+            siblings: p.siblings,
             ids: ids,
             srcIdx: idx,
             curIdx: idx,
-            startY: e.clientY,
+            startY: p.startY,
             origTop: rect.top,
             elHeight: rect.height,
         };
 
-        e.preventDefault();
-        document.addEventListener('pointermove', onPointerMove);
-        document.addEventListener('pointerup', onPointerUp);
+        pending = null;
     }
 
     function onPointerMove(e) {
+        if (pending) {
+            var dx = e.clientX - pending.startX;
+            var dy = e.clientY - pending.startY;
+            if (Math.abs(dx) < DRAG_THRESHOLD && Math.abs(dy) < DRAG_THRESHOLD) return;
+            startDrag(pending);
+        }
         if (!state) return;
         var dy = e.clientY - state.startY;
         state.clone.style.top = (state.origTop + dy) + 'px';
@@ -134,9 +152,14 @@
     }
 
     function onPointerUp() {
-        if (!state) return;
         document.removeEventListener('pointermove', onPointerMove);
         document.removeEventListener('pointerup', onPointerUp);
+
+        if (pending) {
+            pending = null;
+            return;
+        }
+        if (!state) return;
 
         state.clone.remove();
         clearLine();

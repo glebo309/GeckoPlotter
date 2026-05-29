@@ -37,8 +37,47 @@
                     applyHiddenFiles(data);
                 } catch(e) {}
             }
+            var af = document.getElementById('active-file');
+            if (af) {
+                try { applyActiveFile(JSON.parse(af.textContent || '')); } catch(_) {}
+            }
             initGroupCollapse();
         }).observe(treeEl, { childList: true, subtree: true });
+    }
+
+    // -----------------------------------------------------------------------
+    // 1b. CSS-only active-file selection highlight (avoids full tree re-render)
+    // -----------------------------------------------------------------------
+    function applyActiveFile(fileId) {
+        document.querySelectorAll('.file-tree-item').forEach(function(el) {
+            var elId = null;
+            try {
+                var raw = el.id;
+                if (raw && raw.charAt(0) === '{') {
+                    elId = JSON.parse(raw).index;
+                }
+            } catch(_) {}
+            if (elId && elId === fileId) {
+                el.style.backgroundColor = '#fff5f0';
+                el.style.borderLeft = '2px solid #ff6b35';
+                el.style.fontWeight = '500';
+            } else {
+                el.style.backgroundColor = '';
+                el.style.borderLeft = '';
+                el.style.fontWeight = '';
+            }
+        });
+    }
+
+    var activeFileStore = document.getElementById('active-file');
+    if (activeFileStore) {
+        new MutationObserver(function() {
+            try {
+                var raw = activeFileStore.textContent || '';
+                var fid = JSON.parse(raw);
+                applyActiveFile(fid);
+            } catch(_) {}
+        }).observe(activeFileStore, { childList: true, characterData: true, subtree: true });
     }
 
     // -----------------------------------------------------------------------

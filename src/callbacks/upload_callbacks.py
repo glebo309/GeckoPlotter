@@ -334,9 +334,7 @@ def render_bundle_item_selected(bundle_item: dict, is_selected: bool = False, da
     bundle_icon = bundle_item.get('icon', '📦')
     bundle_id = bundle_item.get('id')
 
-    # Selection highlighting colors
-    bg_color = '#fff5f0' if is_selected else '#ffffff'
-    opacity = '0.5' if dimmed and not is_selected else '1.0'
+    opacity = '0.5' if dimmed else '1.0'
     
     # Check stored collapse state for expansion button and child visibility
     initial_icon = '▶'
@@ -392,8 +390,8 @@ def render_bundle_item_selected(bundle_item: dict, is_selected: bool = False, da
                 'cursor': 'pointer',
                 'padding': '1px 6px',
                 'borderRadius': '3px',
-                'backgroundColor': bg_color,
-                'borderLeft': f'2px solid {"#ff6b35" if is_selected else "transparent"}',
+                'backgroundColor': '#ffffff',
+                'borderLeft': '2px solid transparent',
                 'transition': 'all 0.15s',
                 'flex': '1',
                 'lineHeight': '1.4',
@@ -474,10 +472,6 @@ def render_individual_file_item_selected(item: dict, is_selected: bool = False, 
     icon = TYPE_ICONS.get(item.get('type'), TYPE_ICONS.get('unknown', '❓'))
     file_id = item.get('id')
 
-    # Selection highlighting colors
-    bg_color = '#fff5f0' if is_selected else '#ffffff'
-    border_color = '#ff6b35' if is_selected else '#e0e0e0'
-    
     # Check if this item has children (like UV-Vis wells)
     children = []
     has_children = 'children' in item and item['children'] and not is_child
@@ -632,7 +626,7 @@ def render_individual_file_item_selected(item: dict, is_selected: bool = False, 
                 html.Span(icon, style={'marginRight': '6px', 'fontSize': '11px', 'flexShrink': '0'}),
                 html.Span(os.path.splitext(item.get('name', ''))[0], style={
                     'overflow': 'hidden', 'textOverflow': 'ellipsis', 'whiteSpace': 'nowrap', 'flex': '1',
-                    'fontWeight': '500' if is_selected else '400',
+                    'fontWeight': '400',
                 }),
                 html.Span(item.get('size_display', ''), style={
                     'fontSize': '10px', 'color': '#999', 'marginLeft': '6px', 'flexShrink': '0',
@@ -649,13 +643,13 @@ def render_individual_file_item_selected(item: dict, is_selected: bool = False, 
                 'cursor': 'pointer',
                 'padding': '1px 6px',
                 'borderRadius': '3px',
-                'backgroundColor': bg_color,
-                'borderLeft': f'2px solid {"#ff6b35" if is_selected else "transparent"}',
+                'backgroundColor': '#ffffff',
+                'borderLeft': '2px solid transparent',
                 'transition': 'all 0.15s',
                 'flex': '1',
                 'lineHeight': '1.4',
             }),
-            
+
             # Control buttons
             html.Div([
                 html.Button(

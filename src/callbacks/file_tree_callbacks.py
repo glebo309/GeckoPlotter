@@ -392,14 +392,15 @@ def register_file_tree_callbacks(app: dash.Dash, data_manager: DataManager) -> N
 
     @app.callback(
         Output('file-tree', 'children', allow_duplicate=True),
-        [Input('active-file', 'data'),
-         Input('loaded-files', 'data'),
+        [Input('loaded-files', 'data'),
          Input('active-plot-tab', 'data'),
          Input('file-order', 'data')],
+        [State('active-file', 'data')],
         prevent_initial_call=True
     )
-    def sync_file_tree_selection(active_file_id, loaded_files, active_plot_tab, file_order):
-        """Re-render the file tree grouped by overlay type, highlighting the active group."""
+    def sync_file_tree_selection(loaded_files, active_plot_tab, file_order, active_file_id):
+        """Re-render the file tree grouped by overlay type. Selection highlight
+        is applied client-side via file-tree-ui.js (CSS-only, no re-render)."""
         ctx = dash.callback_context
         trigger = ctx.triggered[0]['prop_id'].rsplit('.', 1)[0] if ctx.triggered else ''
         if trigger == 'file-order':
