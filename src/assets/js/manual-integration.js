@@ -229,7 +229,8 @@
     function isContextMenuTarget(event) {
         if (!event || !event.target || typeof event.target.closest !== 'function') return false;
         return !!event.target.closest(
-            '#context-menu-dropdown, #context-menu-anchor, #ctx-rename-modal, [id^="ctx-"]'
+            '#context-menu-dropdown, #context-menu-anchor, #ctx-rename-modal, ' +
+            '[id^="ctx-"], [role="menu"], .mantine-Menu-dropdown'
         );
     }
 
@@ -732,11 +733,13 @@
             };
             document.addEventListener('pointerdown', consumeBlankBeforePlotly, true);
             document.addEventListener('mousedown', consumeMouseBeforePlotly, true);
-            document.addEventListener('pointerdown', function (event) {
-                if (!event || event.button !== 0 || isContextMenuTarget(event)) return;
+            document.addEventListener('click', function (event) {
+                if (!event || isContextMenuTarget(event)) return;
                 if (!document.getElementById('context-menu-dropdown')) return;
-                publishContextMenuClose('outside');
-            }, true);
+                window.setTimeout(function () {
+                    publishContextMenuClose('outside');
+                }, 0);
+            });
             document.addEventListener('keydown', function (event) {
                 if (!event || event.key !== 'Escape') return;
                 if (!document.getElementById('context-menu-dropdown')) return;
