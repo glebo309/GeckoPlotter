@@ -201,6 +201,19 @@
         return true;
     }
 
+    function publishDeconvMarkerClick(x) {
+        var dashClientside = window.dash_clientside ||
+            (window.parent && window.parent !== window ? window.parent.dash_clientside : null);
+        if (x === null || x === undefined ||
+            !dashClientside || typeof dashClientside.set_props !== 'function') {
+            return false;
+        }
+        dashClientside.set_props('deconv-marker-click-store', {
+            data: { x: x, ts: Date.now() }
+        });
+        return true;
+    }
+
     function resetAxes(gd) {
         if (!window.Plotly || !gd || !gd._fullLayout) return;
         var reset = {};
@@ -631,6 +644,20 @@
             clearEmptyClickTimer(gd);
             resetAxes(gd);
             return;
+        }
+
+        // Deconvolve mode: a plain click places (or removes) a peak-center
+        // marker. Server-side decides add vs remove by proximity.
+        if (gd.__geckoManualIntegrationMode === 'deconvolve' &&
+            isInsidePlotArea(gd, event) && !isOverlayTarget(event)) {
+            var dp = dataPointAtEvent(gd, event);
+            if (dp) {
+                stopPlotlyGesture(event);
+                gd.__geckoManualIntegrationLastPlotlyClickAt = Date.now();
+                clearEmptyClickTimer(gd);
+                publishDeconvMarkerClick(dp.x);
+                return;
+            }
         }
 
         var peakId = peakIdAtEvent(gd, event);

@@ -45,8 +45,11 @@ class Peak:
     group_id: Optional[str] = None
     calibration_id: Optional[str] = None
     concentration: Optional[float] = None
-    source: str = 'detected'  # 'imported' | 'manual' | 'detected'
+    source: str = 'detected'  # 'imported' | 'manual' | 'detected' | 'deconvolved'
     label: str = ''  # User-assigned compound/label shown above peak on plot
+    # Deconvolution fields (EMG fit)
+    deconv_group: Optional[str] = None  # e.g. "deconv_5.2_c1" — cross-sample matching tag
+    fit_params: Optional[Dict] = None  # {sigma, gamma, amplitude} from the EMG fit
     # Manual baseline integration fields (p-line)
     poly_x: Optional[List[float]] = None  # Filled polygon x-coords
     poly_y: Optional[List[float]] = None  # Filled polygon y-coords
@@ -499,6 +502,8 @@ class PeakService:
         source: str = 'manual',
         name: Optional[str] = None,
         label: Optional[str] = None,
+        deconv_group: Optional[str] = None,
+        fit_params: Optional[Dict] = None,
     ) -> Peak:
         """Add a manually integrated peak from baseline drawing (p-line).
 
@@ -508,8 +513,39 @@ class PeakService:
         ``source`` tags the peak's origin ('manual' by default; 'cross_integrated'
         when dropped in by the cross-file integration tool). ``name``/``label``
         let cross-file integration inherit the source peak's compound name.
+
+        Deconvolved peaks (``source='deconvolved'``) are always appended fresh
+        and carry their ``deconv_group``/``fit_params`` tags — the overlap
+        replacement is skipped so sibling components (which overlap by nature)
+        never clobber one another. Clearing pre-existing peaks in the region is
+        the caller's responsibility for deconvolution.
         """
         existing = self._peaks.get(file_id, [])
+
+        if source == 'deconvolved':
+            peak_number = len(existing) + 1
+            peak = Peak(
+                peak_id=str(uuid.uuid4()),
+                file_id=file_id,
+                name=f"Peak {peak_number}",
+                rt=apex_x,
+                rt_start=min(p_line[0][0], p_line[1][0]),
+                rt_end=max(p_line[0][0], p_line[1][0]),
+                area=area,
+                height=height,
+                width=abs(p_line[1][0] - p_line[0][0]),
+                color=self._next_color(),
+                source='deconvolved',
+                poly_x=poly_x,
+                poly_y=poly_y,
+                p_line=p_line,
+                q1=q1,
+                q2=q2,
+                deconv_group=deconv_group,
+                fit_params=fit_params,
+            )
+            self._peaks.setdefault(file_id, []).append(peak)
+            return peak
 
         line_x_min = min(p_line[0][0], p_line[1][0])
         line_x_max = max(p_line[0][0], p_line[1][0])
@@ -600,13 +636,11 @@ class PeakService:
         if rel_peaks.size == 0:
             return None
 
-        # Most prominent local maximum within the window.
         best = rel_peaks[int(np.argmax(props['prominences']))]
         apex_idx = int(win_idx[0] + best)
         apex_h = float(signal[apex_idx])
         floor = apex_h * 0.05
 
-        # Walk down the flanks until a valley (signal turns upward) or floor.
         left = apex_idx
         while left > 1:
             if signal[left - 1] > signal[left]:
@@ -651,6 +685,30 @@ class PeakService:
             q1=(rt_start, y_left),
             q2=(rt_end, y_right),
         )
+
+    def clear_region(
+        self, file_id: str, rt_lo: float, rt_hi: float, min_overlap: float = 0.5
+    ) -> int:
+        """Remove peaks overlapping ``[rt_lo, rt_hi]`` by more than
+        ``min_overlap`` of their own width. Returns the number removed.
+
+        Used by deconvolution accept to clear pre-existing peaks in a region
+        before dropping in the fitted components.
+        """
+        peaks = self._peaks.get(file_id)
+        if not peaks:
+            return 0
+        kept: List[Peak] = []
+        removed = 0
+        for p in peaks:
+            width = p.rt_end - p.rt_start
+            overlap = max(0.0, min(rt_hi, p.rt_end) - max(rt_lo, p.rt_start))
+            if width > 0 and overlap / width > min_overlap:
+                removed += 1
+            else:
+                kept.append(p)
+        self._peaks[file_id] = kept
+        return removed
 
     def clear_peaks(self, file_id: str) -> None:
         """Remove all peaks for a bundle."""
@@ -787,24 +845,46 @@ class PeakService:
         result: Dict[str, List[Peak]] = {}
 
         for og_key, og_peaks in overlay_buckets.items():
-            og_peaks.sort(key=lambda p: p.rt)
+            # Deconvolved peaks match across samples by their deconv_group tag,
+            # not RT proximity — otherwise two close components (e.g. RT 5.1 and
+            # 5.2) would collide into one group. Everything else uses RT windows.
+            deconv_peaks = [
+                p for p in og_peaks if p.source == 'deconvolved' and p.deconv_group
+            ]
+            regular_peaks = [
+                p for p in og_peaks if not (p.source == 'deconvolved' and p.deconv_group)
+            ]
 
-            # RT-proximity grouping within this overlay group
-            groups: List[List[Peak]] = []
-            current_group: List[Peak] = [og_peaks[0]]
+            # gid -> list of peaks, where gid is the group identifier
+            grouped: List[Tuple[str, List[Peak]]] = []
 
-            for peak in og_peaks[1:]:
-                group_mean_rt = np.mean([p.rt for p in current_group])
-                same_file_as_existing = any(
-                    peak_file_map.get(peak.peak_id) == peak_file_map.get(p.peak_id)
-                    for p in current_group
-                )
-                if abs(peak.rt - group_mean_rt) <= rt_window and not same_file_as_existing:
-                    current_group.append(peak)
-                else:
-                    groups.append(current_group)
-                    current_group = [peak]
-            groups.append(current_group)
+            # ── Deconvolved: bucket by tag ────────────────────────────
+            tag_buckets: Dict[str, List[Peak]] = {}
+            for p in deconv_peaks:
+                tag_buckets.setdefault(p.deconv_group, []).append(p)
+            for tag, members in tag_buckets.items():
+                grouped.append((tag, members))
+
+            # ── Regular: RT-proximity grouping ────────────────────────
+            regular_peaks.sort(key=lambda p: p.rt)
+            if regular_peaks:
+                current_group: List[Peak] = [regular_peaks[0]]
+                rt_groups: List[List[Peak]] = []
+                for peak in regular_peaks[1:]:
+                    group_mean_rt = np.mean([p.rt for p in current_group])
+                    same_file_as_existing = any(
+                        peak_file_map.get(peak.peak_id) == peak_file_map.get(p.peak_id)
+                        for p in current_group
+                    )
+                    if abs(peak.rt - group_mean_rt) <= rt_window and not same_file_as_existing:
+                        current_group.append(peak)
+                    else:
+                        rt_groups.append(current_group)
+                        current_group = [peak]
+                rt_groups.append(current_group)
+                for group in rt_groups:
+                    mean_rt = float(np.mean([p.rt for p in group]))
+                    grouped.append((f"compound_rt{mean_rt:.1f}", group))
 
             # Per-overlay-group color namespace
             og_colors = self._group_colors.setdefault(og_key, {})
@@ -813,15 +893,13 @@ class PeakService:
             active_gids: set = set()
             used_colors: set = set()
 
-            for group in groups:
-                mean_rt = float(np.mean([p.rt for p in group]))
-                gid = f"compound_rt{mean_rt:.1f}"
+            for gid, group in grouped:
                 active_gids.add(gid)
 
                 if gid in og_colors:
                     color = og_colors[gid]
                 else:
-                    color_idx = hash(round(mean_rt, 1)) % len(OKABE_ITO_PALETTE)
+                    color_idx = hash(gid) % len(OKABE_ITO_PALETTE)
                     if OKABE_ITO_PALETTE[color_idx] in used_colors:
                         for offset in range(1, len(OKABE_ITO_PALETTE)):
                             candidate = (color_idx + offset) % len(OKABE_ITO_PALETTE)
@@ -975,7 +1053,7 @@ class PeakService:
                 "peak_id", "file_id", "name", "rt", "rt_start", "rt_end",
                 "area", "height", "width", "width_half_height", "color",
                 "opacity", "group_id", "calibration_id", "concentration",
-                "source",
+                "source", "deconv_group", "fit_params",
             ])
         return pd.DataFrame([asdict(p) for p in peaks])
 
