@@ -2,7 +2,6 @@
 
 import numpy as np
 import pytest
-from unittest.mock import MagicMock, patch
 from lmfit.models import ExponentialGaussianModel
 
 from services.peak_service import PeakService, Peak
@@ -43,11 +42,6 @@ class TestOneClickDeconvolute:
         assert result is not None
         assert result.r_squared > 0.95
         assert len(result.components) >= 2
-
-    def test_no_peak_selected_returns_message(self):
-        """When selected-peak-idx is None, should produce a status message."""
-        selected_peak_id = None
-        assert selected_peak_id is None  # guard triggers
 
     def test_single_peak_region_returns_fewer_than_2(self, overlapping_signal):
         """A region with only one peak should fail detection gracefully."""

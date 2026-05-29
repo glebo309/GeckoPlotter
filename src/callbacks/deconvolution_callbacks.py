@@ -34,6 +34,9 @@ _svc = DeconvolutionService()
 _SNAP_FRAC = 0.02
 _DEFAULT_PROMINENCE = 0.05
 
+_BTN_SHOW = {'padding': '4px 10px', 'fontSize': '12px', 'display': 'inline-block'}
+_BTN_HIDE = {'padding': '4px 10px', 'fontSize': '12px', 'display': 'none'}
+
 
 def _snap_to_local_max(x, y, clicked_x):
     """Return (apex_x, apex_y) at the nearest local maximum to clicked_x."""
@@ -43,6 +46,12 @@ def _snap_to_local_max(x, y, clicked_x):
     hi = min(len(x), idx + window + 1)
     local = lo + int(np.argmax(y[lo:hi]))
     return float(x[local]), float(y[local])
+
+
+def _find_peak(data_manager, file_id, peak_id):
+    """Look up a Peak by ID from the peak service."""
+    return next((p for p in data_manager.peak_service.get_peaks(file_id)
+                 if p.peak_id == peak_id), None)
 
 
 def _build_results_display(payload):
@@ -96,7 +105,7 @@ def _extract_peak_region(data_manager, file_id, peak):
 
 
 def _run_detect_and_fit(x_region, y_region):
-    """Auto-detect centers and fit EMG model. Returns (markers, payload) or raises."""
+    """Auto-detect centers and fit EMG model. Returns (markers, payload) or (None, None) if detection/fit fails."""
     centers = _svc.auto_detect_centers(x_region, y_region, prominence=_DEFAULT_PROMINENCE)
     if len(centers) < 2:
         return None, None
@@ -130,30 +139,24 @@ def register_deconvolution_callbacks(app: dash.Dash, data_manager) -> None:
         if not n_clicks:
             raise PreventUpdate
 
-        btn_show = {'padding': '4px 10px', 'fontSize': '12px', 'display': 'inline-block'}
-        btn_hide = {'padding': '4px 10px', 'fontSize': '12px', 'display': 'none'}
         no = dash.no_update
 
         if not selected_peak_id or not active_file:
             msg = html.Div('Select a peak first.',
                            style={'fontSize': '11px', 'color': '#888'})
-            return no, no, no, msg, btn_hide, btn_hide, no
+            return no, no, no, msg, _BTN_HIDE, _BTN_HIDE, no
 
-        peak = None
-        for p in data_manager.peak_service.get_peaks(active_file):
-            if p.peak_id == selected_peak_id:
-                peak = p
-                break
+        peak = _find_peak(data_manager, active_file, selected_peak_id)
         if peak is None:
             msg = html.Div('Peak not found. Select a peak first.',
                            style={'fontSize': '11px', 'color': '#c62828'})
-            return no, no, no, msg, btn_hide, btn_hide, no
+            return no, no, no, msg, _BTN_HIDE, _BTN_HIDE, no
 
         x_region, y_region = _extract_peak_region(data_manager, active_file, peak)
         if x_region is None or len(x_region) < 10:
             msg = html.Div('Peak region too narrow for deconvolution.',
                            style={'fontSize': '11px', 'color': '#c62828'})
-            return no, no, no, msg, btn_hide, btn_hide, no
+            return no, no, no, msg, _BTN_HIDE, _BTN_HIDE, no
 
         try:
             markers, payload = _run_detect_and_fit(x_region, y_region)
@@ -161,17 +164,17 @@ def register_deconvolution_callbacks(app: dash.Dash, data_manager) -> None:
             log.exception("Deconvolution fit failed")
             msg = html.Div('Fit failed — try a wider peak region.',
                            style={'fontSize': '11px', 'color': '#c62828'})
-            return no, no, no, msg, btn_hide, btn_hide, no
+            return no, no, no, msg, _BTN_HIDE, _BTN_HIDE, no
 
         if markers is None:
             msg = html.Div('Could not detect multiple peaks in this region.',
                            style={'fontSize': '11px', 'color': '#c62828'})
-            return no, no, no, msg, btn_hide, btn_hide, no
+            return no, no, no, msg, _BTN_HIDE, _BTN_HIDE, no
 
         log.debug(f"deconvolute: {len(markers)} components, R²={payload['r_squared']:.4f}")
         return ('deconvolve', markers, payload,
                 _build_results_display(payload),
-                btn_show, btn_show,
+                _BTN_SHOW, _BTN_SHOW,
                 (render_counter or 0) + 1)
 
     # ── Marker add/remove + auto-refit ───────────────────────────────
@@ -195,11 +198,7 @@ def register_deconvolution_callbacks(app: dash.Dash, data_manager) -> None:
         if clicked_x is None:
             raise PreventUpdate
 
-        peak = None
-        for p in data_manager.peak_service.get_peaks(active_file):
-            if p.peak_id == selected_peak_id:
-                peak = p
-                break
+        peak = _find_peak(data_manager, active_file, selected_peak_id)
         if peak is None:
             raise PreventUpdate
 
@@ -288,10 +287,9 @@ def register_deconvolution_callbacks(app: dash.Dash, data_manager) -> None:
             file_overlay_map=data_manager.build_file_overlay_map())
         log.debug(f"accept: replaced peak {selected_peak_id} with {len(new_peaks)} sub-peaks")
 
-        btn_hide = {'padding': '4px 10px', 'fontSize': '12px', 'display': 'none'}
         status = html.Div('Select a peak first.',
                           style={'fontSize': '11px', 'color': '#888'})
-        return ('navigate', [], None, status, btn_hide, btn_hide, None,
+        return ('navigate', [], None, status, _BTN_HIDE, _BTN_HIDE, None,
                 (peak_counter or 0) + 1, (render_counter or 0) + 1)
 
     # ── Cancel ────────────────────────────────────────────────────────
@@ -310,8 +308,7 @@ def register_deconvolution_callbacks(app: dash.Dash, data_manager) -> None:
     def cancel(n_clicks, render_counter):
         if not n_clicks:
             raise PreventUpdate
-        btn_hide = {'padding': '4px 10px', 'fontSize': '12px', 'display': 'none'}
         status = html.Div('Select a peak first.',
                           style={'fontSize': '11px', 'color': '#888'})
-        return ('navigate', [], None, status, btn_hide, btn_hide,
+        return ('navigate', [], None, status, _BTN_HIDE, _BTN_HIDE,
                 (render_counter or 0) + 1)
