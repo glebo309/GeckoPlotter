@@ -35,8 +35,8 @@ from components.table_styles import TABLE_STYLE_CELL, TABLE_STYLE_HEADER, TABLE_
 from callbacks.publication_callbacks import register_publication_callbacks
 from callbacks.integration_callbacks import register_integration_callbacks
 from callbacks.baseline_callbacks import register_baseline_callbacks
-from callbacks.deconvolution_callbacks import register_deconvolution_callbacks
 from callbacks.context_menu_callbacks import register_context_menu_callbacks
+from callbacks.deconvolution_callbacks import register_deconvolution_callbacks
 from callbacks.export_callbacks import register_export_callbacks
 from callbacks.calibration_callbacks import register_calibration_callbacks
 
@@ -129,11 +129,10 @@ _layout_body = html.Div(
         dcc.Store(id='cross-sample-table-store', data=None),  # Mirror of cross-sample-table data (JSON split) — always in layout
         # Baseline integration stores (p-line drawing)
         dcc.Store(id='baseline-mode', data='navigate'),  # 'draw' | 'edit' | 'navigate' | 'deconvolve'
+        dcc.Store(id='context-menu-store', data=None),  # {peak_id, x, y, ts} from right-click
         dcc.Store(id='deconv-markers', data=[]),  # [{x, y}, ...] peak-center markers
         dcc.Store(id='deconv-result', data=None),  # serialized DeconvResult (preview/accept)
         dcc.Store(id='deconv-marker-click-store', data=None),  # browser-side marker click {x, ts}
-        dcc.Store(id='context-menu-store', data=None),  # {peak_id, x, y, ts} from right-click
-        dcc.Store(id='context-menu-close-store', data=None),  # browser-side outside-click/Escape close
         dcc.Store(id='selected-peak-idx', data=None),  # Index of peak being edited
         dcc.Store(id='clear-shapes-trigger', data=0),  # Counter to trigger shape clearing
         dcc.Store(id='peak-change-trigger', data=0),  # Counter to refresh tables/overlays after peak edits
@@ -1215,11 +1214,11 @@ _layout_body = html.Div(
                 children=[
                     dmc.MenuTarget(html.Div(style={'width': '1px', 'height': '1px'})),
                     dmc.MenuDropdown([
-                        dmc.MenuItem('Deconvolute', id='ctx-deconvolve-item'),
-                        dmc.MenuItem('Integrate in All Files', id='ctx-integrate-item'),
                         dmc.MenuItem('Delete Peak', id='ctx-delete-item'),
                         dmc.MenuItem('Rename Peak', id='ctx-rename-item'),
-                    ], id='context-menu-dropdown'),
+                        dmc.MenuItem('Deconvolute', id='ctx-deconvolve-item'),
+                        dmc.MenuItem('Integrate in All Files', id='ctx-integrate-item'),
+                    ]),
                 ],
             ),
         ),
@@ -1258,8 +1257,8 @@ register_context_callbacks(app, data_manager)
 register_publication_callbacks(app, data_manager)
 register_integration_callbacks(app, data_manager)
 register_baseline_callbacks(app, data_manager)
-register_deconvolution_callbacks(app, data_manager)
 register_context_menu_callbacks(app, data_manager)
+register_deconvolution_callbacks(app, data_manager)
 register_export_callbacks(app, data_manager)
 register_calibration_callbacks(app, data_manager)
 register_plot_settings_callbacks(app, data_manager)
@@ -1302,7 +1301,22 @@ clientside_callback(
     Input('resize-init-trigger', 'id'),
 )
 
-# File-tree selection highlighting is now rendered server-side from active-file.
+# File-tree selection highlight + hidden-file dimming via clientside callback
+clientside_callback(
+    """
+    function(activeFile, hiddenFiles, _treeChildren) {
+        requestAnimationFrame(function() {
+            if (window._geckoApplyActiveFile) window._geckoApplyActiveFile(activeFile);
+            if (window._geckoApplyHiddenFiles) window._geckoApplyHiddenFiles(hiddenFiles || []);
+        });
+        return '';
+    }
+    """,
+    Output('dummy-output', 'children'),
+    [Input('active-file', 'data'),
+     Input('hidden-files', 'data'),
+     Input('file-tree', 'children')],
+)
 
 # Analysis tabs (DMC) <-> active-tab store, kept in sync both ways.
 # dmc.Tabs owns the visible panel; the store stays the source of truth for
@@ -1376,12 +1390,11 @@ def save_panel_per_tab(active_tab, plot_tab, memory):
     prevent_initial_call=True,
 )
 def restore_panel_on_tab_switch(plot_tab, memory, current_panel, figures):
-    """Auto-switch bottom panel only for custom plot tabs.
+    """Sync the bottom panel when switching plot tabs.
 
-    When the user clicks a custom plot tab, switch to its source panel
-    (e.g. across-samples).  For all other plot tabs, leave the bottom
-    panel alone — avoids overriding the user's manual panel click when
-    switch_to_raw_tab_on_panel_change auto-switches the plot tab.
+    Custom plot tabs always switch to their source panel (e.g. across-samples).
+    Raw plot tabs restore the user's last panel choice, defaulting to
+    data-overview on first visit.
     """
     if not plot_tab:
         return dash.no_update
@@ -1389,26 +1402,11 @@ def restore_panel_on_tab_switch(plot_tab, memory, current_panel, figures):
         target = figures[plot_tab].get('source_tab')
         if target and target != current_panel:
             return target
-    return dash.no_update
-
-
-@app.callback(
-    Output('active-plot-tab', 'data', allow_duplicate=True),
-    Input('active-tab', 'data'),
-    [State('plot-tabs', 'data'),
-     State('active-plot-tab', 'data')],
-    prevent_initial_call=True,
-)
-def switch_to_raw_tab_on_panel_change(active_tab, tabs, current_plot_tab):
-    """Switch to Chromatograms tab when leaving Across Samples panel."""
-    if not tabs or active_tab == 'across-samples':
         return dash.no_update
-    current = next((t for t in tabs if t['id'] == current_plot_tab), None)
-    if not current or current.get('type') != 'custom':
-        return dash.no_update
-    raw_tab = next((t for t in tabs if t.get('type') not in ('custom', 'analysis')), None)
-    if raw_tab:
-        return raw_tab['id']
+    memory = memory or {}
+    target = memory.get(plot_tab, 'data-overview')
+    if target and target != current_panel:
+        return target
     return dash.no_update
 
 

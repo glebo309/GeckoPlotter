@@ -282,24 +282,18 @@ def register_file_tree_callbacks(app: dash.Dash, data_manager: DataManager) -> N
                 table_editor, pub_data, pub_sel)
 
     @app.callback(
-        [Output({'type': 'visibility-btn', 'index': dash.dependencies.ALL}, 'children'),
-         Output({'type': 'visibility-btn', 'index': dash.dependencies.ALL}, 'style'),
-         Output('render-trigger', 'data', allow_duplicate=True),
+        [Output('render-trigger', 'data', allow_duplicate=True),
          Output('hidden-files', 'data')],
         Input({'type': 'visibility-btn', 'index': dash.dependencies.ALL}, 'n_clicks'),
-        [State({'type': 'visibility-btn', 'index': dash.dependencies.ALL}, 'children'),
-         State({'type': 'visibility-btn', 'index': dash.dependencies.ALL}, 'id'),
+        [State({'type': 'visibility-btn', 'index': dash.dependencies.ALL}, 'id'),
          State('render-trigger', 'data')],
         prevent_initial_call=True
     )
-    def handle_visibility_toggles(n_clicks_list, current_icons, button_ids, render_counter):
-        """Handle visibility toggles — update buttons, bump render-trigger,
-        and publish hidden file IDs for CSS dimming (no tree re-render)."""
+    def handle_visibility_toggles(n_clicks_list, button_ids, render_counter):
+        """Toggle visibility state, bump render-trigger, publish hidden IDs.
+        The eye icon stays unchanged; CSS dimming via clientside callback
+        handles the visual feedback (no button style changes = no layout shift)."""
         if not any(n_clicks_list):
-            raise PreventUpdate
-
-        if len(current_icons) != len(button_ids) or len(n_clicks_list) != len(button_ids):
-            log.error(f"Array length mismatch: icons={len(current_icons)}, ids={len(button_ids)}, clicks={len(n_clicks_list)}")
             raise PreventUpdate
 
         ctx = callback_context
@@ -317,78 +311,33 @@ def register_file_tree_callbacks(app: dash.Dash, data_manager: DataManager) -> N
         if not hasattr(data_manager, 'visibility_state'):
             data_manager.visibility_state = {}
 
-        current_icon = None
-        for i, button_id in enumerate(button_ids):
-            if button_id['index'] == clicked_file_id:
-                current_icon = current_icons[i] if i < len(current_icons) else '👁'
-                break
-
-        if current_icon is None:
-            log.error(f"Could not find clicked button: {clicked_file_id}")
-            raise PreventUpdate
-
-        is_visible = current_icon == '👁'
+        is_visible = data_manager.visibility_state.get(clicked_file_id, True)
         new_visibility = not is_visible
         data_manager.visibility_state[clicked_file_id] = new_visibility
 
         log.debug(f"Toggling visibility for {clicked_file_id}: {'visible' if new_visibility else 'hidden'}")
 
         bundle = data_manager.bundle_manager.get_bundle_by_id(clicked_file_id)
-        child_ids = []
-
         if bundle:
             for aux_file in bundle.auxiliary_files:
                 aux_file_id = aux_file.get('id')
                 if aux_file_id:
-                    child_ids.append(aux_file_id)
                     data_manager.visibility_state[aux_file_id] = new_visibility
         else:
             lcms_bundle = data_manager.get_lcms_bundle_by_id(clicked_file_id)
             if lcms_bundle:
                 for comp_id in lcms_bundle.get('files', []):
-                    child_ids.append(comp_id)
                     data_manager.visibility_state[comp_id] = new_visibility
             else:
                 file_data = data_manager.get_data_by_id(clicked_file_id)
                 if _is_multi_well(file_data):
                     filled_wells = file_data.get('metadata', {}).get('filled_wells', [])
                     for well in filled_wells:
-                        well_id = f"{clicked_file_id}|{well}"
-                        child_ids.append(well_id)
-                        data_manager.visibility_state[well_id] = new_visibility
+                        data_manager.visibility_state[f"{clicked_file_id}|{well}"] = new_visibility
 
-        new_icons = []
-        new_styles = []
-        hidden_ids = []
+        hidden_ids = [fid for fid, vis in data_manager.visibility_state.items() if not vis]
 
-        try:
-            for i, button_id in enumerate(button_ids):
-                button_file_id = button_id['index']
-                button_visible = data_manager.visibility_state.get(button_file_id, True)
-                button_icon = '👁' if button_visible else '🚫'
-
-                if not button_visible:
-                    hidden_ids.append(button_file_id)
-
-                new_icons.append(button_icon)
-                new_styles.append({
-                    'background': 'none',
-                    'border': 'none',
-                    'cursor': 'pointer',
-                    'padding': '0 4px',
-                    'fontSize': '14px',
-                    'width': '24px',
-                    'height': '24px',
-                    'display': 'flex',
-                    'alignItems': 'center',
-                    'justifyContent': 'center',
-                    'borderRadius': '3px'
-                })
-        except Exception as e:
-            log.error(f"Error updating button arrays: {e}")
-            raise PreventUpdate
-
-        return new_icons, new_styles, (render_counter or 0) + 1, hidden_ids
+        return (render_counter or 0) + 1, hidden_ids
 
     @app.callback(
         Output('file-tree', 'children', allow_duplicate=True),

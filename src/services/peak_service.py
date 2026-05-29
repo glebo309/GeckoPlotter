@@ -64,6 +64,7 @@ class PeakService:
     def __init__(self) -> None:
         self._peaks: Dict[str, List[Peak]] = {}
         self._color_index: int = 0
+        self._file_color_index: Dict[str, int] = {}
         self._imported_files: set = set()
         # Nested: overlay_group -> compound_gid -> color
         self._group_colors: Dict[str, Dict[str, str]] = {}
@@ -72,9 +73,11 @@ class PeakService:
     # Color cycling
     # ------------------------------------------------------------------
 
-    def _next_color(self) -> str:
-        color = OKABE_ITO_PALETTE[self._color_index % len(OKABE_ITO_PALETTE)]
-        self._color_index += 1
+    def _next_color(self, file_id: str = '') -> str:
+        """Return next color for a file. Each file starts from color[0]."""
+        idx = self._file_color_index.get(file_id, 0)
+        color = OKABE_ITO_PALETTE[idx % len(OKABE_ITO_PALETTE)]
+        self._file_color_index[file_id] = idx + 1
         return color
 
     @staticmethod
@@ -201,7 +204,7 @@ class PeakService:
                 area=area,
                 height=apex_height,
                 width=width,
-                color=self._next_color(),
+                color=self._next_color(file_id),
                 source='detected',
             )
             peak.width_half_height = self.calculate_width_at_half_height(
@@ -278,7 +281,7 @@ class PeakService:
         y_right = float(ys[-1])
         baseline = y_left + (y_right - y_left) * (xs - xs[0]) / (xs[-1] - xs[0])
         diff = ys - baseline
-        area = float(np.trapezoid(np.maximum(diff, 0), xs))
+        area = float(np.trapz(np.maximum(diff, 0), xs))
         height = float(diff.max())
 
         baseline_clamped = np.minimum(baseline, ys)
@@ -358,7 +361,7 @@ class PeakService:
                     area=r.get('area', shape['area']),
                     height=r.get('height', shape['height']),
                     width=shape['width'],
-                    color=self._next_color(),
+                    color=self._next_color(file_id),
                     source='imported',
                     poly_x=shape['poly_x'],
                     poly_y=shape['poly_y'],
@@ -377,7 +380,7 @@ class PeakService:
                     area=r.get('area', 0.0),
                     height=r.get('height', 0.0),
                     width=0.0,
-                    color=self._next_color(),
+                    color=self._next_color(file_id),
                     source='imported',
                 )
             peaks.append(peak)
@@ -475,7 +478,7 @@ class PeakService:
             area=area,
             height=apex_height,
             width=width,
-            color=self._next_color(),
+            color=self._next_color(file_id),
         )
         peak.width_half_height = self.calculate_width_at_half_height(
             signal, time_axis, peak
@@ -500,25 +503,25 @@ class PeakService:
         q1: Tuple[float, float],
         q2: Tuple[float, float],
         source: str = 'manual',
-        deconv_group: Optional[str] = None,
-        fit_params: Optional[Dict] = None,
         name: Optional[str] = None,
         label: Optional[str] = None,
+        deconv_group: Optional[str] = None,
+        fit_params: Optional[Dict] = None,
     ) -> Peak:
         """Add a manually integrated peak from baseline drawing (p-line).
 
         If a manual peak with a very close apex already exists, it is updated
         instead of creating a duplicate.
 
+        ``source`` tags the peak's origin ('manual' by default; 'cross_integrated'
+        when dropped in by the cross-file integration tool). ``name``/``label``
+        let cross-file integration inherit the source peak's compound name.
+
         Deconvolved peaks (``source='deconvolved'``) are always appended fresh
         and carry their ``deconv_group``/``fit_params`` tags — the overlap
         replacement is skipped so sibling components (which overlap by nature)
         never clobber one another. Clearing pre-existing peaks in the region is
         the caller's responsibility for deconvolution.
-
-        ``source`` tags the peak's origin ('manual' by default; 'cross_integrated'
-        when dropped in by the cross-file integration tool). ``name``/``label``
-        let cross-file integration inherit the source peak's compound name.
         """
         existing = self._peaks.get(file_id, [])
 
@@ -527,16 +530,15 @@ class PeakService:
             peak = Peak(
                 peak_id=str(uuid.uuid4()),
                 file_id=file_id,
-                name=name if name is not None else f"Peak {peak_number}",
+                name=f"Peak {peak_number}",
                 rt=apex_x,
                 rt_start=min(p_line[0][0], p_line[1][0]),
                 rt_end=max(p_line[0][0], p_line[1][0]),
                 area=area,
                 height=height,
                 width=abs(p_line[1][0] - p_line[0][0]),
-                color=self._next_color(),
+                color=self._next_color(file_id),
                 source='deconvolved',
-                label=label if label is not None else '',
                 poly_x=poly_x,
                 poly_y=poly_y,
                 p_line=p_line,
@@ -583,7 +585,7 @@ class PeakService:
             area=area,
             height=height,
             width=abs(p_line[1][0] - p_line[0][0]),
-            color=self._next_color(),
+            color=self._next_color(file_id),
             source=source,
             label=label if label is not None else '',
             poly_x=poly_x,
@@ -594,6 +596,105 @@ class PeakService:
         )
         self._peaks.setdefault(file_id, []).append(peak)
         return peak
+
+    def find_matching_peak(
+        self,
+        file_id: str,
+        target_rt: float,
+        tolerance: float,
+        signal: np.ndarray,
+        time: np.ndarray,
+        prominence_frac: float = 0.01,
+    ) -> Optional[dict]:
+        """Find and integrate the peak nearest to *target_rt* within a window.
+
+        Searches ``[target_rt - tolerance, target_rt + tolerance]`` for the
+        local maximum **closest to target_rt** (not the tallest). This ensures
+        cross-file integration matches the same compound, even when a taller
+        neighbour sits inside the tolerance window.
+
+        Walks the flanks down to the peak foot (valley or 1 % of apex height),
+        integrates against a straight baseline, and returns geometry ready for
+        ``add_baseline_peak``.
+
+        Returns a dict with apex_x, height, area, rt_start, rt_end, poly_x,
+        poly_y, p_line, q1, q2 — or ``None``.
+        """
+        signal = np.asarray(signal, dtype=float)
+        time = np.asarray(time, dtype=float)
+        if signal.size < 3:
+            return None
+
+        sig_range = float(np.ptp(signal))
+        if sig_range == 0:
+            return None
+
+        lo = target_rt - tolerance
+        hi = target_rt + tolerance
+        win_idx = np.where((time >= lo) & (time <= hi))[0]
+        if win_idx.size < 3:
+            return None
+
+        win_sig = signal[win_idx]
+        rel_peaks, _ = find_peaks(win_sig)
+        if rel_peaks.size > 0:
+            rel_rts = time[win_idx[0] + rel_peaks]
+            nearest = int(np.argmin(np.abs(rel_rts - target_rt)))
+            apex_idx = int(win_idx[0] + rel_peaks[nearest])
+        else:
+            apex_idx = int(win_idx[0] + int(np.argmax(win_sig)))
+
+        apex_h = float(signal[apex_idx])
+        if apex_h <= 0:
+            return None
+
+        base_floor = apex_h * 0.01
+        n = signal.size
+
+        left = apex_idx
+        while left > 0:
+            if signal[left] <= base_floor:
+                break
+            if signal[left - 1] > signal[left]:
+                break
+            left -= 1
+
+        right = apex_idx
+        while right < n - 1:
+            if signal[right] <= base_floor:
+                break
+            if signal[right + 1] > signal[right]:
+                break
+            right += 1
+
+        if right <= left:
+            return None
+
+        xs = time[left:right + 1]
+        ys = signal[left:right + 1]
+        y_left = float(signal[left])
+        y_right = float(signal[right])
+        baseline = y_left + (y_right - y_left) * (xs - xs[0]) / (xs[-1] - xs[0])
+        diff = ys - baseline
+        area = float(np.trapz(np.maximum(diff, 0), xs))
+        if area <= 0:
+            return None
+
+        rt_start = float(time[left])
+        rt_end = float(time[right])
+        baseline_clamped = np.minimum(baseline, ys)
+        return dict(
+            apex_x=float(time[apex_idx]),
+            height=float(diff.max()),
+            area=area,
+            rt_start=rt_start,
+            rt_end=rt_end,
+            poly_x=np.concatenate([xs, xs[::-1]]).tolist(),
+            poly_y=np.concatenate([ys, baseline_clamped[::-1]]).tolist(),
+            p_line=[(rt_start, y_left), (rt_end, y_right)],
+            q1=(rt_start, y_left),
+            q2=(rt_end, y_right),
+        )
 
     def clear_region(
         self, file_id: str, rt_lo: float, rt_hi: float, min_overlap: float = 0.5
@@ -619,110 +720,18 @@ class PeakService:
         self._peaks[file_id] = kept
         return removed
 
-    def find_matching_peak(
-        self,
-        file_id: str,
-        target_rt: float,
-        tolerance: float,
-        signal: np.ndarray,
-        time: np.ndarray,
-        prominence_frac: float = 0.01,
-    ) -> Optional[dict]:
-        """Find and integrate the most prominent peak within an RT window.
-
-        Searches ``[target_rt - tolerance, target_rt + tolerance]`` for the most
-        prominent local maximum (``scipy.signal.find_peaks`` with a prominence
-        floor of ``prominence_frac`` of the signal range). If none is found above
-        that floor, returns ``None`` — no phantom peaks. Otherwise walks the peak
-        flanks to boundaries (valley or 5% of apex height), integrates against a
-        straight baseline, and returns geometry ready for ``add_baseline_peak``.
-
-        Returns a dict with apex_x, height, area, rt_start, rt_end, poly_x,
-        poly_y, p_line, q1, q2 — or ``None``.
-        """
-        signal = np.asarray(signal, dtype=float)
-        time = np.asarray(time, dtype=float)
-        if signal.size < 3:
-            return None
-
-        sig_range = float(np.ptp(signal))
-        if sig_range == 0:
-            return None
-
-        lo = target_rt - tolerance
-        hi = target_rt + tolerance
-        win_idx = np.where((time >= lo) & (time <= hi))[0]
-        if win_idx.size < 3:
-            return None
-
-        win_sig = signal[win_idx]
-        prominence = sig_range * prominence_frac
-        rel_peaks, props = find_peaks(win_sig, prominence=prominence)
-        if rel_peaks.size == 0:
-            return None
-
-        # Most prominent local maximum within the window.
-        best = rel_peaks[int(np.argmax(props['prominences']))]
-        apex_idx = int(win_idx[0] + best)
-        apex_h = float(signal[apex_idx])
-        floor = apex_h * 0.05
-
-        # Walk down the flanks until a valley (signal turns upward) or floor.
-        left = apex_idx
-        while left > 1:
-            if signal[left - 1] > signal[left]:
-                break
-            if signal[left] < floor:
-                break
-            left -= 1
-
-        right = apex_idx
-        while right < len(signal) - 2:
-            if signal[right + 1] > signal[right]:
-                break
-            if signal[right] < floor:
-                break
-            right += 1
-
-        if right <= left:
-            return None
-
-        xs = time[left:right + 1]
-        ys = signal[left:right + 1]
-        y_left = float(signal[left])
-        y_right = float(signal[right])
-        baseline = y_left + (y_right - y_left) * (xs - xs[0]) / (xs[-1] - xs[0])
-        diff = ys - baseline
-        area = float(np.trapezoid(np.maximum(diff, 0), xs))
-        if area <= 0:
-            return None
-
-        rt_start = float(time[left])
-        rt_end = float(time[right])
-        baseline_clamped = np.minimum(baseline, ys)
-        return dict(
-            apex_x=float(time[apex_idx]),
-            height=float(diff.max()),
-            area=area,
-            rt_start=rt_start,
-            rt_end=rt_end,
-            poly_x=np.concatenate([xs, xs[::-1]]).tolist(),
-            poly_y=np.concatenate([ys, baseline_clamped[::-1]]).tolist(),
-            p_line=[(rt_start, y_left), (rt_end, y_right)],
-            q1=(rt_start, y_left),
-            q2=(rt_end, y_right),
-        )
-
     def clear_peaks(self, file_id: str) -> None:
         """Remove all peaks for a bundle."""
         self._peaks.pop(file_id, None)
         self._imported_files.discard(file_id)
+        self._file_color_index.pop(file_id, None)
 
     def clear_all_peaks(self) -> None:
         """Remove every peak. Used when all files are deleted."""
         self._peaks.clear()
         self._imported_files.clear()
         self._color_index = 0
+        self._file_color_index.clear()
         self._group_colors.clear()  # clears entire nested dict
 
     def clear_manual_peaks(self, file_id: str) -> None:
@@ -902,13 +911,7 @@ class PeakService:
                 if gid in og_colors:
                     color = og_colors[gid]
                 else:
-                    color_idx = hash(gid) % len(OKABE_ITO_PALETTE)
-                    if OKABE_ITO_PALETTE[color_idx] in used_colors:
-                        for offset in range(1, len(OKABE_ITO_PALETTE)):
-                            candidate = (color_idx + offset) % len(OKABE_ITO_PALETTE)
-                            if OKABE_ITO_PALETTE[candidate] not in used_colors:
-                                color_idx = candidate
-                                break
+                    color_idx = len(og_colors) % len(OKABE_ITO_PALETTE)
                     color = OKABE_ITO_PALETTE[color_idx]
                     og_colors[gid] = color
 
@@ -967,7 +970,7 @@ class PeakService:
         if baseline is not None:
             s_seg = s_seg - baseline[mask]
 
-        area = float(np.trapezoid(s_seg, t_seg))
+        area = float(np.trapz(s_seg, t_seg))
         return max(area, 0.0)
 
     @staticmethod
@@ -1104,6 +1107,7 @@ class PeakService:
         """Serialize all peak data for persistence (JSON-compatible)."""
         return {
             "color_index": self._color_index,
+            "file_color_index": self._file_color_index,
             "group_colors": self._group_colors,  # nested dict, JSON-safe
             "peaks": {
                 fid: [asdict(p) for p in pks]
@@ -1114,6 +1118,7 @@ class PeakService:
     def deserialize(self, data: dict) -> None:
         """Restore peak data from a previously serialized dict."""
         self._color_index = data.get("color_index", 0)
+        self._file_color_index = data.get("file_color_index", {})
         # Support both old flat format and new nested format
         raw_gc = data.get("group_colors", {})
         if raw_gc and isinstance(next(iter(raw_gc.values()), None), str):

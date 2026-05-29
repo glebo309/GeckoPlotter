@@ -49,17 +49,11 @@ def _snap_to_local_max(x, y, clicked_x):
 
 
 def _find_peak(data_manager, file_id, peak_id):
-    """Look up a Peak by ID from the peak service."""
-    return next((p for p in data_manager.peak_service.get_peaks(file_id)
-                 if p.peak_id == peak_id), None)
-
-
-def _find_peak_anywhere(data_manager, peak_id):
-    """Return (file_id, Peak) for a peak id from any loaded file."""
+    """Look up a Peak by ID. Searches all files so subplot mode works."""
     for fid, peaks in data_manager.peak_service.get_all_peaks().items():
-        for peak in peaks:
-            if peak.peak_id == peak_id:
-                return fid, peak
+        for p in peaks:
+            if p.peak_id == peak_id:
+                return fid, p
     return None, None
 
 
@@ -126,10 +120,33 @@ def _run_detect_and_fit(x_region, y_region):
     return markers, payload
 
 
+def _apply_deconv(data_manager, result, active_file, selected_peak_id):
+    """Replace the selected peak with the fitted sub-peaks. Returns the count."""
+    region_rt = float(np.mean([c.center for c in result.components]))
+    new_peaks = _svc.result_to_peaks(result, active_file, region_rt)
+    if not new_peaks:
+        return 0
+    if selected_peak_id:
+        data_manager.peak_service.remove_peak(active_file, selected_peak_id)
+    for p in new_peaks:
+        data_manager.peak_service.add_baseline_peak(
+            file_id=active_file,
+            area=p.area, height=p.height, apex_x=p.rt,
+            poly_x=p.poly_x, poly_y=p.poly_y,
+            p_line=p.p_line, q1=p.q1, q2=p.q2,
+            source='deconvolved',
+            deconv_group=p.deconv_group,
+            fit_params=p.fit_params,
+        )
+    data_manager.peak_service.group_peaks_across_samples(
+        file_overlay_map=data_manager.build_file_overlay_map())
+    return len(new_peaks)
+
+
 def register_deconvolution_callbacks(app: dash.Dash, data_manager) -> None:
     """Register all deconvolution callbacks."""
 
-    # ── Deconvolute button: detect + fit in one shot ─────────────────
+    # ── Deconvolute: toolbox button (preview) or right-click (auto-accept)
     @app.callback(
         [Output('baseline-mode', 'data', allow_duplicate=True),
          Output('deconv-markers', 'data', allow_duplicate=True),
@@ -139,68 +156,71 @@ def register_deconvolution_callbacks(app: dash.Dash, data_manager) -> None:
          Output('deconv-cancel-btn', 'style', allow_duplicate=True),
          Output('selected-peak-idx', 'data', allow_duplicate=True),
          Output('context-menu', 'opened', allow_duplicate=True),
-         Output('render-trigger', 'data', allow_duplicate=True)],
+         Output('render-trigger', 'data', allow_duplicate=True),
+         Output('peak-change-trigger', 'data', allow_duplicate=True)],
         [Input('deconv-btn', 'n_clicks'),
          Input('ctx-deconvolve-item', 'n_clicks')],
         [State('selected-peak-idx', 'data'),
          State('active-file', 'data'),
          State('context-menu-store', 'data'),
-         State('render-trigger', 'data')],
+         State('render-trigger', 'data'),
+         State('peak-change-trigger', 'data')],
         prevent_initial_call=True,
     )
-    def deconvolute(button_clicks, context_clicks, selected_peak_id, active_file, context_store, render_counter):
+    def deconvolute(button_clicks, context_clicks, selected_peak_id, active_file,
+                    context_store, render_counter, peak_counter):
         triggered = dash.callback_context.triggered_id
-        if triggered == 'ctx-deconvolve-item':
+        from_context = triggered == 'ctx-deconvolve-item'
+        if from_context:
             if not context_clicks or not context_store or not context_store.get('peak_id'):
                 raise PreventUpdate
             selected_peak_id = context_store['peak_id']
-            active_file, peak = _find_peak_anywhere(data_manager, selected_peak_id)
         else:
             if not button_clicks:
                 raise PreventUpdate
-            peak = _find_peak(data_manager, active_file, selected_peak_id) if active_file and selected_peak_id else None
 
-        close_context_menu = False if triggered == 'ctx-deconvolve-item' else dash.no_update
+        peak_fid, peak = _find_peak(data_manager, active_file, selected_peak_id) if selected_peak_id else (None, None)
 
-        if not selected_peak_id or not active_file:
-            msg = html.Div('Select a peak first.',
-                           style={'fontSize': '11px', 'color': '#888'})
-            return dash.no_update, dash.no_update, dash.no_update, msg, _BTN_HIDE, _BTN_HIDE, dash.no_update, close_context_menu, dash.no_update
-
-        if peak is None:
-            msg = html.Div('Peak not found. Select a peak first.',
-                           style={'fontSize': '11px', 'color': '#c62828'})
-            return dash.no_update, dash.no_update, dash.no_update, msg, _BTN_HIDE, _BTN_HIDE, dash.no_update, close_context_menu, dash.no_update
-
-        if not button_clicks and triggered != 'ctx-deconvolve-item':
-            raise PreventUpdate
-
+        close_menu = False if from_context else dash.no_update
         no = dash.no_update
 
-        x_region, y_region = _extract_peak_region(data_manager, active_file, peak)
+        def fail(text, color='#c62828'):
+            msg = html.Div(text, style={'fontSize': '11px', 'color': color})
+            return no, no, no, msg, _BTN_HIDE, _BTN_HIDE, no, close_menu, no, no
+
+        if not selected_peak_id:
+            return fail('Select a peak first.', '#888')
+        if peak is None:
+            return fail('Peak not found. Select a peak first.')
+
+        x_region, y_region = _extract_peak_region(data_manager, peak_fid, peak)
         if x_region is None or len(x_region) < 10:
-            msg = html.Div('Peak region too narrow for deconvolution.',
-                           style={'fontSize': '11px', 'color': '#c62828'})
-            return no, no, no, msg, _BTN_HIDE, _BTN_HIDE, selected_peak_id, close_context_menu, no
+            return fail('Peak region too narrow for deconvolution.')
 
         try:
             markers, payload = _run_detect_and_fit(x_region, y_region)
         except Exception:
             log.exception("Deconvolution fit failed")
-            msg = html.Div('Fit failed — try a wider peak region.',
-                           style={'fontSize': '11px', 'color': '#c62828'})
-            return no, no, no, msg, _BTN_HIDE, _BTN_HIDE, selected_peak_id, close_context_menu, no
+            return fail('Fit failed — try a wider peak region.')
 
         if markers is None:
-            msg = html.Div('Could not detect multiple peaks in this region.',
-                           style={'fontSize': '11px', 'color': '#c62828'})
-            return no, no, no, msg, _BTN_HIDE, _BTN_HIDE, selected_peak_id, close_context_menu, no
+            return fail('Could not detect multiple peaks in this region.')
 
-        log.debug(f"deconvolute: {len(markers)} components, R²={payload['r_squared']:.4f}")
-        return ('deconvolve', markers, payload,
-                _build_results_display(payload),
-                _BTN_SHOW, _BTN_SHOW, selected_peak_id, close_context_menu,
-                (render_counter or 0) + 1)
+        # Right-click: auto-accept immediately, no preview step.
+        if from_context:
+            result = deserialize_result(payload)
+            n = _apply_deconv(data_manager, result, peak_fid, selected_peak_id)
+            if not n:
+                return fail('Deconvolution produced no peaks.')
+            log.debug(f"deconvolute (auto, right-click): {n} sub-peaks")
+            return ('navigate', [], None, html.Div(), _BTN_HIDE, _BTN_HIDE,
+                    None, close_menu, (render_counter or 0) + 1, (peak_counter or 0) + 1)
+
+        # Toolbox button: show preview (table + on-plot markers), user clicks Accept.
+        log.debug(f"deconvolute (preview): {len(markers)} components, R²={payload['r_squared']:.4f}")
+        return ('deconvolve', markers, payload, _build_results_display(payload),
+                _BTN_SHOW, _BTN_SHOW, selected_peak_id, close_menu,
+                (render_counter or 0) + 1, no)
 
     # ── Marker add/remove + auto-refit ───────────────────────────────
     @app.callback(
@@ -217,17 +237,17 @@ def register_deconvolution_callbacks(app: dash.Dash, data_manager) -> None:
         prevent_initial_call=True,
     )
     def marker_click_and_refit(click, markers, active_file, selected_peak_id, mode, render_counter):
-        if mode != 'deconvolve' or not click or not active_file or not selected_peak_id:
+        if mode != 'deconvolve' or not click or not selected_peak_id:
             raise PreventUpdate
         clicked_x = click.get('x')
         if clicked_x is None:
             raise PreventUpdate
 
-        peak = _find_peak(data_manager, active_file, selected_peak_id)
+        peak_fid, peak = _find_peak(data_manager, active_file, selected_peak_id)
         if peak is None:
             raise PreventUpdate
 
-        x_region, y_region = _extract_peak_region(data_manager, active_file, peak)
+        x_region, y_region = _extract_peak_region(data_manager, peak_fid, peak)
         if x_region is None:
             raise PreventUpdate
 
@@ -284,33 +304,15 @@ def register_deconvolution_callbacks(app: dash.Dash, data_manager) -> None:
         prevent_initial_call=True,
     )
     def accept(n_clicks, result_payload, active_file, selected_peak_id, peak_counter, render_counter):
-        if not n_clicks or not result_payload or not active_file:
+        if not n_clicks or not result_payload:
             raise PreventUpdate
 
+        peak_fid, _ = _find_peak(data_manager, active_file, selected_peak_id) if selected_peak_id else (active_file, None)
         result = deserialize_result(result_payload)
-        region_rt = float(np.mean([c.center for c in result.components]))
-        new_peaks = _svc.result_to_peaks(result, active_file, region_rt)
-        if not new_peaks:
+        n = _apply_deconv(data_manager, result, peak_fid or active_file, selected_peak_id)
+        if not n:
             raise PreventUpdate
-
-        # Remove the original selected peak
-        if selected_peak_id:
-            data_manager.peak_service.remove_peak(active_file, selected_peak_id)
-
-        for p in new_peaks:
-            data_manager.peak_service.add_baseline_peak(
-                file_id=active_file,
-                area=p.area, height=p.height, apex_x=p.rt,
-                poly_x=p.poly_x, poly_y=p.poly_y,
-                p_line=p.p_line, q1=p.q1, q2=p.q2,
-                source='deconvolved',
-                deconv_group=p.deconv_group,
-                fit_params=p.fit_params,
-            )
-
-        data_manager.peak_service.group_peaks_across_samples(
-            file_overlay_map=data_manager.build_file_overlay_map())
-        log.debug(f"accept: replaced peak {selected_peak_id} with {len(new_peaks)} sub-peaks")
+        log.debug(f"accept: replaced peak {selected_peak_id} with {n} sub-peaks")
 
         status = html.Div('Select a peak first.',
                           style={'fontSize': '11px', 'color': '#888'})

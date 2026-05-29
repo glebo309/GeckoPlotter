@@ -908,6 +908,48 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
         # active-file change triggers auto_switch_tab which triggers render.
         return dash.no_update, file_id, None, data_table, table_editor, pub_data
 
+    @app.callback(
+        [Output('table-editor-container', 'children', allow_duplicate=True),
+         Output('pub-data-store', 'data', allow_duplicate=True),
+         Output('metadata-container', 'children', allow_duplicate=True)],
+        Input('active-file', 'data'),
+        State('active-tab', 'data'),
+        prevent_initial_call=True,
+    )
+    def sync_table_to_active_file(active_file, active_tab):
+        """Keep Data Overview table in sync whenever the active file changes.
+
+        handle_file_selection only fires on tree clicks — this covers
+        programmatic active-file changes (tab switches, initial load).
+        """
+        if not active_file:
+            return dash.no_update, dash.no_update, dash.no_update
+
+        file_data = data_manager.get_data_by_id(active_file)
+        if not file_data:
+            return dash.no_update, dash.no_update, dash.no_update
+
+        on_shared_tab = active_tab in ('peak-analysis', 'across-samples')
+
+        table_data = prepare_table_data(file_data, file_id=active_file)
+        sheet_names = file_data.get('metadata', {}).get('sheet_names')
+        active_sheet = file_data.get('metadata', {}).get('active_sheet')
+        table_editor = create_data_table_editor(
+            table_data, table_id='pub-table',
+            sheet_names=sheet_names, active_sheet=active_sheet,
+        )
+        pub_data = dash.no_update
+        if not on_shared_tab:
+            pub_data = table_data.to_json(orient='split') if table_data is not None else None
+
+        bundle = data_manager.get_bundle_by_id(active_file)
+        if bundle:
+            metadata_table = create_bundle_data_table(bundle, file_data, data_manager)
+        else:
+            metadata_table = create_data_table(file_data)
+
+        return table_editor, pub_data, metadata_table
+
     # ---- Sheet tab switching for multi-sheet Excel files ----
     @app.callback(
         [Output('render-trigger', 'data', allow_duplicate=True),

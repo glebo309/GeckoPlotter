@@ -563,6 +563,7 @@ def register_baseline_callbacks(app: dash.Dash, data_manager) -> None:
         if not peak_id:
             raise PreventUpdate
 
+        log.info(f"🎯 peak selected via hit-test: {peak_id}, stacked={_is_stacked(plot_settings)}")
         if _is_stacked(plot_settings):
             return peak_id, dash.no_update, (render_counter or 0) + 1
 
@@ -759,15 +760,16 @@ def register_baseline_callbacks(app: dash.Dash, data_manager) -> None:
                                  current_figure, peak_counter, plot_settings,
                                  render_counter, view_mode):
         """Delete the currently selected peak when Backspace/Delete is pressed."""
+        log.info(f"⌨️ keyboard-delete fired: trigger={trigger}, selected={selected_peak_id}, active={active_file}")
         if not trigger or not selected_peak_id or not active_file:
             raise PreventUpdate
 
         peak_fid = _find_peak_file_id(data_manager.peak_service, selected_peak_id)
         if peak_fid is None:
-            log.debug(f"keyboard delete: selected peak not found: {selected_peak_id}")
+            log.info(f"⌨️ keyboard delete: peak {selected_peak_id} not found in any file")
             raise PreventUpdate
 
-        log.debug(f"keyboard delete: peak_fid={peak_fid}, active={active_file}, selected={selected_peak_id}")
+        log.info(f"⌨️ keyboard delete: removing peak from {peak_fid} (active={active_file})")
         data_manager.peak_service.remove_peak(peak_fid, selected_peak_id)
         data_manager.peak_service.group_peaks_across_samples(
             file_overlay_map=data_manager.build_file_overlay_map())

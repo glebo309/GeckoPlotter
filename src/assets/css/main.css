@@ -203,12 +203,14 @@ body {
 
 /* File tree selection highlighting */
 .file-tree-item.selected {
-    background-color: #fff5f0 !important;
-    border: 1px solid #ff6b35 !important;
+    background-color: #fff0e6 !important;
+    border-left: 3px solid #ff6b35 !important;
+    font-weight: 600 !important;
 }
 
-.file-tree-item.selected .bundle-name {
-    color: #ff6b35 !important;
+/* Hidden (eye-toggled) files */
+.file-hidden {
+    opacity: 0.35 !important;
 }
 
 /* Tab Styles */
@@ -312,9 +314,8 @@ div:hover > div > .tree-action-group {
     opacity: 1;
 }
 
-.file-tree-item.selected {
-    background: #ff6b35;
-    color: #333333;  /* Changed from #ffffff to dark text for readability */
+.file-tree-item.selected:hover {
+    background-color: #ffe8d6 !important;
 }
 
 .file-tree-icon {

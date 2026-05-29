@@ -189,19 +189,6 @@
         return true;
     }
 
-    function publishDeconvMarkerClick(x) {
-        var dashClientside = window.dash_clientside ||
-            (window.parent && window.parent !== window ? window.parent.dash_clientside : null);
-        if (x === null || x === undefined ||
-            !dashClientside || typeof dashClientside.set_props !== 'function') {
-            return false;
-        }
-        dashClientside.set_props('deconv-marker-click-store', {
-            data: { x: x, ts: Date.now() }
-        });
-        return true;
-    }
-
     function publishContextMenu(peakId, clientX, clientY) {
         var dashClientside = window.dash_clientside ||
             (window.parent && window.parent !== window ? window.parent.dash_clientside : null);
@@ -214,24 +201,17 @@
         return true;
     }
 
-    function publishContextMenuClose(reason) {
+    function publishDeconvMarkerClick(x) {
         var dashClientside = window.dash_clientside ||
             (window.parent && window.parent !== window ? window.parent.dash_clientside : null);
-        if (!dashClientside || typeof dashClientside.set_props !== 'function') {
+        if (x === null || x === undefined ||
+            !dashClientside || typeof dashClientside.set_props !== 'function') {
             return false;
         }
-        dashClientside.set_props('context-menu-close-store', {
-            data: { reason: reason || 'outside', ts: Date.now() }
+        dashClientside.set_props('deconv-marker-click-store', {
+            data: { x: x, ts: Date.now() }
         });
         return true;
-    }
-
-    function isContextMenuTarget(event) {
-        if (!event || !event.target || typeof event.target.closest !== 'function') return false;
-        return !!event.target.closest(
-            '#context-menu-dropdown, #context-menu-anchor, #ctx-rename-modal, ' +
-            '[id^="ctx-"], [role="menu"], .mantine-Menu-dropdown'
-        );
     }
 
     function resetAxes(gd) {
@@ -733,18 +713,6 @@
             };
             document.addEventListener('pointerdown', consumeBlankBeforePlotly, true);
             document.addEventListener('mousedown', consumeMouseBeforePlotly, true);
-            document.addEventListener('click', function (event) {
-                if (!event || isContextMenuTarget(event)) return;
-                if (!document.getElementById('context-menu-dropdown')) return;
-                window.setTimeout(function () {
-                    publishContextMenuClose('outside');
-                }, 0);
-            });
-            document.addEventListener('keydown', function (event) {
-                if (!event || event.key !== 'Escape') return;
-                if (!document.getElementById('context-menu-dropdown')) return;
-                publishContextMenuClose('escape');
-            }, true);
             document.addEventListener('keydown', syncMomentaryDrawButton, true);
             document.addEventListener('keyup', syncMomentaryDrawButton, true);
             window.addEventListener('blur', function () {
