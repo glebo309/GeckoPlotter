@@ -811,7 +811,7 @@ _layout_body = html.Div(
                                                     # Peak Analysis Tab
                                                     dmc.TabsPanel(value="peak-analysis", style={'flex': '1', 'overflow': 'auto'}, children=[
                                                     html.Div(id="peak-analysis-content", className="tab-content", style={
-                                                        'display': 'none',
+                                                        'display': 'block',
                                                         'padding': '15px',
                                                         'height': '100%',
                                                         'overflowY': 'auto'
@@ -840,7 +840,7 @@ _layout_body = html.Div(
                                                     # Across Samples Tab
                                                     dmc.TabsPanel(value="across-samples", style={'flex': '1', 'overflow': 'auto'}, children=[
                                                     html.Div(id="across-samples-content", className="tab-content", style={
-                                                        'display': 'none',
+                                                        'display': 'block',
                                                         'padding': '15px',
                                                         'height': '100%',
                                                         'overflowY': 'auto'
@@ -904,7 +904,7 @@ _layout_body = html.Div(
                                                     # Metadata Tab
                                                     dmc.TabsPanel(value="metadata", style={'flex': '1', 'overflow': 'auto'}, children=[
                                                     html.Div(id="metadata-content", className="tab-content", style={
-                                                        'display': 'none',
+                                                        'display': 'block',
                                                         'padding': '0',
                                                         'height': '100%',
                                                         'overflowY': 'auto'
@@ -931,7 +931,7 @@ _layout_body = html.Div(
                                                     # Calibration Tab
                                                     dmc.TabsPanel(value="calibration", style={'flex': '1', 'overflow': 'auto'}, children=[
                                                     html.Div(id="calibration-content", className="tab-content", style={
-                                                        'display': 'none',
+                                                        'display': 'block',
                                                         'padding': '15px',
                                                         'height': '100%',
                                                         'overflowY': 'auto'
@@ -1031,7 +1031,7 @@ _layout_body = html.Div(
                                                     # MS Viewer Tab
                                                     dmc.TabsPanel(value="ms-viewer", style={'flex': '1', 'overflow': 'auto'}, children=[
                                                     html.Div(id="ms-viewer-content", className="tab-content", style={
-                                                        'display': 'none',
+                                                        'display': 'block',
                                                         'padding': '15px',
                                                         'height': '100%',
                                                         'overflowY': 'auto'
