@@ -218,30 +218,6 @@ body {
     background-color: #f8f9fa;
 }
 
-.tab-button {
-    background: none;
-    border: none;
-    padding: 10px 20px;
-    cursor: pointer;
-    color: #666;
-    font-size: 14px;
-    font-weight: 500;
-    transition: all 0.2s;
-    border-bottom: 2px solid transparent;
-    margin-bottom: -1px;
-}
-
-.tab-button:hover {
-    background-color: #f0f0f0;
-    color: #333;
-}
-
-.tab-button.active {
-    color: #ff6b35;
-    border-bottom: 2px solid #ff6b35;
-    background-color: #ffffff;
-}
-
 .tab-content {
     display: none;
     height: 100%;
@@ -369,28 +345,6 @@ div:hover > div > .tree-action-group {
     display: flex;
     background: #f1f3f4;
     border-bottom: 1px solid #e0e0e0;
-}
-
-.tab-button {
-    padding: 8px 16px;
-    background: transparent;
-    border: none;
-    cursor: pointer;
-    font-size: 13px;
-    color: #666666;
-    transition: all 0.2s;
-    border-bottom: 2px solid transparent;
-}
-
-.tab-button:hover {
-    color: #333333;
-    background: rgba(0,0,0,0.05);
-}
-
-.tab-button.active {
-    color: #ff6b35;
-    border-bottom-color: #ff6b35;
-    font-weight: 500;
 }
 
 /* Tab Content */
@@ -701,30 +655,6 @@ button[id*="collapse-btn"]:active {
     display: flex;
     border-bottom: 1px solid #e0e0e0;
     background-color: #f8f9fa;
-}
-
-.toolbox-tab-button {
-    flex: 1;
-    padding: 8px 12px;
-    background: none;
-    border: none;
-    color: #666;
-    font-size: 12px;
-    cursor: pointer;
-    transition: all 0.2s;
-    border-bottom: 2px solid transparent;
-}
-
-.toolbox-tab-button:hover {
-    background-color: #f0f0f0;
-    color: #333;
-}
-
-.toolbox-tab-button.active {
-    color: #ff6b35;
-    border-bottom-color: #ff6b35;
-    background-color: #ffffff;
-    font-weight: 500;
 }
 
 .toolbox-tab-content {
