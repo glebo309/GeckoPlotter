@@ -8,6 +8,10 @@ import logging
 from dash import dash_table, html, dcc
 import pandas as pd
 
+from components.table_styles import (
+    TABLE_STYLE_TABLE, TABLE_STYLE_CELL, TABLE_STYLE_HEADER, TABLE_STYLE_DATA,
+)
+
 
 
 log = logging.getLogger(__name__)
@@ -119,35 +123,13 @@ def create_data_table_editor(df=None, table_id='pub-table', default_selected_col
             row_deletable=True,
             sort_action='native',
             selected_columns=sel_cols if sel_cols else [],
-            style_table={
-                'overflowX': 'auto',
-                'overflowY': 'auto',
-                'maxHeight': '500px',
-            },
-            style_cell={
-                'textAlign': 'center',
-                'padding': '6px',
-                'fontSize': '11px',
-                'fontFamily': 'monospace',
-                'minWidth': '80px',
-                'whiteSpace': 'normal',
-            },
-            style_header={
-                'backgroundColor': '#37474F',
-                'color': 'white',
-                'fontWeight': '600',
-                'fontSize': '11px',
-                'padding': '10px',
-                'cursor': 'pointer',
-                'textDecoration': 'underline dotted',
-                'textUnderlineOffset': '3px',
-            },
+            style_table=TABLE_STYLE_TABLE,
+            style_cell=TABLE_STYLE_CELL,
+            style_header=TABLE_STYLE_HEADER,
             style_header_conditional=[
                 {'if': {'column_id': '_row_id'}, 'display': 'none'}
             ],
-            style_data={
-                'border': '1px solid #e0e0e0',
-            },
+            style_data=TABLE_STYLE_DATA,
             style_cell_conditional=[
                 {'if': {'column_id': '_row_id'}, 'display': 'none'}
             ],

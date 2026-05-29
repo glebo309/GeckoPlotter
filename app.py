@@ -31,6 +31,7 @@ from callbacks.viz_callbacks import register_viz_callbacks
 from callbacks.file_tree_callbacks import register_file_tree_callbacks
 from components.axis_mapper import create_axis_mapper_layout
 from components.data_table_editor import create_data_table_editor
+from components.table_styles import TABLE_STYLE_CELL, TABLE_STYLE_HEADER, TABLE_STYLE_DATA
 from callbacks.publication_callbacks import register_publication_callbacks
 from callbacks.integration_callbacks import register_integration_callbacks
 from callbacks.baseline_callbacks import register_baseline_callbacks
@@ -842,10 +843,10 @@ _layout_body = html.Div(
                                                                 row_deletable=True,
                                                                 sort_action='native',
                                                                 style_table={'display': 'none'},
-                                                                style_cell={'textAlign': 'center', 'padding': '6px', 'fontSize': '11px', 'fontFamily': 'monospace', 'minWidth': '80px', 'whiteSpace': 'normal'},
-                                                                style_header={'backgroundColor': '#37474F', 'color': 'white', 'fontWeight': '600', 'fontSize': '11px', 'padding': '10px', 'cursor': 'pointer', 'textDecoration': 'underline dotted', 'textUnderlineOffset': '3px'},
+                                                                style_cell=TABLE_STYLE_CELL,
+                                                                style_header=TABLE_STYLE_HEADER,
                                                                 style_header_conditional=[{'if': {'column_id': '_row_id'}, 'display': 'none'}],
-                                                                style_data={'border': '1px solid #e0e0e0'},
+                                                                style_data=TABLE_STYLE_DATA,
                                                                 style_cell_conditional=[{'if': {'column_id': '_row_id'}, 'display': 'none'}],
                                                                 style_data_conditional=[{'if': {'column_id': '_row_id'}, 'display': 'none'}],
                                                             ),
@@ -903,10 +904,10 @@ _layout_body = html.Div(
                                                             row_deletable=True,
                                                             sort_action='native',
                                                             style_table={'display': 'none'},
-                                                            style_cell={'textAlign': 'center', 'padding': '6px', 'fontSize': '11px', 'fontFamily': 'monospace', 'minWidth': '80px', 'whiteSpace': 'normal'},
-                                                            style_header={'backgroundColor': '#37474F', 'color': 'white', 'fontWeight': '600', 'fontSize': '11px', 'padding': '10px', 'cursor': 'pointer', 'textDecoration': 'underline dotted', 'textUnderlineOffset': '3px'},
+                                                            style_cell=TABLE_STYLE_CELL,
+                                                            style_header=TABLE_STYLE_HEADER,
                                                             style_header_conditional=[{'if': {'column_id': '_row_id'}, 'display': 'none'}],
-                                                            style_data={'border': '1px solid #e0e0e0'},
+                                                            style_data=TABLE_STYLE_DATA,
                                                             style_cell_conditional=[{'if': {'column_id': '_row_id'}, 'display': 'none'}],
                                                             style_data_conditional=[{'if': {'column_id': '_row_id'}, 'display': 'none'}],
                                                         ),

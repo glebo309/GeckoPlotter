@@ -705,3 +705,32 @@ button[id*="collapse-btn"]:active {
     color: white !important;
     border-color: #ff6b35 !important;
 }
+
+/* ── Modern DataTable polish (engine unchanged) ─────────────── */
+/* Clip rows to the rounded container border set via style_table. */
+.dash-spreadsheet-container .dash-spreadsheet-inner {
+    border-radius: 8px;
+}
+/* Subtler, hover-revealed sort affordance. */
+.dash-spreadsheet-container .column-header--sort {
+    opacity: 0.4;
+    transition: opacity 0.15s;
+}
+.dash-spreadsheet-container th:hover .column-header--sort {
+    opacity: 0.9;
+}
+/* Slim modern scrollbars within tables. */
+.dash-spreadsheet-container ::-webkit-scrollbar {
+    width: 9px;
+    height: 9px;
+}
+.dash-spreadsheet-container ::-webkit-scrollbar-thumb {
+    background: #cbd3dd;
+    border-radius: 6px;
+}
+.dash-spreadsheet-container ::-webkit-scrollbar-thumb:hover {
+    background: #aab4c2;
+}
+.dash-spreadsheet-container ::-webkit-scrollbar-track {
+    background: transparent;
+}
