@@ -4,6 +4,7 @@ Axis Mapping Component for Publication-Quality Plots
 
 from dash import html, dcc
 import dash
+import dash_mantine_components as dmc
 
 OKABE_ITO = ["#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7"]
 
@@ -67,7 +68,7 @@ def create_axis_mapper_layout():
         html.Div([
             html.Div([
                 html.Label('Label', className='form-label'),
-                dcc.Input(id='x-label-input', value='X', className='form-input', style={'width': '100%'}),
+                dmc.TextInput(id='x-label-input', value='X', size='xs', style={'width': '100%'}),
             ], style={'flex': '1'}),
             html.Div([
                 html.Label('Data', className='form-label'),
@@ -84,7 +85,7 @@ def create_axis_mapper_layout():
         html.Div([
             html.Div([
                 html.Label('Label', className='form-label'),
-                dcc.Input(id='y1-label-input', value='Y1', className='form-input', style={'width': '100%'}),
+                dmc.TextInput(id='y1-label-input', value='Y1', size='xs', style={'width': '100%'}),
             ], style={'flex': '1'}),
         ], style={'display': 'flex', 'gap': '8px', 'marginBottom': '6px'}),
         html.Div(id='y1-series-container'),
@@ -101,14 +102,13 @@ def create_axis_mapper_layout():
             html.Button("Select cells", id='btn-y1-error', style=selector_button_style('y1')),
         ], style={'marginBottom': '6px'}),
         html.Div([
-            dcc.Checklist(id='y1-stats', options=[
-                {'label': ' Mean ± SD', 'value': 'mean_sd'},
-                {'label': ' Mean ± SEM', 'value': 'mean_sem'},
-                {'label': ' Median ± IQR', 'value': 'median_iqr'},
-            ], value=[], style={'fontSize': '12px'}),
-            dcc.Checklist(id='show-raw-points',
-                options=[{'label': ' Show raw points', 'value': 'show'}],
-                value=[], style={'fontSize': '12px', 'marginTop': '2px'}),
+            dmc.CheckboxGroup(id='y1-stats', value=[], children=dmc.Stack([
+                dmc.Checkbox(label='Mean ± SD', value='mean_sd'),
+                dmc.Checkbox(label='Mean ± SEM', value='mean_sem'),
+                dmc.Checkbox(label='Median ± IQR', value='median_iqr'),
+            ], gap=4)),
+            dmc.Switch(id='show-raw-points', label='Show raw points',
+                       checked=False, size='sm', mt=2),
         ], style={'marginBottom': '6px'}),
         html.Button("✕ Clear", id='clear-y1',
             style={'padding': '2px 8px', 'fontSize': '10px', 'marginBottom': '10px',
@@ -118,13 +118,13 @@ def create_axis_mapper_layout():
         # Y₂-Axis (Secondary)
         html.Div([
             html.Span('Y₂-Axis (Secondary)', style={'fontSize': '14px', 'fontWeight': '600', 'color': '#333'}),
-            dcc.Checklist(id='y2-enable', options=[{'label': ' Enable', 'value': 'enable'}],
-                value=[], inline=True, style={'display': 'inline-block', 'fontSize': '12px', 'marginLeft': '10px'}),
+            dmc.Switch(id='y2-enable', label='Enable', checked=False, size='sm',
+                       style={'display': 'inline-block', 'marginLeft': '10px'}),
         ], className='toolbox-section-title'),
         html.Div([
             html.Div([
                 html.Label('Label', className='form-label'),
-                dcc.Input(id='y2-label-input', value='Y₂', className='form-input', style={'width': '100%'}),
+                dmc.TextInput(id='y2-label-input', value='Y₂', size='xs', style={'width': '100%'}),
             ], style={'flex': '1', 'marginBottom': '6px'}),
             html.Div([
                 html.Label('Data', className='form-label'),
@@ -141,11 +141,11 @@ def create_axis_mapper_layout():
                    'backgroundColor': 'white', 'color': '#999'}),
 
         # Hidden plot type (controlled from Plot Settings)
-        html.Div(dcc.RadioItems(id='plot-type', options=[
-            {'label': ' Bar', 'value': 'bar'},
-            {'label': ' Line', 'value': 'line'},
-            {'label': ' Scatter', 'value': 'scatter'}
-        ], value='bar', inline=True), style={'display': 'none'}),
+        html.Div(dmc.RadioGroup(id='plot-type', value='bar', children=dmc.Group([
+            dmc.Radio(label='Bar', value='bar'),
+            dmc.Radio(label='Line', value='line'),
+            dmc.Radio(label='Scatter', value='scatter'),
+        ], gap='md')), style={'display': 'none'}),
 
         # Plot button
         html.Div('Plot', className='toolbox-section-title'),

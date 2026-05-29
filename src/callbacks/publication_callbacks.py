@@ -482,10 +482,10 @@ def register_publication_callbacks(app: dash.Dash, data_manager) -> None:
     # Y2 toggle visibility
     @app.callback(
         Output('y2-controls', 'style'),
-        Input('y2-enable', 'value')
+        Input('y2-enable', 'checked')
     )
     def toggle_y2(enabled):
-        if 'enable' in (enabled or []):
+        if enabled:
             return {'display': 'block'}
         return {'display': 'none'}
     
@@ -810,7 +810,7 @@ def register_publication_callbacks(app: dash.Dash, data_manager) -> None:
         [Input('pub-table', 'selected_cells'),
          Input('pub-table', 'selected_columns'),
          Input('pub-table', 'active_cell'),
-         Input('y2-enable', 'value'),
+         Input('y2-enable', 'checked'),
          Input('clear-all', 'n_clicks'),
          Input('pub-table', 'derived_virtual_data'),
          Input('pub-table', 'data')],
@@ -868,7 +868,7 @@ def register_publication_callbacks(app: dash.Dash, data_manager) -> None:
         if not selections:
             selections = get_empty_selections(y1_count)
 
-        selections['y2_enabled'] = 'enable' in (y2_enabled or [])
+        selections['y2_enabled'] = bool(y2_enabled)
 
         if is_clear:
             new_sel = get_empty_selections(y1_count)
