@@ -75,6 +75,17 @@ def register_context_menu_callbacks(app: dash.Dash, data_manager) -> None:
         single = fid is None or len(_overlay_group_files(fid)) <= 1
         return True, style, single
 
+    # ── Close on outside click / Escape ───────────────────────────────
+    @app.callback(
+        Output('context-menu', 'opened', allow_duplicate=True),
+        Input('context-menu-close-store', 'data'),
+        prevent_initial_call=True,
+    )
+    def close_menu(close_event):
+        if not close_event:
+            raise PreventUpdate
+        return False
+
     # ── Delete Peak ───────────────────────────────────────────────────
     @app.callback(
         [Output('context-menu', 'opened', allow_duplicate=True),

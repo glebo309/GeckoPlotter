@@ -133,6 +133,7 @@ _layout_body = html.Div(
         dcc.Store(id='deconv-result', data=None),  # serialized DeconvResult (preview/accept)
         dcc.Store(id='deconv-marker-click-store', data=None),  # browser-side marker click {x, ts}
         dcc.Store(id='context-menu-store', data=None),  # {peak_id, x, y, ts} from right-click
+        dcc.Store(id='context-menu-close-store', data=None),  # browser-side outside-click/Escape close
         dcc.Store(id='selected-peak-idx', data=None),  # Index of peak being edited
         dcc.Store(id='clear-shapes-trigger', data=0),  # Counter to trigger shape clearing
         dcc.Store(id='peak-change-trigger', data=0),  # Counter to refresh tables/overlays after peak edits
@@ -1214,10 +1215,11 @@ _layout_body = html.Div(
                 children=[
                     dmc.MenuTarget(html.Div(style={'width': '1px', 'height': '1px'})),
                     dmc.MenuDropdown([
+                        dmc.MenuItem('Deconvolute', id='ctx-deconvolve-item'),
+                        dmc.MenuItem('Integrate in All Files', id='ctx-integrate-item'),
                         dmc.MenuItem('Delete Peak', id='ctx-delete-item'),
                         dmc.MenuItem('Rename Peak', id='ctx-rename-item'),
-                        dmc.MenuItem('Integrate in All Files', id='ctx-integrate-item'),
-                    ]),
+                    ], id='context-menu-dropdown'),
                 ],
             ),
         ),

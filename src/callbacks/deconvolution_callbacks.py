@@ -54,6 +54,15 @@ def _find_peak(data_manager, file_id, peak_id):
                  if p.peak_id == peak_id), None)
 
 
+def _find_peak_anywhere(data_manager, peak_id):
+    """Return (file_id, Peak) for a peak id from any loaded file."""
+    for fid, peaks in data_manager.peak_service.get_all_peaks().items():
+        for peak in peaks:
+            if peak.peak_id == peak_id:
+                return fid, peak
+    return None, None
+
+
 def _build_results_display(payload):
     """R² badge + per-component table for the Integration panel."""
     if not payload:
@@ -128,35 +137,51 @@ def register_deconvolution_callbacks(app: dash.Dash, data_manager) -> None:
          Output('deconv-results-container', 'children', allow_duplicate=True),
          Output('deconv-accept-btn', 'style', allow_duplicate=True),
          Output('deconv-cancel-btn', 'style', allow_duplicate=True),
+         Output('selected-peak-idx', 'data', allow_duplicate=True),
+         Output('context-menu', 'opened', allow_duplicate=True),
          Output('render-trigger', 'data', allow_duplicate=True)],
-        Input('deconv-btn', 'n_clicks'),
+        [Input('deconv-btn', 'n_clicks'),
+         Input('ctx-deconvolve-item', 'n_clicks')],
         [State('selected-peak-idx', 'data'),
          State('active-file', 'data'),
+         State('context-menu-store', 'data'),
          State('render-trigger', 'data')],
         prevent_initial_call=True,
     )
-    def deconvolute(n_clicks, selected_peak_id, active_file, render_counter):
-        if not n_clicks:
-            raise PreventUpdate
+    def deconvolute(button_clicks, context_clicks, selected_peak_id, active_file, context_store, render_counter):
+        triggered = dash.callback_context.triggered_id
+        if triggered == 'ctx-deconvolve-item':
+            if not context_clicks or not context_store or not context_store.get('peak_id'):
+                raise PreventUpdate
+            selected_peak_id = context_store['peak_id']
+            active_file, peak = _find_peak_anywhere(data_manager, selected_peak_id)
+        else:
+            if not button_clicks:
+                raise PreventUpdate
+            peak = _find_peak(data_manager, active_file, selected_peak_id) if active_file and selected_peak_id else None
 
-        no = dash.no_update
+        close_context_menu = False if triggered == 'ctx-deconvolve-item' else dash.no_update
 
         if not selected_peak_id or not active_file:
             msg = html.Div('Select a peak first.',
                            style={'fontSize': '11px', 'color': '#888'})
-            return no, no, no, msg, _BTN_HIDE, _BTN_HIDE, no
+            return dash.no_update, dash.no_update, dash.no_update, msg, _BTN_HIDE, _BTN_HIDE, dash.no_update, close_context_menu, dash.no_update
 
-        peak = _find_peak(data_manager, active_file, selected_peak_id)
         if peak is None:
             msg = html.Div('Peak not found. Select a peak first.',
                            style={'fontSize': '11px', 'color': '#c62828'})
-            return no, no, no, msg, _BTN_HIDE, _BTN_HIDE, no
+            return dash.no_update, dash.no_update, dash.no_update, msg, _BTN_HIDE, _BTN_HIDE, dash.no_update, close_context_menu, dash.no_update
+
+        if not button_clicks and triggered != 'ctx-deconvolve-item':
+            raise PreventUpdate
+
+        no = dash.no_update
 
         x_region, y_region = _extract_peak_region(data_manager, active_file, peak)
         if x_region is None or len(x_region) < 10:
             msg = html.Div('Peak region too narrow for deconvolution.',
                            style={'fontSize': '11px', 'color': '#c62828'})
-            return no, no, no, msg, _BTN_HIDE, _BTN_HIDE, no
+            return no, no, no, msg, _BTN_HIDE, _BTN_HIDE, selected_peak_id, close_context_menu, no
 
         try:
             markers, payload = _run_detect_and_fit(x_region, y_region)
@@ -164,17 +189,17 @@ def register_deconvolution_callbacks(app: dash.Dash, data_manager) -> None:
             log.exception("Deconvolution fit failed")
             msg = html.Div('Fit failed — try a wider peak region.',
                            style={'fontSize': '11px', 'color': '#c62828'})
-            return no, no, no, msg, _BTN_HIDE, _BTN_HIDE, no
+            return no, no, no, msg, _BTN_HIDE, _BTN_HIDE, selected_peak_id, close_context_menu, no
 
         if markers is None:
             msg = html.Div('Could not detect multiple peaks in this region.',
                            style={'fontSize': '11px', 'color': '#c62828'})
-            return no, no, no, msg, _BTN_HIDE, _BTN_HIDE, no
+            return no, no, no, msg, _BTN_HIDE, _BTN_HIDE, selected_peak_id, close_context_menu, no
 
         log.debug(f"deconvolute: {len(markers)} components, R²={payload['r_squared']:.4f}")
         return ('deconvolve', markers, payload,
                 _build_results_display(payload),
-                _BTN_SHOW, _BTN_SHOW,
+                _BTN_SHOW, _BTN_SHOW, selected_peak_id, close_context_menu,
                 (render_counter or 0) + 1)
 
     # ── Marker add/remove + auto-refit ───────────────────────────────

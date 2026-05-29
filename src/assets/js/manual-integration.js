@@ -214,6 +214,25 @@
         return true;
     }
 
+    function publishContextMenuClose(reason) {
+        var dashClientside = window.dash_clientside ||
+            (window.parent && window.parent !== window ? window.parent.dash_clientside : null);
+        if (!dashClientside || typeof dashClientside.set_props !== 'function') {
+            return false;
+        }
+        dashClientside.set_props('context-menu-close-store', {
+            data: { reason: reason || 'outside', ts: Date.now() }
+        });
+        return true;
+    }
+
+    function isContextMenuTarget(event) {
+        if (!event || !event.target || typeof event.target.closest !== 'function') return false;
+        return !!event.target.closest(
+            '#context-menu-dropdown, #context-menu-anchor, #ctx-rename-modal, [id^="ctx-"]'
+        );
+    }
+
     function resetAxes(gd) {
         if (!window.Plotly || !gd || !gd._fullLayout) return;
         var reset = {};
@@ -713,6 +732,16 @@
             };
             document.addEventListener('pointerdown', consumeBlankBeforePlotly, true);
             document.addEventListener('mousedown', consumeMouseBeforePlotly, true);
+            document.addEventListener('pointerdown', function (event) {
+                if (!event || event.button !== 0 || isContextMenuTarget(event)) return;
+                if (!document.getElementById('context-menu-dropdown')) return;
+                publishContextMenuClose('outside');
+            }, true);
+            document.addEventListener('keydown', function (event) {
+                if (!event || event.key !== 'Escape') return;
+                if (!document.getElementById('context-menu-dropdown')) return;
+                publishContextMenuClose('escape');
+            }, true);
             document.addEventListener('keydown', syncMomentaryDrawButton, true);
             document.addEventListener('keyup', syncMomentaryDrawButton, true);
             window.addEventListener('blur', function () {
