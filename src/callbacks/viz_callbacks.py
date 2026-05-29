@@ -997,13 +997,17 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
          State('selected-peak-idx', 'data'),
          State('zoom-state', 'data'),
          State('tab-zoom-memory', 'data'),
-         State('custom-plot-figures', 'data')],
+         State('custom-plot-figures', 'data'),
+         State('baseline-mode', 'data'),
+         State('deconv-markers', 'data'),
+         State('deconv-result', 'data')],
         prevent_initial_call=True
     )
     def master_render(active_tab_id, plot_trigger, active_file, plot_settings, render_trigger,
                       file_order, pub_sort, peak_sort, cross_sort,
                       loaded_files, plot_tabs, pub_plot_figure, selected_peak_id,
-                      zoom_state, zoom_memory, custom_figures):
+                      zoom_state, zoom_memory, custom_figures,
+                      baseline_mode, deconv_markers, deconv_result):
         """Single owner of main-plot. Renders the active plot tab's figure."""
         import plotly.graph_objects as go
         from services.plot_settings_service import PlotSettingsService, DEFAULT_PLOT_SETTINGS
@@ -1115,6 +1119,12 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
                 figure = overlay_peaks_on_figure(
                     data_manager.peak_service.get_peaks(active_file),
                     figure, _ov_time, _ov_signal, selected_peak_id)
+                # Deconvolution preview: markers + fitted curves before accept.
+                if baseline_mode == 'deconvolve':
+                    from callbacks.peak_overlay import add_deconv_overlays
+                    add_deconv_overlays(
+                        figure, deconv_markers, deconv_result,
+                        _ov_time, _ov_signal)
 
         if is_tab_switch:
             effective_zoom = restored_zoom

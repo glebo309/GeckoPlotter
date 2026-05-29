@@ -189,6 +189,77 @@ def add_peak_traces(fig, all_peaks, time_arr, signal_arr, selected_peak_id=None,
             ), **add_kw)
 
 
+# Distinct colors for deconvolution preview components (matches the sandbox).
+DECONV_COLORS = [
+    '#2196F3', '#FF5722', '#4CAF50', '#9C27B0',
+    '#FF9800', '#00BCD4', '#E91E63', '#8BC34A',
+]
+
+
+def add_deconv_overlays(fig, markers, deconv_payload, time_arr, signal_arr, row=None):
+    """Draw deconvolution preview: center markers, fitted component curves,
+    and the composite fit. All traces are tagged meta='deconv_overlay'.
+
+    Parameters
+    ----------
+    fig : go.Figure
+    markers : list of dict
+        ``[{'x': float, 'y': float}, ...]`` user/auto peak centers.
+    deconv_payload : dict or None
+        Serialized DeconvResult (see deconvolution_service.serialize_result).
+    time_arr, signal_arr : array-like
+        Region data, used to size the marker lines.
+    row : int, optional
+        Subplot row for stacked layouts.
+    """
+    import plotly.graph_objects as go
+
+    add_kw = dict(row=row, col=1) if row else {}
+    xref = 'x' if not row or row == 1 else f'x{row}'
+    yref = 'y' if not row or row == 1 else f'y{row}'
+
+    y_arr = np.asarray(signal_arr, dtype=float)
+    finite_y = y_arr[np.isfinite(y_arr)]
+    y_top = float(finite_y.max()) * 1.05 if finite_y.size else 1.0
+
+    # ── Center markers: vertical dashed line + apex dot ──
+    for m in (markers or []):
+        mx = m.get('x')
+        my = m.get('y')
+        if mx is None:
+            continue
+        fig.add_shape(
+            type='line', x0=mx, x1=mx, y0=0, y1=y_top,
+            xref=xref, yref=yref,
+            line=dict(color='rgba(120,120,120,0.8)', width=1.5, dash='dash'),
+        )
+        fig.add_trace(go.Scatter(
+            x=[mx], y=[my if my is not None else y_top * 0.5],
+            mode='markers',
+            marker=dict(size=10, color='#555', symbol='circle-open', line=dict(width=2)),
+            hoverinfo='skip', showlegend=False, meta='deconv_overlay',
+        ), **add_kw)
+
+    # ── Fitted components + composite (preview before accept) ──
+    if deconv_payload:
+        x = deconv_payload.get('x') or []
+        for comp in deconv_payload.get('components', []):
+            color = DECONV_COLORS[comp['index'] % len(DECONV_COLORS)]
+            fig.add_trace(go.Scatter(
+                x=x, y=comp['curve'], mode='lines',
+                line=dict(color=color, width=1.5),
+                fill='tozeroy', fillcolor=rgba(color, 0.12),
+                hoverinfo='skip', showlegend=False, meta='deconv_overlay',
+            ), **add_kw)
+        best_fit = deconv_payload.get('best_fit')
+        if best_fit is not None:
+            fig.add_trace(go.Scatter(
+                x=x, y=best_fit, mode='lines',
+                line=dict(color='#111', width=1.5, dash='dash'),
+                hoverinfo='skip', showlegend=False, meta='deconv_overlay',
+            ), **add_kw)
+
+
 def overlay_peaks_on_figure(all_peaks, figure, time_arr, signal_arr, selected_peak_id=None):
     """Rebuild the current figure, adding all peak overlays.
 

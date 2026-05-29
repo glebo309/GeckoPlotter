@@ -35,6 +35,7 @@ from components.table_styles import TABLE_STYLE_CELL, TABLE_STYLE_HEADER, TABLE_
 from callbacks.publication_callbacks import register_publication_callbacks
 from callbacks.integration_callbacks import register_integration_callbacks
 from callbacks.baseline_callbacks import register_baseline_callbacks
+from callbacks.deconvolution_callbacks import register_deconvolution_callbacks
 from callbacks.export_callbacks import register_export_callbacks
 from callbacks.calibration_callbacks import register_calibration_callbacks
 
@@ -126,7 +127,10 @@ _layout_body = html.Div(
         dcc.Store(id='peak-table-store', data=None),  # Mirror of peak-table data (JSON split) — always in layout
         dcc.Store(id='cross-sample-table-store', data=None),  # Mirror of cross-sample-table data (JSON split) — always in layout
         # Baseline integration stores (p-line drawing)
-        dcc.Store(id='baseline-mode', data='navigate'),  # 'draw' | 'edit' | 'navigate'
+        dcc.Store(id='baseline-mode', data='navigate'),  # 'draw' | 'edit' | 'navigate' | 'deconvolve'
+        dcc.Store(id='deconv-markers', data=[]),  # [{x, y}, ...] peak-center markers
+        dcc.Store(id='deconv-result', data=None),  # serialized DeconvResult (preview/accept)
+        dcc.Store(id='deconv-marker-click-store', data=None),  # browser-side marker click {x, ts}
         dcc.Store(id='selected-peak-idx', data=None),  # Index of peak being edited
         dcc.Store(id='clear-shapes-trigger', data=0),  # Counter to trigger shape clearing
         dcc.Store(id='peak-change-trigger', data=0),  # Counter to refresh tables/overlays after peak edits
@@ -571,6 +575,45 @@ _layout_body = html.Div(
                                                                  id='baseline-mode-indicator',
                                                                  style={'fontSize': '11px', 'color': '#666', 'marginBottom': '10px'}),
                                                         html.Div(id='manual-peak-table-container', style={'marginBottom': '10px'}),
+                                                        html.Hr(style={'margin': '10px 0', 'borderColor': '#e0e0e0'}),
+                                                        # -- Peak Deconvolution (EMG) --
+                                                        html.Div('Peak Deconvolution', className='toolbox-section-title'),
+                                                        html.Div([
+                                                            html.Button('Deconvolve', id='deconv-toggle-btn',
+                                                                        className='btn btn-secondary',
+                                                                        title='Resolve overlapping peaks by EMG fitting',
+                                                                        style={'padding': '4px 10px', 'fontSize': '12px'}),
+                                                        ], style={'marginBottom': '6px'}),
+                                                        html.Div('Click plot to add/remove peak centers.',
+                                                                 style={'fontSize': '11px', 'color': '#888', 'marginBottom': '6px'}),
+                                                        html.Div([
+                                                            html.Label('Detect sensitivity (%)', className='form-label'),
+                                                            dmc.Slider(id='deconv-prominence', min=1, max=50, step=1, value=5,
+                                                                       marks=[{'value': 1, 'label': '1'},
+                                                                              {'value': 25, 'label': '25'},
+                                                                              {'value': 50, 'label': '50'}]),
+                                                        ], style={'marginBottom': '10px'}),
+                                                        html.Div([
+                                                            html.Button('Detect', id='deconv-detect-btn',
+                                                                        className='btn btn-secondary',
+                                                                        title='Auto-detect peak centers',
+                                                                        style={'padding': '4px 10px', 'fontSize': '12px'}),
+                                                            html.Button('Fit', id='deconv-fit-btn',
+                                                                        className='btn btn-primary',
+                                                                        title='Fit composite EMG model',
+                                                                        style={'padding': '4px 10px', 'fontSize': '12px'}),
+                                                        ], style={'display': 'flex', 'gap': '4px', 'marginBottom': '6px'}),
+                                                        html.Div([
+                                                            html.Button('Accept', id='deconv-accept-btn',
+                                                                        className='btn btn-primary',
+                                                                        title='Convert fitted components to peaks',
+                                                                        style={'padding': '4px 10px', 'fontSize': '12px'}),
+                                                            html.Button('Cancel', id='deconv-cancel-btn',
+                                                                        className='btn btn-secondary',
+                                                                        title='Discard fit and markers',
+                                                                        style={'padding': '4px 10px', 'fontSize': '12px'}),
+                                                        ], style={'display': 'flex', 'gap': '4px', 'marginBottom': '6px'}),
+                                                        html.Div(id='deconv-results-container', style={'marginBottom': '10px'}),
                                                         html.Hr(style={'margin': '10px 0', 'borderColor': '#e0e0e0'}),
                                                         # -- Auto Peak Detection --
                                                         html.Div('Signal Processing', className='toolbox-section-title'),
@@ -1179,6 +1222,7 @@ register_context_callbacks(app, data_manager)
 register_publication_callbacks(app, data_manager)
 register_integration_callbacks(app, data_manager)
 register_baseline_callbacks(app, data_manager)
+register_deconvolution_callbacks(app, data_manager)
 register_export_callbacks(app, data_manager)
 register_calibration_callbacks(app, data_manager)
 register_plot_settings_callbacks(app, data_manager)
