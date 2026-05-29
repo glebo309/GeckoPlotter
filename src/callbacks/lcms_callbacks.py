@@ -147,7 +147,7 @@ def register_lcms_callbacks(app, data_manager):
                 f"m/z {e['mz']:.1f} ±{e['tolerance']}",
                 style={
                     'display': 'inline-block', 'padding': '2px 8px',
-                    'backgroundColor': '#e3f2fd', 'borderRadius': '12px',
+                    'backgroundColor': '#f0f0f0', 'borderRadius': '12px',
                     'fontSize': '11px', 'marginRight': '4px', 'marginBottom': '4px',
                 },
             )

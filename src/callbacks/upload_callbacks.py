@@ -5,7 +5,11 @@ import os
 from typing import List, Dict, Any
 import dash
 from dash import dcc, html, Input, Output, State, dash_table
+from dash_iconify import DashIconify
 import pandas as pd
+
+def _icon(name, width=14, height=14, color='#666', **kw):
+    return DashIconify(icon=name, width=width, height=height, color=color, **kw)
 
 
 
@@ -299,7 +303,7 @@ def _render_group_header(label: str, group_id: str, is_active: bool, sort_dir: s
             'fontSize': '11px',
             'textTransform': 'uppercase',
             'letterSpacing': '0.5px',
-            'color': '#ff6b35' if is_active else '#888',
+            'color': '#1a1a1a' if is_active else '#888',
         }),
         html.Button(arrow, id={'type': 'group-sort-btn', 'index': group_id},
             n_clicks=0,
@@ -313,7 +317,7 @@ def _render_group_header(label: str, group_id: str, is_active: bool, sort_dir: s
         style={
             'padding': '6px 8px 3px 8px',
             'marginTop': '6px',
-            'borderBottom': '1px solid #ff6b35' if is_active else '1px solid #e0e0e0',
+            'borderBottom': '1px solid #1a1a1a' if is_active else '1px solid #e0e0e0',
             'display': 'flex', 'alignItems': 'center', 'justifyContent': 'space-between',
         },
     )
@@ -400,7 +404,7 @@ def render_bundle_item_selected(bundle_item: dict, is_selected: bool = False, da
             # Control buttons
             html.Div([
                 html.Button(
-                    '👁',
+                    _icon('tabler:eye', width=12, height=12),
                     id={'type': 'visibility-btn', 'index': bundle_id},
                     title='Toggle visibility',
                     className='tree-action-btn',
@@ -412,7 +416,7 @@ def render_bundle_item_selected(bundle_item: dict, is_selected: bool = False, da
                     }
                 ),
                 html.Button(
-                    '🗑',
+                    _icon('tabler:trash', width=12, height=12, color='#999'),
                     id={'type': 'delete-btn', 'index': bundle_id},
                     title='Delete bundle',
                     className='tree-action-btn',
@@ -450,26 +454,26 @@ def render_bundle_item_selected(bundle_item: dict, is_selected: bool = False, da
 def render_individual_file_item_selected(item: dict, is_selected: bool = False, is_child: bool = False, data_manager=None, dimmed: bool = False) -> html.Div:
     """Render an individual file item with selection highlighting using clean grid layout."""
     # Define icons for different file types
-    TYPE_ICONS = {
-        'table': '📊',
-        'csv': '📊',
-        'generic_csv': '📊',
-        'structured': '🧩',
-        'image': '🖼️',
-        'chromatogram': '🌊',
-        'spectra': '📈',
-        'uvvis_csv': '🧪',
-        'lcms_bundle': '🧪',
-        'lcms_ms_positive': '➕',
-        'lcms_ms_negative': '➖',
-        'lcms_uv_a': '🌈',
-        'lcms_uv_b': '🌈',
-        'text': '📄',
-        'binary': '💾',
-        'unknown': '❓',
+    TYPE_ICON_NAMES = {
+        'table': 'tabler:table',
+        'csv': 'tabler:table',
+        'generic_csv': 'tabler:table',
+        'structured': 'tabler:layout-grid',
+        'image': 'tabler:photo',
+        'chromatogram': 'tabler:chart-line',
+        'spectra': 'tabler:chart-area-line',
+        'uvvis_csv': 'tabler:flask',
+        'lcms_bundle': 'tabler:flask',
+        'lcms_ms_positive': 'tabler:plus',
+        'lcms_ms_negative': 'tabler:minus',
+        'lcms_uv_a': 'tabler:spectrum',
+        'lcms_uv_b': 'tabler:spectrum',
+        'text': 'tabler:file-text',
+        'binary': 'tabler:file-code',
+        'unknown': 'tabler:file-question',
     }
 
-    icon = TYPE_ICONS.get(item.get('type'), TYPE_ICONS.get('unknown', '❓'))
+    icon = _icon(TYPE_ICON_NAMES.get(item.get('type'), 'tabler:file-question'))
     file_id = item.get('id')
 
     # Check if this item has children (like UV-Vis wells)
@@ -482,11 +486,12 @@ def render_individual_file_item_selected(item: dict, is_selected: bool = False, 
             
             # Default visibility state for child
             is_child_visible = True
-            child_icon = '👁'
+            child_icon = _icon('tabler:eye', width=12, height=12)
             child_opacity = '1.0'
             
             # Use grid layout for child items too
-            child_icon_symbol = child.get('icon', '🧪')
+            raw_icon = child.get('icon', '')
+            child_icon_symbol = _icon('tabler:flask') if not raw_icon.startswith('tabler:') else _icon(raw_icon)
             child_info = child.get('size_display', '')
             child_type_label = child.get('component_type')
             if child_type_label:
@@ -504,7 +509,7 @@ def render_individual_file_item_selected(item: dict, is_selected: bool = False, 
                     
                     # Child content (clickable for selection)
                     html.Div([
-                        html.Span(child_icon_symbol, style={'marginRight': '8px'}),
+                        html.Span(child_icon_symbol, style={'marginRight': '8px', 'display': 'inline-flex'}),
                         html.Div([
                             html.Div(os.path.splitext(child.get('name', ''))[0], style={'fontWeight': '500'}),
                             html.Div(child_info, style={'fontSize': '12px', 'color': '#666'}),
@@ -547,7 +552,7 @@ def render_individual_file_item_selected(item: dict, is_selected: bool = False, 
                             }
                         ),
                         html.Button(
-                            '🗑',
+                            _icon('tabler:trash', width=12, height=12, color='#999'),
                             id={'type': 'delete-btn', 'index': child_id},
                             title='Delete component',
                             style={
@@ -623,7 +628,7 @@ def render_individual_file_item_selected(item: dict, is_selected: bool = False, 
             
             # File content (clickable for selection)
             html.Div([
-                html.Span(icon, style={'marginRight': '6px', 'fontSize': '11px', 'flexShrink': '0'}),
+                html.Span(icon, style={'marginRight': '6px', 'flexShrink': '0', 'display': 'inline-flex'}),
                 html.Span(os.path.splitext(item.get('name', ''))[0], style={
                     'overflow': 'hidden', 'textOverflow': 'ellipsis', 'whiteSpace': 'nowrap', 'flex': '1',
                     'fontWeight': '400',
@@ -653,7 +658,7 @@ def render_individual_file_item_selected(item: dict, is_selected: bool = False, 
             # Control buttons
             html.Div([
                 html.Button(
-                    '👁',
+                    _icon('tabler:eye', width=12, height=12),
                     id={'type': 'visibility-btn', 'index': file_id},
                     title='Toggle visibility',
                     className='tree-action-btn',
@@ -665,7 +670,7 @@ def render_individual_file_item_selected(item: dict, is_selected: bool = False, 
                     }
                 ),
                 html.Button(
-                    '🗑',
+                    _icon('tabler:trash', width=12, height=12, color='#999'),
                     id={'type': 'delete-btn', 'index': file_id},
                     title='Delete file',
                     className='tree-action-btn',

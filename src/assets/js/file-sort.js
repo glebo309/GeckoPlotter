@@ -1,6 +1,7 @@
 /**
  * file-sort.js — Pointer-event drag reorder.
  * Clone follows cursor and repels siblings. Drop indicator is a thin line.
+ * Supports within-group reorder and cross-group moves.
  */
 (function() {
     'use strict';
@@ -14,12 +15,39 @@
         return Array.from(container.querySelectorAll(':scope > .draggable-file-item'));
     }
 
+    function getAllGroupContainers() {
+        return Array.from(document.querySelectorAll('.file-group-container'));
+    }
+
+    function getGroupId(container) {
+        try { return JSON.parse(container.id).index; } catch(_) { return null; }
+    }
+
     function clearLine() {
         document.querySelectorAll('.' + LINE_CLASS).forEach(function(el) {
             el.classList.remove(LINE_CLASS);
             el.style.borderTop = '';
             el.style.borderBottom = '';
         });
+    }
+
+    function clearGroupHighlight() {
+        getAllGroupContainers().forEach(function(el) {
+            el.style.outline = '';
+            el.style.outlineOffset = '';
+        });
+    }
+
+    function containerAtPoint(x, y, excludeContainer) {
+        var containers = getAllGroupContainers();
+        for (var i = 0; i < containers.length; i++) {
+            if (containers[i] === excludeContainer) continue;
+            var r = containers[i].getBoundingClientRect();
+            if (x >= r.left && x <= r.right && y >= r.top && y <= r.bottom) {
+                return containers[i];
+            }
+        }
+        return null;
     }
 
     function onPointerDown(e) {
@@ -32,7 +60,8 @@
         if (!container) return;
 
         var siblings = getSiblings(container);
-        if (siblings.length < 2) return;
+        var multipleGroups = getAllGroupContainers().length > 1;
+        if (siblings.length < 2 && !multipleGroups) return;
 
         pending = {
             el: el,
@@ -85,6 +114,9 @@
             startY: p.startY,
             origTop: rect.top,
             elHeight: rect.height,
+            targetContainer: null,
+            lastX: p.startX,
+            lastY: p.startY,
         };
 
         pending = null;
@@ -98,8 +130,32 @@
             startDrag(pending);
         }
         if (!state) return;
+        state.lastX = e.clientX;
+        state.lastY = e.clientY;
         var dy = e.clientY - state.startY;
         state.clone.style.top = (state.origTop + dy) + 'px';
+
+        var otherContainer = containerAtPoint(e.clientX, e.clientY, state.container);
+
+        if (otherContainer) {
+            if (state.targetContainer !== otherContainer) {
+                clearLine();
+                clearGroupHighlight();
+                state.siblings.forEach(function(sib) {
+                    sib.style.transition = 'transform 0.15s ease';
+                    sib.style.transform = '';
+                });
+                state.targetContainer = otherContainer;
+                otherContainer.style.outline = '2px solid #1a1a1a';
+                otherContainer.style.outlineOffset = '-2px';
+            }
+            return;
+        }
+
+        if (state.targetContainer) {
+            clearGroupHighlight();
+            state.targetContainer = null;
+        }
 
         var cloneMid = state.origTop + dy + state.elHeight / 2;
         var newIdx = state.siblings.length - 1;
@@ -139,15 +195,12 @@
             s.style.transform = shift ? 'translateY(' + shift + 'px)' : '';
         }
 
-        // Thin line at the drop position
         if (state.srcIdx < newIdx) {
-            // Dropping below: line under the target item
             state.siblings[newIdx].classList.add(LINE_CLASS);
-            state.siblings[newIdx].style.borderBottom = '2px solid #ff6b35';
+            state.siblings[newIdx].style.borderBottom = '2px solid #1a1a1a';
         } else if (state.srcIdx > newIdx) {
-            // Dropping above: line above the target item
             state.siblings[newIdx].classList.add(LINE_CLASS);
-            state.siblings[newIdx].style.borderTop = '2px solid #ff6b35';
+            state.siblings[newIdx].style.borderTop = '2px solid #1a1a1a';
         }
     }
 
@@ -163,6 +216,7 @@
 
         state.clone.remove();
         clearLine();
+        clearGroupHighlight();
 
         var s = state.srcEl.style;
         s.transition = ''; s.maxHeight = ''; s.overflow = '';
@@ -175,19 +229,53 @@
             sib.style.transform = '';
         });
 
+        var sourceGroupId = getGroupId(state.container);
+        var fileId = state.ids[state.srcIdx];
+
+        if (state.targetContainer) {
+            var targetGroupId = getGroupId(state.targetContainer);
+            if (targetGroupId && sourceGroupId && targetGroupId !== sourceGroupId &&
+                window.dash_clientside && window.dash_clientside.set_props) {
+                window.dash_clientside.set_props('group-move-event', {
+                    data: {
+                        file_id: fileId,
+                        source_group: sourceGroupId,
+                        target_group: targetGroupId,
+                        ts: Date.now(),
+                    }
+                });
+            }
+            state = null;
+            return;
+        }
+
+        // Check if pointer ended up outside all group containers (create new group)
+        var droppedOutside = !containerAtPoint(state.lastX, state.lastY, null);
+
+        if (droppedOutside && sourceGroupId && state.siblings.length > 1 &&
+            window.dash_clientside && window.dash_clientside.set_props) {
+            window.dash_clientside.set_props('group-move-event', {
+                data: {
+                    file_id: fileId,
+                    source_group: sourceGroupId,
+                    target_group: null,
+                    ts: Date.now(),
+                }
+            });
+            state = null;
+            return;
+        }
+
         var ids = state.ids.slice();
         if (state.curIdx !== state.srcIdx) {
             var moved = ids.splice(state.srcIdx, 1)[0];
             ids.splice(state.curIdx, 0, moved);
         }
 
-        var groupId = null;
-        try { groupId = JSON.parse(state.container.id).index; } catch(_) {}
-
-        if (groupId && state.curIdx !== state.srcIdx &&
+        if (sourceGroupId && state.curIdx !== state.srcIdx &&
             window.dash_clientside && window.dash_clientside.set_props) {
             window.dash_clientside.set_props('file-reorder-event', {
-                data: { group_id: groupId, order: ids, ts: Date.now() }
+                data: { group_id: sourceGroupId, order: ids, ts: Date.now() }
             });
         }
 

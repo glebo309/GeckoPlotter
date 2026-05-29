@@ -9,9 +9,9 @@ import dash_mantine_components as dmc
 OKABE_ITO = ["#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7"]
 
 SECTION_COLORS = {
-    'x': {'main': '#2196F3', 'light': '#E3F2FD', 'border': '#1976D2'},
-    'y1': {'main': '#FF9800', 'light': '#FFF3E0', 'border': '#F57C00'},
-    'y2': {'main': '#4CAF50', 'light': '#E8F5E9', 'border': '#388E3C'},
+    'x': {'main': '#4a7c9b', 'light': '#eaf2f7', 'border': '#3a6580'},
+    'y1': {'main': '#b08040', 'light': '#faf5ed', 'border': '#8a6530'},
+    'y2': {'main': '#5a8a6a', 'light': '#edf5f0', 'border': '#457058'},
 }
 
 
@@ -151,7 +151,7 @@ def create_axis_mapper_layout():
         html.Div('Plot', className='toolbox-section-title'),
         html.Button("Create Plot", id='create-plot-btn',
             style={'padding': '6px 12px', 'fontSize': '13px', 'fontWeight': '600',
-                   'width': '100%', 'backgroundColor': '#1976D2', 'color': 'white',
+                   'width': '100%', 'backgroundColor': '#1a1a1a', 'color': '#e0e0e0',
                    'border': 'none', 'borderRadius': '4px', 'cursor': 'pointer',
                    'marginBottom': '10px'}),
 

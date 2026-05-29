@@ -1,4 +1,4 @@
-/* GeckoPlotter V2 - Clean White Theme Stylesheet */
+/* GeckoPlotter V2 - Minimal Instrument Theme */
 
 /* Reset and Base Styles */
 * {
@@ -8,9 +8,9 @@
 }
 
 body {
-    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
     background-color: #ffffff;
-    color: #333333;
+    color: #1a1a1a;
     overflow: hidden;
     height: 100vh;
     width: 100vw;
@@ -27,28 +27,27 @@ body {
 
 /* Header */
 .app-header {
-    height: 42px;
-    background: #2c2c2c;
-    border-bottom: 1px solid #e0e0e0;
+    height: 40px;
+    background: #111111;
+    border-bottom: 1px solid #222;
     display: flex;
     align-items: center;
     padding: 0 15px;
-    box-shadow: 0 1px 3px rgba(0,0,0,0.1);
     z-index: 1000;
 }
 
 .app-logo {
     display: flex;
     align-items: center;
-    gap: 10px;
-    color: #ffffff;
-    font-size: 20px;
-    font-weight: 600;
+    gap: 8px;
+    color: #d4d4d4;
+    font-size: 15px;
+    font-weight: 500;
+    letter-spacing: 0.02em;
 }
 
 .logo-icon {
-    font-size: 24px;
-    color: #ff6b35;
+    font-size: 20px;
 }
 
 /* Main Content Area */
@@ -61,7 +60,7 @@ body {
 
 /* Panels */
 .panel {
-    background: #f8f9fa;
+    background: #fafafa;
     border: 1px solid #e0e0e0;
     overflow: hidden;
     position: relative;
@@ -69,39 +68,38 @@ body {
     flex-direction: column;
 }
 
-/* Content panels have pure white background */
 .panel.content-panel {
     background: white;
 }
 
 .panel-header {
-    padding: 10px 15px;
-    background: #f1f3f4;
+    padding: 8px 12px;
+    background: #f5f5f5;
     border-bottom: 1px solid #e0e0e0;
     font-weight: 500;
-    font-size: 14px;
-    color: #333333;
+    font-size: 12px;
+    color: #555;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
     flex-shrink: 0;
     z-index: 10;
 }
 
-/* Content panel headers */
 .content-panel .panel-header {
-    background: #f8f9fa;
-    color: #333;
+    background: #f5f5f5;
+    color: #555;
     border-bottom: 1px solid #e0e0e0;
 }
 
 .panel-content {
-    padding: 15px;
-    color: #333333;
+    padding: 12px;
+    color: #1a1a1a;
     flex: 1;
     overflow: auto;
 }
 
-/* Content panel content */
 .content-panel .panel-content {
-    color: #333;
+    color: #1a1a1a;
     background: white;
 }
 
@@ -110,38 +108,38 @@ body {
     background: #e0e0e0;
     position: relative;
     user-select: none;
-    transition: background-color 0.2s ease;
+    transition: background-color 0.15s ease;
     z-index: 10;
     flex-shrink: 0;
 }
 
 .divider:hover {
-    background: #d0d0d0;
+    background: #ccc;
 }
 
 .divider:active {
-    background: #c0c0c0;
+    background: #bbb;
 }
 
 .collapse-button {
     border: none;
-    background: rgba(44, 44, 44, 0.9);
-    color: #ffffff;
+    background: rgba(26, 26, 26, 0.85);
+    color: #d4d4d4;
     font-size: 12px;
-    width: 24px;
-    height: 24px;
-    border-radius: 12px;
+    width: 22px;
+    height: 22px;
+    border-radius: 11px;
     display: flex;
     align-items: center;
     justify-content: center;
     cursor: pointer;
-    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.2);
-    transition: transform 0.2s ease, background 0.2s ease;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.15);
+    transition: transform 0.15s ease, background 0.15s ease;
 }
 
 .collapse-button:hover {
-    background: rgba(255, 107, 53, 0.9);
-    color: #ffffff;
+    background: rgba(26, 26, 26, 1);
+    color: #fff;
     transform: scale(1.05);
 }
 
@@ -203,8 +201,8 @@ body {
 
 /* File tree selection highlighting */
 .file-tree-item.selected {
-    background-color: #fff0e6 !important;
-    border-left: 3px solid #ff6b35 !important;
+    background-color: #f0f0f0 !important;
+    border-left: 3px solid #1a1a1a !important;
     font-weight: 600 !important;
 }
 
@@ -315,7 +313,7 @@ div:hover > div > .tree-action-group {
 }
 
 .file-tree-item.selected:hover {
-    background-color: #ffe8d6 !important;
+    background-color: #e8e8e8 !important;
 }
 
 .file-tree-icon {
@@ -381,8 +379,8 @@ div:hover > div > .tree-action-group {
 
 .form-input:focus {
     outline: none;
-    border-color: #ff6b35;
-    box-shadow: 0 0 0 2px rgba(255, 107, 53, 0.2);
+    border-color: #333;
+    box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.08);
 }
 
 /* Buttons */
@@ -397,12 +395,12 @@ div:hover > div > .tree-action-group {
 }
 
 .btn-primary {
-    background: #ff6b35;
-    color: white;
+    background: #1a1a1a;
+    color: #e0e0e0;
 }
 
 .btn-primary:hover {
-    background: #e55a2b;
+    background: #333;
 }
 
 .btn-secondary {
@@ -418,25 +416,25 @@ div:hover > div > .tree-action-group {
 
 /* Upload Area */
 .upload-area {
-    border: 2px dashed #d0d0d0;
-    border-radius: 8px;
+    border: 2px dashed #ccc;
+    border-radius: 6px;
     padding: 30px;
     text-align: center;
     cursor: pointer;
-    transition: all 0.3s;
+    transition: all 0.2s;
     margin: 20px;
-    color: #666666;
-    background: #f8f9fa;
+    color: #666;
+    background: #fafafa;
 }
 
 .upload-area:hover {
-    border-color: #ff6b35;
-    background: rgba(255, 107, 53, 0.05);
+    border-color: #888;
+    background: #f5f5f5;
 }
 
 .upload-area.dragging {
-    border-color: #ff6b35;
-    background: rgba(255, 107, 53, 0.1);
+    border-color: #333;
+    background: #f0f0f0;
 }
 
 /* Visualization Area */
@@ -510,14 +508,14 @@ div:hover > div > .tree-action-group {
 
 /* Status Bar */
 .status-bar {
-    height: 25px;
-    background: #2c2c2c;
-    border-top: 1px solid #e0e0e0;
+    height: 24px;
+    background: #111111;
+    border-top: 1px solid #222;
     display: flex;
     align-items: center;
-    padding: 0 15px;
-    font-size: 12px;
-    color: #ffffff;
+    padding: 0 12px;
+    font-size: 11px;
+    color: #888;
 }
 
 /* Minimum panel sizes to prevent collapse */
@@ -529,10 +527,10 @@ div:hover > div > .tree-action-group {
 /* Loading Spinner */
 .spinner {
     border: 3px solid #e0e0e0;
-    border-top: 3px solid #ff6b35;
+    border-top: 3px solid #1a1a1a;
     border-radius: 50%;
-    width: 40px;
-    height: 40px;
+    width: 36px;
+    height: 36px;
     animation: spin 1s linear infinite;
 }
 
@@ -565,13 +563,13 @@ div:hover > div > .tree-action-group {
 }
 
 .file-tree-item:hover {
-    background-color: #f0f8ff !important;
-    border-color: #ff6b35 !important;
-    transform: translateX(2px);
+    background-color: #f0f0f0 !important;
+    border-color: #ccc !important;
+    transform: translateX(1px);
 }
 
 .file-tree-item:active {
-    background-color: #e6f3ff !important;
+    background-color: #e8e8e8 !important;
     transform: translateX(0px);
 }
 
@@ -643,7 +641,7 @@ button[id*="collapse-btn"]:active {
 
 .plot-tab-btn.active {
     background: #ffffff;
-    color: #ff6b35;
+    color: #1a1a1a;
     border-color: #d0d0d0;
     border-bottom: 1px solid #ffffff;
     font-weight: 600;
@@ -693,8 +691,8 @@ button[id*="collapse-btn"]:active {
 
 /* Cross-group drop target highlight */
 .file-group-header.drop-target {
-    background-color: #fff5f0 !important;
-    border-bottom: 2px solid #ff6b35 !important;
+    background-color: #f0f0f0 !important;
+    border-bottom: 2px solid #1a1a1a !important;
 }
 
 /* Baseline integration button active state */
@@ -702,35 +700,32 @@ button[id*="collapse-btn"]:active {
 #baseline-draw-btn.momentary-active,
 #baseline-edit-btn.active,
 #baseline-nav-btn.active {
-    background: #ff6b35 !important;
+    background: #1a1a1a !important;
     color: white !important;
-    border-color: #ff6b35 !important;
+    border-color: #1a1a1a !important;
 }
 
-/* ── Modern DataTable polish (engine unchanged) ─────────────── */
-/* Clip rows to the rounded container border set via style_table. */
+/* ── DataTable polish ─────────────── */
 .dash-spreadsheet-container .dash-spreadsheet-inner {
-    border-radius: 8px;
+    border-radius: 4px;
 }
-/* Subtler, hover-revealed sort affordance. */
 .dash-spreadsheet-container .column-header--sort {
-    opacity: 0.4;
+    opacity: 0.3;
     transition: opacity 0.15s;
 }
 .dash-spreadsheet-container th:hover .column-header--sort {
-    opacity: 0.9;
+    opacity: 0.8;
 }
-/* Slim modern scrollbars within tables. */
 .dash-spreadsheet-container ::-webkit-scrollbar {
-    width: 9px;
-    height: 9px;
+    width: 8px;
+    height: 8px;
 }
 .dash-spreadsheet-container ::-webkit-scrollbar-thumb {
-    background: #cbd3dd;
-    border-radius: 6px;
+    background: #c0c0c0;
+    border-radius: 4px;
 }
 .dash-spreadsheet-container ::-webkit-scrollbar-thumb:hover {
-    background: #aab4c2;
+    background: #999;
 }
 .dash-spreadsheet-container ::-webkit-scrollbar-track {
     background: transparent;

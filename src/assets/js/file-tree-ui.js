@@ -109,8 +109,8 @@
             header.addEventListener('dragover', function(e) {
                 e.preventDefault();
                 e.dataTransfer.dropEffect = 'move';
-                header.style.backgroundColor = '#fff5f0';
-                header.style.borderBottom = '2px solid #ff6b35';
+                header.style.backgroundColor = '#f0f0f0';
+                header.style.borderBottom = '2px solid #1a1a1a';
             });
 
             header.addEventListener('dragleave', function() {
