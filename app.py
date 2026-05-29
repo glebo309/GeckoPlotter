@@ -14,6 +14,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 
 import dash
 from dash import dcc, html, dash_table, Input, Output, State, ClientsideFunction, clientside_callback
+import dash_mantine_components as dmc
 import plotly.graph_objects as go
 
 if os.environ.get("GP_DEBUG", "") != "1":
@@ -101,7 +102,7 @@ def render_file_tree(records):
     return tree_items
 
 # Clean layout with proper CSS classes and structure
-app.layout = html.Div(
+_layout_body = html.Div(
     [
         dcc.Store(id='loaded-files', data=[]),
         dcc.Store(id='active-file', data=None),
@@ -1135,6 +1136,9 @@ app.layout = html.Div(
         html.Div(id='resize-init-trigger', style={'display': 'none'}),
     ]
 )
+
+# DMC 2.x requires a MantineProvider ancestor for any DMC component to render.
+app.layout = dmc.MantineProvider(children=[_layout_body])
 
 # Register callbacks
 from callbacks.tab_callbacks import register_tab_callbacks

@@ -1,8 +1,9 @@
 # GeckoPlotter V2 - Dependencies
 # Core Dash and Plotly
-dash==2.14.2
-plotly==5.19.0
-dash-mantine-components==0.14.3
+dash==3.0.4
+plotly==6.0.1
+dash-mantine-components==2.3.0
+dash-ag-grid>=31.0.0  # AG Grid tables (added in UI modernization)
 
 # Data processing
 pandas>=2.0.0
