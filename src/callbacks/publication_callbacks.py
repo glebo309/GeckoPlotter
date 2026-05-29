@@ -279,7 +279,7 @@ def register_publication_callbacks(app: dash.Dash, data_manager) -> None:
             {'if': {'row_index': 'odd'}, 'backgroundColor': '#FAFAFA'},
         ]
 
-        y1_shades = ['#FFF3E0', '#FFE0B2', '#FFCC80', '#FFB74D']
+        y1_shades = ['#faf5ed', '#f5edd8', '#f0e4c5', '#e8d9b0']
 
         def add_highlights(row_ids, column_id, bg_color, border_color, bold=False):
             """Helper to add highlighting for selected cells."""
@@ -311,7 +311,7 @@ def register_publication_callbacks(app: dash.Dash, data_manager) -> None:
         y1_error = selections.get('y1', {}).get('error', {})
         if y1_error.get('row_ids') and y1_error.get('column_id'):
             add_highlights(y1_error['row_ids'], y1_error['column_id'],
-                          '#F5F5F5', '#999')
+                          '#f5f5f5', '#999')
 
         # Y2 highlighting (if enabled)
         if selections.get('y2_enabled'):
@@ -323,7 +323,7 @@ def register_publication_callbacks(app: dash.Dash, data_manager) -> None:
             y2_error = selections.get('y2', {}).get('error', {})
             if y2_error.get('row_ids') and y2_error.get('column_id'):
                 add_highlights(y2_error['row_ids'], y2_error['column_id'],
-                              '#EFEBE9', '#795548')
+                              '#f0f0f0', '#666')
 
         # Active selector: show BOLD highlight for the currently active axis
         if active_selector:
@@ -336,7 +336,7 @@ def register_publication_callbacks(app: dash.Dash, data_manager) -> None:
                 if kind == 'error':
                     sel = selections['y1']['error']
                     add_highlights(sel.get('row_ids'), sel.get('column_id'),
-                                   '#F5F5F5', '#666', bold=True)
+                                   '#f5f5f5', '#555', bold=True)
                 else:
                     idx = active_selector[2] if len(active_selector) > 2 else 0
                     if idx < len(selections['y1']['series']):
@@ -351,7 +351,7 @@ def register_publication_callbacks(app: dash.Dash, data_manager) -> None:
                                    SECTION_COLORS['y2']['light'], SECTION_COLORS['y2']['main'], bold=True)
                 else:
                     add_highlights(sel.get('row_ids'), sel.get('column_id'),
-                                   '#EFEBE9', '#5D4037', bold=True)
+                                   '#f0f0f0', '#555', bold=True)
 
         return style_conditions
     
@@ -371,8 +371,8 @@ def register_publication_callbacks(app: dash.Dash, data_manager) -> None:
         return _build_highlight_styles(selections, active_selector)
 
     GROUP_COLORS = [
-        '#E3F2FD', '#FFF3E0', '#E8F5E9', '#FCE4EC',
-        '#F3E5F5', '#E0F7FA', '#FFF8E1', '#F1F8E9',
+        '#eaf2f7', '#faf5ed', '#edf5f0', '#f5f0f5',
+        '#f0f5f0', '#f5f2ea', '#edf0f5', '#f5edea',
     ]
 
     @app.callback(
@@ -415,7 +415,7 @@ def register_publication_callbacks(app: dash.Dash, data_manager) -> None:
             {'if': {'row_index': 'odd'}, 'backgroundColor': '#FAFAFA'},
         ]
 
-        y1_shades = ['#FFF3E0', '#FFE0B2', '#FFCC80', '#FFB74D']
+        y1_shades = ['#faf5ed', '#f5edd8', '#f0e4c5', '#e8d9b0']
 
         def add_highlights(row_ids, column_id, bg_color, border_color, bold=False):
             if not row_ids or not column_id:
@@ -441,7 +441,7 @@ def register_publication_callbacks(app: dash.Dash, data_manager) -> None:
 
         y1_error = selections.get('y1', {}).get('error', {})
         if y1_error.get('row_ids') and y1_error.get('column_id'):
-            add_highlights(y1_error['row_ids'], y1_error['column_id'], '#F5F5F5', '#999')
+            add_highlights(y1_error['row_ids'], y1_error['column_id'], '#f5f5f5', '#999')
 
         if selections.get('y2_enabled'):
             y2_data = selections.get('y2', {}).get('data', {})
@@ -450,7 +450,7 @@ def register_publication_callbacks(app: dash.Dash, data_manager) -> None:
                               SECTION_COLORS['y2']['light'], SECTION_COLORS['y2']['main'])
             y2_error = selections.get('y2', {}).get('error', {})
             if y2_error.get('row_ids') and y2_error.get('column_id'):
-                add_highlights(y2_error['row_ids'], y2_error['column_id'], '#EFEBE9', '#795548')
+                add_highlights(y2_error['row_ids'], y2_error['column_id'], '#f0f0f0', '#666')
 
         if active_selector:
             axis, kind = active_selector[0], active_selector[1]

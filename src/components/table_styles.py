@@ -6,40 +6,37 @@ Only the *static* style props live here. Dynamic per-cell styling
 ``style_data_conditional`` and must not be set here.
 """
 
-# Scroll container: rounded, lightly bordered card.
 TABLE_STYLE_TABLE = {
     'overflowX': 'auto',
     'overflowY': 'auto',
     'maxHeight': '500px',
-    'borderRadius': '8px',
-    'border': '1px solid #e3e8ee',
+    'borderRadius': '4px',
+    'border': '1px solid #d4d4d4',
 }
 
-# Data cells: roomy, monospace for clean numeric alignment.
 TABLE_STYLE_CELL = {
     'textAlign': 'center',
-    'padding': '8px 10px',
+    'padding': '6px 10px',
     'fontSize': '12px',
     'fontFamily': 'ui-monospace, "SF Mono", Menlo, Consolas, monospace',
     'minWidth': '80px',
     'whiteSpace': 'normal',
+    'color': '#1a1a1a',
 }
 
-# Header: refined slate, uppercase, letter-spaced, orange accent rule.
 TABLE_STYLE_HEADER = {
-    'backgroundColor': '#2f3e4e',
-    'color': '#ffffff',
+    'backgroundColor': '#1a1a1a',
+    'color': '#e0e0e0',
     'fontWeight': '600',
     'fontSize': '11px',
-    'letterSpacing': '0.05em',
+    'letterSpacing': '0.04em',
     'textTransform': 'uppercase',
-    'padding': '10px',
+    'padding': '8px 10px',
     'cursor': 'pointer',
-    'borderBottom': '2px solid #ff6b35',
+    'borderBottom': '1px solid #333',
     'fontFamily': '-apple-system, "Segoe UI", Roboto, sans-serif',
 }
 
-# Data rows: soft separators (backgrounds come from the highlight callback).
 TABLE_STYLE_DATA = {
-    'border': '1px solid #eef1f5',
+    'border': '1px solid #ebebeb',
 }

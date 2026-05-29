@@ -8,6 +8,7 @@ import logging
 from dash import dash_table, html, dcc
 import pandas as pd
 
+from dash_iconify import DashIconify
 from components.table_styles import (
     TABLE_STYLE_TABLE, TABLE_STYLE_CELL, TABLE_STYLE_HEADER, TABLE_STYLE_DATA,
 )
@@ -31,7 +32,7 @@ def create_data_table_editor(df=None, table_id='pub-table', default_selected_col
             dcc.Store(id='active-sheet-name', data=None),
             html.Div(
                 [
-                    html.Span('📊', className='empty-state__icon'),
+                    DashIconify(icon='tabler:table', width=36, height=36, color='#bbb'),
                     html.H4('No data loaded', className='empty-state__title'),
                     html.P('Select a file from the explorer to view and edit data', className='empty-state__subtitle'),
                 ],
@@ -90,9 +91,9 @@ def create_data_table_editor(df=None, table_id='pub-table', default_selected_col
                     'padding': '4px 12px',
                     'fontSize': '11px',
                     'border': 'none',
-                    'borderBottom': '2px solid #FF5722' if is_active else '2px solid transparent',
-                    'backgroundColor': '#37474F' if is_active else '#263238',
-                    'color': '#fff' if is_active else '#90A4AE',
+                    'borderBottom': '2px solid #1a1a1a' if is_active else '2px solid transparent',
+                    'backgroundColor': '#2a2a2a' if is_active else '#1a1a1a',
+                    'color': '#ddd' if is_active else '#777',
                     'cursor': 'pointer',
                     'fontWeight': '600' if is_active else '400',
                     'marginRight': '2px',
@@ -101,7 +102,7 @@ def create_data_table_editor(df=None, table_id='pub-table', default_selected_col
             ))
         sheet_tabs = [html.Div(tabs, style={
             'display': 'flex',
-            'backgroundColor': '#263238',
+            'backgroundColor': '#1a1a1a',
             'padding': '4px 4px 0',
             'borderRadius': '4px 4px 0 0',
             'overflowX': 'auto',

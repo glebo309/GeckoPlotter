@@ -11,6 +11,7 @@ import sys
 from typing import Dict, Any, Optional
 import dash
 from dash import Input, Output, State, html, dash_table, Patch
+from dash_iconify import DashIconify
 import numpy as np
 import pandas as pd
 from services.plot_manager import PlotManager
@@ -1208,8 +1209,8 @@ def create_bundle_data_table(bundle, file_data: Dict[str, Any], data_manager) ->
         
         # Bundle header
         bundle_header = html.Div([
-            html.H5(f"📦 {bundle.base_name}", 
-                   style={'margin': '0 0 5px 0', 'color': '#ff6b35', 'fontSize': '16px'}),
+            html.H5([DashIconify(icon='tabler:package', width=16, height=16, color='#555', style={'marginRight': '6px'}), bundle.base_name],
+                   style={'margin': '0 0 5px 0', 'color': '#1a1a1a', 'fontSize': '16px', 'display': 'flex', 'alignItems': 'center'}),
             html.P([
                 html.Strong("Bundle Type: "), f"{bundle.bundle_type.capitalize()}",
                 html.Br(),
@@ -1220,13 +1221,13 @@ def create_bundle_data_table(bundle, file_data: Dict[str, Any], data_manager) ->
         # File list section
         file_list_items = []
         file_list_items.append(html.Div([
-            html.Span("📄 ", style={'marginRight': '5px'}),
+            DashIconify(icon='tabler:file-text', width=14, height=14, color='#888', style={'marginRight': '5px'}),
             html.Strong(main_file.get('name', 'Unknown'), style={'color': '#333'})
         ], style={'padding': '4px 0', 'fontSize': '13px'}))
         
         for aux_file in aux_files:
             file_list_items.append(html.Div([
-                html.Span("📄 ", style={'marginRight': '5px'}),
+                DashIconify(icon='tabler:file-text', width=14, height=14, color='#888', style={'marginRight': '5px'}),
                 html.Span(aux_file.get('name', 'Unknown'), style={'color': '#666'})
             ], style={'padding': '4px 0', 'fontSize': '13px'}))
         
@@ -1293,7 +1294,7 @@ def create_data_table(file_data: Dict[str, Any]) -> html.Div:
 
         # File info section
         file_info = html.Div([
-            html.H5(f"📄 {record.get('name', 'Unknown')}", style={'margin': '0 0 10px 0', 'color': '#333'}),
+            html.H5([DashIconify(icon='tabler:file-text', width=16, height=16, color='#888', style={'marginRight': '6px'}), record.get('name', 'Unknown')], style={'margin': '0 0 10px 0', 'color': '#333', 'display': 'flex', 'alignItems': 'center'}),
             html.P([
                 html.Strong("Type: "), f"{record.get('type', 'unknown').capitalize()}",
                 html.Br(),

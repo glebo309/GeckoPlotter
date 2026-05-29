@@ -334,8 +334,8 @@ def register_tab_callbacks(app: dash.Dash, data_manager) -> None:
         return data
 
     GROUP_COLORS = [
-        '#E3F2FD', '#FFF3E0', '#E8F5E9', '#FCE4EC',
-        '#F3E5F5', '#E0F7FA', '#FFF8E1', '#F1F8E9',
+        '#eaf2f7', '#faf5ed', '#edf5f0', '#f5f0f5',
+        '#f0f5f0', '#f5f2ea', '#edf0f5', '#f5edea',
     ]
 
     @app.callback(
@@ -660,7 +660,7 @@ def create_group_comparison_table(group):
             html.Td(f"{peak.get('area', 0):,.0f}", style={'padding': '4px 6px', 'textAlign': 'right', 'border': '1px solid #e0e0e0', 'fontSize': '13px'}),
             html.Td(f"{peak.get('height', 0):,.0f}", style={'padding': '4px 6px', 'textAlign': 'right', 'border': '1px solid #e0e0e0', 'fontSize': '13px'}),
             html.Td(f"{peak.get('relative_area', 0):.2f}", style={'padding': '4px 6px', 'textAlign': 'right', 'border': '1px solid #e0e0e0', 'fontSize': '13px'}),
-            html.Td(f"{cross_sample_relative:.2f}", style={'padding': '4px 6px', 'textAlign': 'right', 'border': '1px solid #e0e0e0', 'fontSize': '13px', 'fontWeight': 'bold', 'backgroundColor': '#f0f8ff'}),
+            html.Td(f"{cross_sample_relative:.2f}", style={'padding': '4px 6px', 'textAlign': 'right', 'border': '1px solid #e0e0e0', 'fontSize': '13px', 'fontWeight': 'bold', 'backgroundColor': '#f5f5f5'}),
         ]))
     
     # Add total row
@@ -684,7 +684,7 @@ def create_group_comparison_table(group):
             html.Th("Area", style={'padding': '6px', 'fontWeight': 'bold', 'backgroundColor': '#f8f9fa', 'border': '1px solid #e0e0e0', 'fontSize': '13px'}),
             html.Th("Height", style={'padding': '6px', 'fontWeight': 'bold', 'backgroundColor': '#f8f9fa', 'border': '1px solid #e0e0e0', 'fontSize': '13px'}),
             html.Th("Within Sample (%)", style={'padding': '6px', 'fontWeight': 'bold', 'backgroundColor': '#f8f9fa', 'border': '1px solid #e0e0e0', 'fontSize': '13px'}),
-            html.Th("Cross-Sample (%)", style={'padding': '6px', 'fontWeight': 'bold', 'backgroundColor': '#f0f8ff', 'border': '1px solid #e0e0e0', 'fontSize': '13px'}),
+            html.Th("Cross-Sample (%)", style={'padding': '6px', 'fontWeight': 'bold', 'backgroundColor': '#f5f5f5', 'border': '1px solid #e0e0e0', 'fontSize': '13px'}),
         ])
     ] + rows + [total_row], style={
         'width': '100%',

@@ -15,6 +15,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 import dash
 from dash import dcc, html, dash_table, Input, Output, State, ClientsideFunction, clientside_callback
 import dash_mantine_components as dmc
+from dash_iconify import DashIconify
 import plotly.graph_objects as go
 
 if os.environ.get("GP_DEBUG", "") != "1":
@@ -48,17 +49,19 @@ app.title = 'GeckoPlotter'
 # Global data store (Bundle-first architecture)
 data_manager = DataStore()
 
-# Type icons for file tree
+def _icon(name, width=16, height=16, **kw):
+    return DashIconify(icon=name, width=width, height=height, **kw)
+
 TYPE_ICONS = {
-    'table': '📊',
-    'structured': '🧩',
-    'image': '🖼️',
-    'chromatogram': '🌊',
-    'spectra': '📈',
-    'uvvis_csv': '🧪',
-    'text': '📄',
-    'binary': '💾',
-    'unknown': '❓',
+    'table': 'tabler:table',
+    'structured': 'tabler:layout-grid',
+    'image': 'tabler:photo',
+    'chromatogram': 'tabler:chart-line',
+    'spectra': 'tabler:chart-area-line',
+    'uvvis_csv': 'tabler:flask',
+    'text': 'tabler:file-text',
+    'binary': 'tabler:file-code',
+    'unknown': 'tabler:file-question',
 }
 
 def render_file_tree(records):
@@ -73,11 +76,11 @@ def render_file_tree(records):
 
     tree_items = []
     for record in records:
-        icon = TYPE_ICONS.get(record.get('type'), TYPE_ICONS['unknown'])
+        icon_name = TYPE_ICONS.get(record.get('type'), TYPE_ICONS['unknown'])
         tree_items.append(
             html.Div(
                 [
-                    html.Span(icon, style={'marginRight': '8px'}),
+                    html.Span(_icon(icon_name, color='#666'), style={'marginRight': '8px', 'display': 'inline-flex'}),
                     html.Div(
                         [
                             html.Div(record.get('name'), style={'fontWeight': '500'}),
@@ -151,6 +154,9 @@ _layout_body = html.Div(
         dcc.Store(id='file-order', data={}),  # Per-group file ordering {group_id: {sort_dir: 'asc'|'desc'|null, order: [id, ...]}}
         dcc.Store(id='file-reorder-event', data=None),  # JS drag-and-drop event {group_id, order: [id, ...]}
         dcc.Store(id='keyboard-delete-trigger', data=0),  # Counter bumped by JS on Backspace/Delete keypress
+        dcc.Store(id='undo-trigger', data=0),
+        dcc.Store(id='redo-trigger', data=0),
+        dcc.Store(id='keyboard-action-trigger', data=None),
         dcc.Store(id='hidden-files', data=[]),  # List of hidden file IDs for CSS dimming
         dcc.Store(id='group-collapse-state', data={}),  # {group_id: bool} collapse state
         dcc.Store(id='group-move-event', data=None),  # {file_id, source_group, target_group|null}
@@ -169,7 +175,7 @@ _layout_body = html.Div(
                         html.Div(
                             className='app-logo',
                             children=[
-                                html.Span('🦎', className='logo-icon'),
+                                _icon('tabler:chart-dots-3', width=18, height=18, color='#888'),
                                 html.Span('GeckoPlotter'),
                             ],
                         ),
@@ -218,7 +224,7 @@ _layout_body = html.Div(
                                                             multiple=True,
                                                         ),
                                                         html.Button(
-                                                            '🗑',
+                                                            _icon('tabler:trash', width=14, height=14, color='#888'),
                                                             id='clear-files-btn',
                                                             className='btn btn-secondary',
                                                             title='Clear all files',
@@ -243,8 +249,8 @@ _layout_body = html.Div(
                                                 'transition': 'border-color 0.2s',
                                             },
                                             style_active={
-                                                'border': '2px dashed #ff6b35',
-                                                'backgroundColor': '#fff5f0',
+                                                'border': '2px dashed #333',
+                                                'backgroundColor': '#f5f5f5',
                                             },
                                             children=html.Div(
                                                 className='panel-content',
@@ -850,7 +856,7 @@ _layout_body = html.Div(
                                                                 ),
                                                                 html.Div(
                                                                     [
-                                                                        html.Span('📊', className='empty-state__icon'),
+                                                                        _icon('tabler:table', width=36, height=36, color='#bbb'),
                                                                         html.H4('Select a file to view data', className='empty-state__title'),
                                                                         html.P(
                                                                             'Choose a dataset from the File Explorer to display it as a table.',
@@ -970,7 +976,7 @@ _layout_body = html.Div(
                                                             children=[
                                                                 html.Div(
                                                                     [
-                                                                        html.Span('🦎', className='empty-state__icon'),
+                                                                        _icon('tabler:info-circle', width=36, height=36, color='#bbb'),
                                                                         html.H4('Select a file to view metadata', className='empty-state__title'),
                                                                         html.P(
                                                                             'Choose a dataset from the file explorer to view its metadata and details.',
