@@ -1221,7 +1221,22 @@ clientside_callback(
     Input('resize-init-trigger', 'id'),
 )
 
-# File-tree selection highlighting is now rendered server-side from active-file.
+# File-tree selection highlight + hidden-file dimming via clientside callback
+clientside_callback(
+    """
+    function(activeFile, hiddenFiles, _treeChildren) {
+        requestAnimationFrame(function() {
+            if (window._geckoApplyActiveFile) window._geckoApplyActiveFile(activeFile);
+            if (window._geckoApplyHiddenFiles) window._geckoApplyHiddenFiles(hiddenFiles || []);
+        });
+        return '';
+    }
+    """,
+    Output('dummy-output', 'children'),
+    [Input('active-file', 'data'),
+     Input('hidden-files', 'data'),
+     Input('file-tree', 'children')],
+)
 
 # Analysis tabs (DMC) <-> active-tab store, kept in sync both ways.
 # dmc.Tabs owns the visible panel; the store stays the source of truth for
