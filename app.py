@@ -1216,6 +1216,7 @@ _layout_body = html.Div(
                     dmc.MenuDropdown([
                         dmc.MenuItem('Delete Peak', id='ctx-delete-item'),
                         dmc.MenuItem('Rename Peak', id='ctx-rename-item'),
+                        dmc.MenuItem('Deconvolute', id='ctx-deconvolve-item'),
                         dmc.MenuItem('Integrate in All Files', id='ctx-integrate-item'),
                     ]),
                 ],
