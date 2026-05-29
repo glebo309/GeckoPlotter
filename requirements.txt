@@ -3,7 +3,6 @@
 dash==3.0.4
 plotly==6.0.1
 dash-mantine-components==2.3.0
-dash-ag-grid>=31.0.0  # AG Grid tables (added in UI modernization)
 
 # Data processing
 pandas>=2.0.0
