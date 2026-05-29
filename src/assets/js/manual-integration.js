@@ -202,6 +202,18 @@
         return true;
     }
 
+    function publishContextMenu(peakId, clientX, clientY) {
+        var dashClientside = window.dash_clientside ||
+            (window.parent && window.parent !== window ? window.parent.dash_clientside : null);
+        if (!peakId || !dashClientside || typeof dashClientside.set_props !== 'function') {
+            return false;
+        }
+        dashClientside.set_props('context-menu-store', {
+            data: { peak_id: peakId, x: clientX, y: clientY, ts: Date.now() }
+        });
+        return true;
+    }
+
     function resetAxes(gd) {
         if (!window.Plotly || !gd || !gd._fullLayout) return;
         var reset = {};
@@ -778,6 +790,15 @@
                 triggerEmptyClick();
             }, 240);
         });
+
+        gd.addEventListener('contextmenu', function (event) {
+            // Suppress the browser/Plotly default menu everywhere on the plot.
+            event.preventDefault();
+            var peakId = peakIdAtEvent(gd, event);
+            if (peakId) {
+                publishContextMenu(peakId, event.clientX, event.clientY);
+            }
+        }, true);
 
         gd.__geckoManualIntegrationClickInstalled = true;
     }

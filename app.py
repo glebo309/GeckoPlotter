@@ -36,6 +36,7 @@ from callbacks.publication_callbacks import register_publication_callbacks
 from callbacks.integration_callbacks import register_integration_callbacks
 from callbacks.baseline_callbacks import register_baseline_callbacks
 from callbacks.deconvolution_callbacks import register_deconvolution_callbacks
+from callbacks.context_menu_callbacks import register_context_menu_callbacks
 from callbacks.export_callbacks import register_export_callbacks
 from callbacks.calibration_callbacks import register_calibration_callbacks
 
@@ -131,6 +132,7 @@ _layout_body = html.Div(
         dcc.Store(id='deconv-markers', data=[]),  # [{x, y}, ...] peak-center markers
         dcc.Store(id='deconv-result', data=None),  # serialized DeconvResult (preview/accept)
         dcc.Store(id='deconv-marker-click-store', data=None),  # browser-side marker click {x, ts}
+        dcc.Store(id='context-menu-store', data=None),  # {peak_id, x, y, ts} from right-click
         dcc.Store(id='selected-peak-idx', data=None),  # Index of peak being edited
         dcc.Store(id='clear-shapes-trigger', data=0),  # Counter to trigger shape clearing
         dcc.Store(id='peak-change-trigger', data=0),  # Counter to refresh tables/overlays after peak edits
@@ -575,6 +577,14 @@ _layout_body = html.Div(
                                                                  id='baseline-mode-indicator',
                                                                  style={'fontSize': '11px', 'color': '#666', 'marginBottom': '10px'}),
                                                         html.Div(id='manual-peak-table-container', style={'marginBottom': '10px'}),
+                                                        html.Div([
+                                                            html.Label('RT match tolerance (min)', className='form-label'),
+                                                            dmc.NumberInput(id='int-rt-tolerance', value=0.3, min=0.05, max=1.0,
+                                                                            step=0.05, decimalScale=2, size='xs',
+                                                                            style={'width': '100%'}),
+                                                        ], style={'marginBottom': '6px'}),
+                                                        html.Div(id='ctx-status',
+                                                                 style={'fontSize': '11px', 'color': '#2e7d32', 'marginBottom': '6px'}),
                                                         html.Hr(style={'margin': '10px 0', 'borderColor': '#e0e0e0'}),
                                                         # -- Peak Deconvolution (EMG) --
                                                         html.Div('Peak Deconvolution', className='toolbox-section-title'),
@@ -1185,6 +1195,44 @@ _layout_body = html.Div(
         ),
 
         html.Div(id='resize-init-trigger', style={'display': 'none'}),
+
+        # -- Right-click context menu (peaks) --
+        # Fixed anchor moved to the cursor by a callback; the portal dropdown
+        # opens relative to it. Dismissal (outside-click / Escape) is native.
+        html.Div(
+            id='context-menu-anchor',
+            style={'position': 'fixed', 'left': '0px', 'top': '0px',
+                   'width': '1px', 'height': '1px', 'zIndex': 4000,
+                   'pointerEvents': 'none'},
+            children=dmc.Menu(
+                id='context-menu',
+                opened=False,
+                position='bottom-start',
+                offset=2,
+                withinPortal=True,
+                shadow='md',
+                children=[
+                    dmc.MenuTarget(html.Div(style={'width': '1px', 'height': '1px'})),
+                    dmc.MenuDropdown([
+                        dmc.MenuItem('Delete Peak', id='ctx-delete-item'),
+                        dmc.MenuItem('Rename Peak', id='ctx-rename-item'),
+                        dmc.MenuItem('Integrate in All Files', id='ctx-integrate-item'),
+                    ]),
+                ],
+            ),
+        ),
+        dmc.Modal(
+            id='ctx-rename-modal',
+            title='Rename Peak',
+            opened=False,
+            zIndex=4100,
+            children=[
+                dmc.TextInput(id='ctx-rename-input', placeholder='Peak name'),
+                dmc.Group([
+                    dmc.Button('Save', id='ctx-rename-save', size='xs'),
+                ], justify='flex-end', mt='sm'),
+            ],
+        ),
     ]
 )
 
@@ -1209,6 +1257,7 @@ register_publication_callbacks(app, data_manager)
 register_integration_callbacks(app, data_manager)
 register_baseline_callbacks(app, data_manager)
 register_deconvolution_callbacks(app, data_manager)
+register_context_menu_callbacks(app, data_manager)
 register_export_callbacks(app, data_manager)
 register_calibration_callbacks(app, data_manager)
 register_plot_settings_callbacks(app, data_manager)

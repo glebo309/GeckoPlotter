@@ -278,7 +278,7 @@ class PeakService:
         y_right = float(ys[-1])
         baseline = y_left + (y_right - y_left) * (xs - xs[0]) / (xs[-1] - xs[0])
         diff = ys - baseline
-        area = float(np.trapz(np.maximum(diff, 0), xs))
+        area = float(np.trapezoid(np.maximum(diff, 0), xs))
         height = float(diff.max())
 
         baseline_clamped = np.minimum(baseline, ys)
@@ -502,6 +502,8 @@ class PeakService:
         source: str = 'manual',
         deconv_group: Optional[str] = None,
         fit_params: Optional[Dict] = None,
+        name: Optional[str] = None,
+        label: Optional[str] = None,
     ) -> Peak:
         """Add a manually integrated peak from baseline drawing (p-line).
 
@@ -513,6 +515,10 @@ class PeakService:
         replacement is skipped so sibling components (which overlap by nature)
         never clobber one another. Clearing pre-existing peaks in the region is
         the caller's responsibility for deconvolution.
+
+        ``source`` tags the peak's origin ('manual' by default; 'cross_integrated'
+        when dropped in by the cross-file integration tool). ``name``/``label``
+        let cross-file integration inherit the source peak's compound name.
         """
         existing = self._peaks.get(file_id, [])
 
@@ -521,7 +527,7 @@ class PeakService:
             peak = Peak(
                 peak_id=str(uuid.uuid4()),
                 file_id=file_id,
-                name=f"Peak {peak_number}",
+                name=name if name is not None else f"Peak {peak_number}",
                 rt=apex_x,
                 rt_start=min(p_line[0][0], p_line[1][0]),
                 rt_end=max(p_line[0][0], p_line[1][0]),
@@ -530,6 +536,7 @@ class PeakService:
                 width=abs(p_line[1][0] - p_line[0][0]),
                 color=self._next_color(),
                 source='deconvolved',
+                label=label if label is not None else '',
                 poly_x=poly_x,
                 poly_y=poly_y,
                 p_line=p_line,
@@ -558,14 +565,18 @@ class PeakService:
                 p.rt_start = min(p_line[0][0], p_line[1][0])
                 p.rt_end = max(p_line[0][0], p_line[1][0])
                 p.width = p.rt_end - p.rt_start
-                p.source = 'manual'
+                p.source = source
+                if name is not None:
+                    p.name = name
+                if label is not None:
+                    p.label = label
                 return p
 
         peak_number = len(existing) + 1
         peak = Peak(
             peak_id=str(uuid.uuid4()),
             file_id=file_id,
-            name=f"Peak {peak_number}",
+            name=name if name is not None else f"Peak {peak_number}",
             rt=apex_x,
             rt_start=min(p_line[0][0], p_line[1][0]),
             rt_end=max(p_line[0][0], p_line[1][0]),
@@ -573,7 +584,8 @@ class PeakService:
             height=height,
             width=abs(p_line[1][0] - p_line[0][0]),
             color=self._next_color(),
-            source='manual',
+            source=source,
+            label=label if label is not None else '',
             poly_x=poly_x,
             poly_y=poly_y,
             p_line=p_line,
@@ -606,6 +618,100 @@ class PeakService:
                 kept.append(p)
         self._peaks[file_id] = kept
         return removed
+
+    def find_matching_peak(
+        self,
+        file_id: str,
+        target_rt: float,
+        tolerance: float,
+        signal: np.ndarray,
+        time: np.ndarray,
+        prominence_frac: float = 0.01,
+    ) -> Optional[dict]:
+        """Find and integrate the most prominent peak within an RT window.
+
+        Searches ``[target_rt - tolerance, target_rt + tolerance]`` for the most
+        prominent local maximum (``scipy.signal.find_peaks`` with a prominence
+        floor of ``prominence_frac`` of the signal range). If none is found above
+        that floor, returns ``None`` — no phantom peaks. Otherwise walks the peak
+        flanks to boundaries (valley or 5% of apex height), integrates against a
+        straight baseline, and returns geometry ready for ``add_baseline_peak``.
+
+        Returns a dict with apex_x, height, area, rt_start, rt_end, poly_x,
+        poly_y, p_line, q1, q2 — or ``None``.
+        """
+        signal = np.asarray(signal, dtype=float)
+        time = np.asarray(time, dtype=float)
+        if signal.size < 3:
+            return None
+
+        sig_range = float(np.ptp(signal))
+        if sig_range == 0:
+            return None
+
+        lo = target_rt - tolerance
+        hi = target_rt + tolerance
+        win_idx = np.where((time >= lo) & (time <= hi))[0]
+        if win_idx.size < 3:
+            return None
+
+        win_sig = signal[win_idx]
+        prominence = sig_range * prominence_frac
+        rel_peaks, props = find_peaks(win_sig, prominence=prominence)
+        if rel_peaks.size == 0:
+            return None
+
+        # Most prominent local maximum within the window.
+        best = rel_peaks[int(np.argmax(props['prominences']))]
+        apex_idx = int(win_idx[0] + best)
+        apex_h = float(signal[apex_idx])
+        floor = apex_h * 0.05
+
+        # Walk down the flanks until a valley (signal turns upward) or floor.
+        left = apex_idx
+        while left > 1:
+            if signal[left - 1] > signal[left]:
+                break
+            if signal[left] < floor:
+                break
+            left -= 1
+
+        right = apex_idx
+        while right < len(signal) - 2:
+            if signal[right + 1] > signal[right]:
+                break
+            if signal[right] < floor:
+                break
+            right += 1
+
+        if right <= left:
+            return None
+
+        xs = time[left:right + 1]
+        ys = signal[left:right + 1]
+        y_left = float(signal[left])
+        y_right = float(signal[right])
+        baseline = y_left + (y_right - y_left) * (xs - xs[0]) / (xs[-1] - xs[0])
+        diff = ys - baseline
+        area = float(np.trapezoid(np.maximum(diff, 0), xs))
+        if area <= 0:
+            return None
+
+        rt_start = float(time[left])
+        rt_end = float(time[right])
+        baseline_clamped = np.minimum(baseline, ys)
+        return dict(
+            apex_x=float(time[apex_idx]),
+            height=float(diff.max()),
+            area=area,
+            rt_start=rt_start,
+            rt_end=rt_end,
+            poly_x=np.concatenate([xs, xs[::-1]]).tolist(),
+            poly_y=np.concatenate([ys, baseline_clamped[::-1]]).tolist(),
+            p_line=[(rt_start, y_left), (rt_end, y_right)],
+            q1=(rt_start, y_left),
+            q2=(rt_end, y_right),
+        )
 
     def clear_peaks(self, file_id: str) -> None:
         """Remove all peaks for a bundle."""
@@ -861,7 +967,7 @@ class PeakService:
         if baseline is not None:
             s_seg = s_seg - baseline[mask]
 
-        area = float(np.trapz(s_seg, t_seg))
+        area = float(np.trapezoid(s_seg, t_seg))
         return max(area, 0.0)
 
     @staticmethod
