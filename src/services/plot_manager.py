@@ -20,18 +20,20 @@ class PlotManager:
         ]
 
     def create_empty_plot(self, message: str = "Select a file to view data") -> go.Figure:
-        """Create an empty placeholder plot."""
         fig = go.Figure()
-        
         fig.update_layout(
-            title=message,
-            xaxis_title='X Axis',
-            yaxis_title='Y Axis',
             template='plotly_white',
-            height=400,
-            showlegend=False
+            xaxis={'visible': False},
+            yaxis={'visible': False},
+            showlegend=False,
+            margin=dict(l=0, r=0, t=0, b=0),
+            annotations=[dict(
+                text=f"🦎  {message}",
+                xref='paper', yref='paper',
+                x=0.5, y=0.5, showarrow=False,
+                font=dict(size=15, color='#bbb'),
+            )],
         )
-        
         return fig
 
     def create_multi_file_plot(

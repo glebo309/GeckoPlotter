@@ -176,7 +176,7 @@ _layout_body = html.Div(
                         html.Div(
                             className='app-logo',
                             children=[
-                                _icon('tabler:chart-dots-3', width=18, height=18, color='#888'),
+                                html.Span('🦎', style={'fontSize': '18px'}),
                                 html.Span('GeckoPlotter'),
                             ],
                         ),
@@ -777,12 +777,12 @@ _layout_body = html.Div(
                                                             dragmode='zoom',
                                                             uirevision='main-plot',
                                                             autosize=True,
-                                                            margin=dict(l=50, r=20, t=30, b=40),
+                                                            margin=dict(l=0, r=0, t=0, b=0),
                                                             annotations=[dict(
-                                                                text='Upload files to start visualizing data',
+                                                                text='🦎  Drop files here to get started',
                                                                 xref='paper', yref='paper',
                                                                 x=0.5, y=0.5, showarrow=False,
-                                                                font=dict(size=16, color='#999'),
+                                                                font=dict(size=15, color='#bbb'),
                                                             )],
                                                         )
                                                     ),
@@ -1245,7 +1245,10 @@ _layout_body = html.Div(
 )
 
 # DMC 2.x requires a MantineProvider ancestor for any DMC component to render.
-app.layout = dmc.MantineProvider(children=[_layout_body])
+app.layout = dmc.MantineProvider(
+    theme={"primaryColor": "teal"},
+    children=[_layout_body],
+)
 
 # Register callbacks
 from callbacks.tab_callbacks import register_tab_callbacks
