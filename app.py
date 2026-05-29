@@ -299,123 +299,125 @@ _layout_body = html.Div(
                                                     className='toolbox-tab-content',
                                                     style={'display': 'block', 'padding': '10px', 'overflowY': 'auto', 'maxHeight': 'calc(100% - 40px)'},
                                                     children=[
-                                                        # ── Dynamic Header ──
+                                                        # -- Dynamic Header --
                                                         html.Div(id='pt-panel-header', children='Analysis Plot Settings',
                                                                  className='toolbox-section-title',
                                                                  style={'fontSize': '13px', 'fontWeight': '600', 'marginBottom': '8px',
                                                                         'padding': '4px 0', 'borderBottom': '1px solid #ddd'}),
 
-                                                        # ── 0. Layout Mode (Raw only) ──
+                                                        # -- 0. Layout Mode (Raw only) --
                                                         html.Div(id='pt-raw-layout-wrapper', children=[
                                                             html.Div('Trace Layout', className='toolbox-section-title'),
-                                                            dcc.RadioItems(
+                                                            dmc.RadioGroup(
                                                                 id='pt-layout-mode',
-                                                                options=[
-                                                                    {'label': ' Superposed', 'value': 'overlay'},
-                                                                    {'label': ' Subplots', 'value': 'stacked'},
-                                                                ],
-                                                                value='overlay', inline=True,
-                                                                style={'fontSize': '12px', 'marginBottom': '10px'},
+                                                                value='overlay',
+                                                                size='xs',
+                                                                mb=10,
+                                                                children=dmc.Group([
+                                                                    dmc.Radio(label='Superposed', value='overlay'),
+                                                                    dmc.Radio(label='Subplots', value='stacked'),
+                                                                ], gap='md'),
                                                             ),
                                                         ], style={'display': 'none'}),
 
-                                                        # ── 1. Plot Type (Analysis only) ──
+                                                        # -- 1. Plot Type (Analysis only) --
                                                         html.Div(id='pt-plot-type-wrapper', children=[
                                                             html.Div('Plot Type', className='toolbox-section-title'),
-                                                            dcc.RadioItems(
+                                                            dmc.RadioGroup(
                                                                 id='pt-plot-type',
-                                                                options=[
-                                                                    {'label': ' Bar', 'value': 'bar'},
-                                                                    {'label': ' Line', 'value': 'line'},
-                                                                    {'label': ' Scatter', 'value': 'scatter'},
-                                                                ],
-                                                                value='bar', inline=True,
-                                                                style={'fontSize': '12px', 'marginBottom': '10px'},
+                                                                value='bar',
+                                                                size='xs',
+                                                                mb=10,
+                                                                children=dmc.Group([
+                                                                    dmc.Radio(label='Bar', value='bar'),
+                                                                    dmc.Radio(label='Line', value='line'),
+                                                                    dmc.Radio(label='Scatter', value='scatter'),
+                                                                ], gap='md'),
                                                             ),
                                                         ]),
 
-                                                        # ── 2. Axes (Both) ──
+                                                        # -- 2. Axes (Both) --
                                                         html.Div('Axes', className='toolbox-section-title'),
-                                                        dcc.Checklist(id='pt-auto-range', options=[{'label': ' Auto range', 'value': 'auto'}],
-                                                                      value=['auto'], style={'marginBottom': '6px', 'fontSize': '12px'}),
-                                                        dcc.Checklist(id='pt-categorical-x', options=[{'label': ' Categorical X axis', 'value': 'cat'}],
-                                                                      value=['cat'], style={'marginBottom': '6px', 'fontSize': '12px'}),
+                                                        dmc.Switch(id='pt-auto-range', label='Auto range', checked=True,
+                                                                   size='sm', mb=6),
+                                                        dmc.Switch(id='pt-categorical-x', label='Categorical X axis', checked=True,
+                                                                   size='sm', mb=6),
                                                         html.Div(id='pt-range-wrapper', children=[
                                                             html.Div([
                                                                 html.Div([html.Label('X min', className='form-label'),
-                                                                          dcc.Input(id='pt-x-min', type='number', className='form-input', style={'width': '100%'})],
+                                                                          dmc.NumberInput(id='pt-x-min', size='xs', style={'width': '100%'})],
                                                                          style={'flex': '1'}),
                                                                 html.Div([html.Label('X max', className='form-label'),
-                                                                          dcc.Input(id='pt-x-max', type='number', className='form-input', style={'width': '100%'})],
+                                                                          dmc.NumberInput(id='pt-x-max', size='xs', style={'width': '100%'})],
                                                                          style={'flex': '1'}),
                                                             ], style={'display': 'flex', 'gap': '8px', 'marginBottom': '6px'}, id='pt-x-range-row'),
                                                             html.Div([
                                                                 html.Div([html.Label('Y min', className='form-label'),
-                                                                          dcc.Input(id='pt-y-min', type='number', className='form-input', style={'width': '100%'})],
+                                                                          dmc.NumberInput(id='pt-y-min', size='xs', style={'width': '100%'})],
                                                                          style={'flex': '1'}),
                                                                 html.Div([html.Label('Y max', className='form-label'),
-                                                                          dcc.Input(id='pt-y-max', type='number', className='form-input', style={'width': '100%'})],
+                                                                          dmc.NumberInput(id='pt-y-max', size='xs', style={'width': '100%'})],
                                                                          style={'flex': '1'}),
                                                             ], style={'display': 'flex', 'gap': '8px', 'marginBottom': '6px'}, id='pt-y-range-row'),
                                                         ], style={'display': 'none'}),
                                                         html.Div([
                                                             html.Div([html.Label('X scale', className='form-label'),
-                                                                      dcc.Dropdown(id='pt-x-scale', value='linear',
-                                                                                   options=[{'label': 'Linear', 'value': 'linear'}, {'label': 'Log', 'value': 'log'}],
-                                                                                   clearable=False, style={'fontSize': '12px'})],
+                                                                      dmc.Select(id='pt-x-scale', value='linear', size='xs',
+                                                                                 data=[{'label': 'Linear', 'value': 'linear'}, {'label': 'Log', 'value': 'log'}],
+                                                                                 clearable=False, allowDeselect=False)],
                                                                      style={'flex': '1'}),
                                                             html.Div([html.Label('Y scale', className='form-label'),
-                                                                      dcc.Dropdown(id='pt-y-scale', value='linear',
-                                                                                   options=[{'label': 'Linear', 'value': 'linear'}, {'label': 'Log', 'value': 'log'}],
-                                                                                   clearable=False, style={'fontSize': '12px'})],
+                                                                      dmc.Select(id='pt-y-scale', value='linear', size='xs',
+                                                                                 data=[{'label': 'Linear', 'value': 'linear'}, {'label': 'Log', 'value': 'log'}],
+                                                                                 clearable=False, allowDeselect=False)],
                                                                      style={'flex': '1'}),
                                                         ], style={'display': 'flex', 'gap': '8px', 'marginBottom': '10px'}),
 
-                                                        # ── 3. Theme & Colors (Analysis only for now) ──
+                                                        # -- 3. Theme & Colors (Analysis only for now) --
                                                         html.Div(id='pt-theme-wrapper', children=[
                                                             html.Div('Theme & Colors', className='toolbox-section-title'),
                                                             html.Div([
                                                                 html.Label('Theme', className='form-label'),
-                                                                dcc.Dropdown(id='pt-theme', value='plotly_white',
-                                                                             options=[{'label': t, 'value': t} for t in
-                                                                                      ['plotly_white', 'simple_white', 'plotly', 'ggplot2', 'seaborn',
-                                                                                       'plotly_dark', 'presentation', 'none']],
-                                                                             clearable=False, style={'fontSize': '12px'}),
+                                                                dmc.Select(id='pt-theme', value='plotly_white', size='xs',
+                                                                           data=[{'label': t, 'value': t} for t in
+                                                                                 ['plotly_white', 'simple_white', 'plotly', 'ggplot2', 'seaborn',
+                                                                                  'plotly_dark', 'presentation', 'none']],
+                                                                           clearable=False, allowDeselect=False, searchable=True),
                                                             ], style={'marginBottom': '6px'}),
                                                         ]),
                                                         html.Div([
                                                             html.Label('Color palette', className='form-label'),
-                                                            dcc.Dropdown(id='pt-palette', value='okabe_ito',
-                                                                         options=[{'label': p.replace('_', ' ').title(), 'value': p} for p in
-                                                                                  ['okabe_ito', 'plotly', 'd3', 'pastel']],
-                                                                         clearable=False, style={'fontSize': '12px'}),
+                                                            dmc.Select(id='pt-palette', value='okabe_ito', size='xs',
+                                                                       data=[{'label': p.replace('_', ' ').title(), 'value': p} for p in
+                                                                             ['okabe_ito', 'plotly', 'd3', 'pastel']],
+                                                                       clearable=False, allowDeselect=False),
                                                         ], style={'marginBottom': '6px'}),
                                                         html.Div([
                                                             html.Div([html.Label('Plot bg', className='form-label'),
-                                                                      dcc.Input(id='pt-bg-color', type='text', value='#ffffff',
-                                                                                className='form-input', style={'width': '100%'})],
+                                                                      dmc.ColorInput(id='pt-bg-color', value='#ffffff', format='hex',
+                                                                                     size='xs', style={'width': '100%'})],
                                                                      style={'flex': '1'}),
                                                             html.Div([html.Label('Paper bg', className='form-label'),
-                                                                      dcc.Input(id='pt-paper-color', type='text', value='#ffffff',
-                                                                                className='form-input', style={'width': '100%'})],
+                                                                      dmc.ColorInput(id='pt-paper-color', value='#ffffff', format='hex',
+                                                                                     size='xs', style={'width': '100%'})],
                                                                      style={'flex': '1'}),
                                                         ], style={'display': 'flex', 'gap': '8px', 'marginBottom': '10px'}),
 
-                                                        # ── 4. Traces ──
+                                                        # -- 4. Traces --
                                                         html.Div('Traces', className='toolbox-section-title'),
                                                         # Line width: both (raw traces + analysis line/scatter)
                                                         html.Div(id='pt-line-controls-wrapper', children=[
                                                             html.Div([
                                                                 html.Div([html.Label('Line width', className='form-label'),
-                                                                          dcc.Input(id='pt-line-width', type='number', value=1.5, min=0.5, max=5, step=0.5,
-                                                                                    className='form-input', style={'width': '100%'})],
+                                                                          dmc.NumberInput(id='pt-line-width', value=1.5, min=0.5, max=5, step=0.5,
+                                                                                          decimalScale=2, size='xs', style={'width': '100%'})],
                                                                          style={'flex': '1'}),
                                                                 html.Div(id='pt-line-style-cell', children=[
                                                                     html.Label('Line style', className='form-label'),
-                                                                    dcc.Dropdown(id='pt-line-style', value='solid',
-                                                                                 options=[{'label': s.title(), 'value': s} for s in
-                                                                                          ['solid', 'dash', 'dot', 'dashdot']],
-                                                                                 clearable=False, style={'fontSize': '12px'}),
+                                                                    dmc.Select(id='pt-line-style', value='solid', size='xs',
+                                                                               data=[{'label': s.title(), 'value': s} for s in
+                                                                                     ['solid', 'dash', 'dot', 'dashdot']],
+                                                                               clearable=False, allowDeselect=False),
                                                                 ], style={'flex': '1'}),
                                                             ], style={'display': 'flex', 'gap': '8px', 'marginBottom': '6px'}),
                                                         ]),
@@ -423,108 +425,110 @@ _layout_body = html.Div(
                                                         html.Div(id='pt-marker-wrapper', children=[
                                                             html.Div([
                                                                 html.Div([html.Label('Marker size', className='form-label'),
-                                                                          dcc.Input(id='pt-marker-size', type='number', value=6, min=2, max=16, step=1,
-                                                                                    className='form-input', style={'width': '100%'})],
+                                                                          dmc.NumberInput(id='pt-marker-size', value=6, min=2, max=16, step=1,
+                                                                                          size='xs', style={'width': '100%'})],
                                                                          style={'flex': '1'}),
                                                                 html.Div([html.Label('Marker shape', className='form-label'),
-                                                                          dcc.Dropdown(id='pt-marker-symbol', value='circle',
-                                                                                       options=[{'label': s.title(), 'value': s} for s in
-                                                                                                ['circle', 'square', 'diamond', 'cross', 'x',
-                                                                                                 'triangle-up', 'triangle-down', 'star']],
-                                                                                       clearable=False, style={'fontSize': '12px'})],
+                                                                          dmc.Select(id='pt-marker-symbol', value='circle', size='xs',
+                                                                                     data=[{'label': s.title(), 'value': s} for s in
+                                                                                           ['circle', 'square', 'diamond', 'cross', 'x',
+                                                                                            'triangle-up', 'triangle-down', 'star']],
+                                                                                     clearable=False, allowDeselect=False, searchable=True)],
                                                                          style={'flex': '1'}),
                                                             ], style={'display': 'flex', 'gap': '8px', 'marginBottom': '6px'}),
                                                         ]),
                                                         # Opacity: both
                                                         html.Div([
                                                             html.Div([html.Label('Opacity', className='form-label'),
-                                                                      dcc.Slider(id='pt-trace-opacity', min=0.1, max=1.0, step=0.1, value=1.0,
-                                                                                 marks={0.1: '.1', 0.5: '.5', 1.0: '1'})],
+                                                                      dmc.Slider(id='pt-trace-opacity', min=0.1, max=1.0, step=0.1, value=1.0,
+                                                                                 marks=[{'value': 0.1, 'label': '.1'}, {'value': 0.5, 'label': '.5'},
+                                                                                        {'value': 1.0, 'label': '1'}])],
                                                                      style={'flex': '1'}),
                                                         ], style={'marginBottom': '6px'}),
                                                         # Bar controls: analysis bar only
                                                         html.Div(id='pt-bar-wrapper', children=[
                                                             html.Div([
                                                                 html.Div([html.Label('Bar gap', className='form-label'),
-                                                                          dcc.Input(id='pt-bar-gap', type='number', value=0.2, min=0, max=1, step=0.05,
-                                                                                    className='form-input', style={'width': '100%'})],
+                                                                          dmc.NumberInput(id='pt-bar-gap', value=0.2, min=0, max=1, step=0.05,
+                                                                                          decimalScale=2, size='xs', style={'width': '100%'})],
                                                                          style={'flex': '1'}),
                                                                 html.Div([html.Label('Group gap', className='form-label'),
-                                                                          dcc.Input(id='pt-bar-group-gap', type='number', value=0.1, min=0, max=1, step=0.05,
-                                                                                    className='form-input', style={'width': '100%'})],
+                                                                          dmc.NumberInput(id='pt-bar-group-gap', value=0.1, min=0, max=1, step=0.05,
+                                                                                          decimalScale=2, size='xs', style={'width': '100%'})],
                                                                          style={'flex': '1'}),
                                                             ], style={'display': 'flex', 'gap': '8px', 'marginBottom': '10px'}),
                                                         ]),
 
-                                                        # ── 5. Labels (Both) ──
+                                                        # -- 5. Labels (Both) --
                                                         html.Div('Labels', className='toolbox-section-title'),
                                                         html.Div([html.Label('Title', className='form-label'),
-                                                                   dcc.Input(id='pt-title', type='text', placeholder='Plot title', className='form-input')],
+                                                                   dmc.TextInput(id='pt-title', placeholder='Plot title', size='xs')],
                                                                  style={'marginBottom': '6px'}),
 
-                                                        # ── 6. Typography (Both) ──
+                                                        # -- 6. Typography (Both) --
                                                         html.Div('Typography', className='toolbox-section-title'),
                                                         html.Div([
                                                             html.Div([html.Label('Font', className='form-label'),
-                                                                      dcc.Dropdown(id='pt-font', value='Arial',
-                                                                                   options=[{'label': f, 'value': f} for f in
-                                                                                            ['Arial', 'Helvetica', 'Times New Roman', 'Courier New',
-                                                                                             'Georgia', 'Verdana', 'Calibri', 'Computer Modern']],
-                                                                                   clearable=False, style={'fontSize': '12px'})],
+                                                                      dmc.Select(id='pt-font', value='Arial', size='xs',
+                                                                                 data=[{'label': f, 'value': f} for f in
+                                                                                       ['Arial', 'Helvetica', 'Times New Roman', 'Courier New',
+                                                                                        'Georgia', 'Verdana', 'Calibri', 'Computer Modern']],
+                                                                                 clearable=False, allowDeselect=False, searchable=True)],
                                                                      style={'flex': '2'}),
                                                             html.Div([html.Label('Size', className='form-label'),
-                                                                      dcc.Input(id='pt-font-size', type='number', value=12, min=8, max=24, step=1,
-                                                                                className='form-input', style={'width': '100%'})],
+                                                                      dmc.NumberInput(id='pt-font-size', value=12, min=8, max=24, step=1,
+                                                                                      size='xs', style={'width': '100%'})],
                                                                      style={'flex': '1'}),
                                                         ], style={'display': 'flex', 'gap': '8px', 'marginBottom': '6px'}),
                                                         html.Div([
                                                             html.Div([html.Label('Title size', className='form-label'),
-                                                                      dcc.Input(id='pt-title-font-size', type='number', value=14, min=10, max=32, step=1,
-                                                                                className='form-input', style={'width': '100%'})],
+                                                                      dmc.NumberInput(id='pt-title-font-size', value=14, min=10, max=32, step=1,
+                                                                                      size='xs', style={'width': '100%'})],
                                                                      style={'flex': '1'}),
                                                             html.Div([html.Label('Tick size', className='form-label'),
-                                                                      dcc.Input(id='pt-tick-font-size', type='number', value=10, min=6, max=18, step=1,
-                                                                                className='form-input', style={'width': '100%'})],
+                                                                      dmc.NumberInput(id='pt-tick-font-size', value=10, min=6, max=18, step=1,
+                                                                                      size='xs', style={'width': '100%'})],
                                                                      style={'flex': '1'}),
                                                         ], style={'display': 'flex', 'gap': '8px', 'marginBottom': '6px'}),
-                                                        dcc.Checklist(id='pt-bold-title', options=[{'label': ' Bold title', 'value': 'bold'}],
-                                                                      value=['bold'], style={'fontSize': '12px', 'marginBottom': '10px'}),
+                                                        dmc.Switch(id='pt-bold-title', label='Bold title', checked=True,
+                                                                   size='sm', mb=10),
 
-                                                        # ── 7. Legend (Both) ──
+                                                        # -- 7. Legend (Both) --
                                                         html.Div('Legend', className='toolbox-section-title'),
-                                                        dcc.Checklist(id='pt-show-legend', options=[{'label': ' Show legend', 'value': 'show'}],
-                                                                      value=['show'], style={'fontSize': '12px', 'marginBottom': '6px'}),
+                                                        dmc.Switch(id='pt-show-legend', label='Show legend', checked=True,
+                                                                   size='sm', mb=6),
                                                         html.Div(id='pt-legend-pos-wrapper', children=[
                                                             html.Label('Position', className='form-label'),
-                                                            dcc.Dropdown(id='pt-legend-pos', value='top-right',
-                                                                         options=[{'label': p.replace('-', ' ').title(), 'value': p}
-                                                                                  for p in ['top-right', 'top-left', 'bottom-right', 'bottom-left']],
-                                                                         clearable=False, style={'fontSize': '12px'}),
+                                                            dmc.Select(id='pt-legend-pos', value='top-right', size='xs',
+                                                                       data=[{'label': p.replace('-', ' ').title(), 'value': p}
+                                                                             for p in ['top-right', 'top-left', 'bottom-right', 'bottom-left']],
+                                                                       clearable=False, allowDeselect=False),
                                                         ], style={'marginBottom': '10px'}),
 
-                                                        # ── 8. Grid & Frame (Both) ──
+                                                        # -- 8. Grid & Frame (Both) --
                                                         html.Div('Grid & Frame', className='toolbox-section-title'),
-                                                        dcc.Checklist(id='pt-layout-opts',
-                                                                      options=[
-                                                                          {'label': ' Grid X', 'value': 'grid_x'},
-                                                                          {'label': ' Grid Y', 'value': 'grid_y'},
-                                                                          {'label': ' Tick marks', 'value': 'ticks'},
-                                                                          {'label': ' Frame (box)', 'value': 'frame'},
-                                                                      ],
-                                                                      value=['grid_x', 'grid_y', 'ticks', 'frame'],
-                                                                      style={'fontSize': '12px', 'marginBottom': '6px'},
-                                                                      labelStyle={'display': 'block', 'marginBottom': '4px'}),
+                                                        dmc.CheckboxGroup(
+                                                            id='pt-layout-opts',
+                                                            value=['grid_x', 'grid_y', 'ticks', 'frame'],
+                                                            mb=6,
+                                                            children=dmc.Stack([
+                                                                dmc.Checkbox(label='Grid X', value='grid_x'),
+                                                                dmc.Checkbox(label='Grid Y', value='grid_y'),
+                                                                dmc.Checkbox(label='Tick marks', value='ticks'),
+                                                                dmc.Checkbox(label='Frame (box)', value='frame'),
+                                                            ], gap=4),
+                                                        ),
                                                         html.Div(id='pt-tick-grid-detail-wrapper', children=[
                                                             html.Div([
                                                                 html.Div([html.Label('Tick direction', className='form-label'),
-                                                                          dcc.Dropdown(id='pt-tick-dir', value='outside',
-                                                                                       options=[{'label': d.title(), 'value': d} for d in ['outside', 'inside']],
-                                                                                       clearable=False, style={'fontSize': '12px'})],
+                                                                          dmc.Select(id='pt-tick-dir', value='outside', size='xs',
+                                                                                     data=[{'label': d.title(), 'value': d} for d in ['outside', 'inside']],
+                                                                                     clearable=False, allowDeselect=False)],
                                                                          style={'flex': '1'}),
                                                                 html.Div([html.Label('Grid style', className='form-label'),
-                                                                          dcc.Dropdown(id='pt-grid-style', value='solid',
-                                                                                       options=[{'label': s.title(), 'value': s} for s in ['solid', 'dash', 'dot']],
-                                                                                       clearable=False, style={'fontSize': '12px'})],
+                                                                          dmc.Select(id='pt-grid-style', value='solid', size='xs',
+                                                                                     data=[{'label': s.title(), 'value': s} for s in ['solid', 'dash', 'dot']],
+                                                                                     clearable=False, allowDeselect=False)],
                                                                          style={'flex': '1'}),
                                                             ], style={'display': 'flex', 'gap': '8px', 'marginBottom': '10px'}),
                                                         ]),
