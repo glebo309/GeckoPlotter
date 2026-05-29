@@ -752,26 +752,26 @@ _layout_body = html.Div(
                                             className='panel-content',
                                             style={'display': 'flex', 'flexDirection': 'column', 'height': '100%'},
                                             children=[
-                                                # Tab Headers (moved up, no panel header)
-                                                html.Div([
-                                                    html.Button("Data Overview", id="data-overview-tab", className="tab-button active", n_clicks=0, style={'display': 'inline-block', 'marginRight': '10px'}),
-                                                    html.Button("Peak Analysis", id="peak-analysis-tab", className="tab-button", n_clicks=0, style={'display': 'inline-block', 'marginRight': '10px'}),
-                                                    html.Button("Across Samples", id="across-samples-tab", className="tab-button", n_clicks=0, style={'display': 'inline-block', 'marginRight': '10px'}),
-                                                    html.Button("Metadata", id="metadata-tab", className="tab-button", n_clicks=0, style={'display': 'inline-block', 'marginRight': '10px'}),
-                                                    html.Button("Calibration", id="calibration-tab", className="tab-button", n_clicks=0, style={'display': 'inline-block', 'marginRight': '10px'}),
-                                                    html.Button("MS Viewer", id="ms-viewer-tab", className="tab-button", n_clicks=0, style={'display': 'inline-block', 'marginRight': '10px'}),
-                                                ], className="tab-header", style={
-                                                    'display': 'flex',
-                                                    'borderBottom': '1px solid #e0e0e0',
-                                                    'backgroundColor': '#f8f9fa',
-                                                    'padding': '0',
-                                                    'gap': '10px',
-                                                    'marginBottom': '0'
-                                                }),
-                                                
-                                                # Tab Content Container
-                                                html.Div([
-                                                    # Data Overview Tab (Table Display)
+                                                # Analysis tabs (DMC). keepMounted keeps inactive panels mounted so
+                                                # callbacks referencing pub-table/peak-table/etc. work off-tab.
+                                                dmc.Tabs(
+                                                    id='analysis-tabs',
+                                                    value='data-overview',
+                                                    keepMounted=True,
+                                                    className='tab-header',
+                                                    style={'display': 'flex', 'flexDirection': 'column',
+                                                           'height': '100%', 'overflow': 'hidden'},
+                                                    children=[
+                                                    dmc.TabsList([
+                                                        dmc.TabsTab("Data Overview", value="data-overview"),
+                                                        dmc.TabsTab("Peak Analysis", value="peak-analysis"),
+                                                        dmc.TabsTab("Across Samples", value="across-samples"),
+                                                        dmc.TabsTab("Metadata", value="metadata"),
+                                                        dmc.TabsTab("Calibration", value="calibration"),
+                                                        dmc.TabsTab("MS Viewer", value="ms-viewer"),
+                                                    ]),
+                                                    # Data Overview Tab
+                                                    dmc.TabsPanel(value="data-overview", style={'flex': '1', 'overflow': 'auto'}, children=[
                                                     html.Div(id="data-overview-content", className="tab-content active", style={
                                                         'display': 'block',
                                                         'padding': '15px',
@@ -807,8 +807,9 @@ _layout_body = html.Div(
                                                             ])
                                                         ])
                                                     ]),
-                                                    
+                                                    ]),
                                                     # Peak Analysis Tab
+                                                    dmc.TabsPanel(value="peak-analysis", style={'flex': '1', 'overflow': 'auto'}, children=[
                                                     html.Div(id="peak-analysis-content", className="tab-content", style={
                                                         'display': 'none',
                                                         'padding': '15px',
@@ -835,8 +836,9 @@ _layout_body = html.Div(
                                                             ),
                                                         ])
                                                     ]),
-
+                                                    ]),
                                                     # Across Samples Tab
+                                                    dmc.TabsPanel(value="across-samples", style={'flex': '1', 'overflow': 'auto'}, children=[
                                                     html.Div(id="across-samples-content", className="tab-content", style={
                                                         'display': 'none',
                                                         'padding': '15px',
@@ -898,8 +900,9 @@ _layout_body = html.Div(
                                                                   style={'color': '#666', 'textAlign': 'center', 'padding': '20px'})
                                                         ])
                                                     ]),
-                                                    
+                                                    ]),
                                                     # Metadata Tab
+                                                    dmc.TabsPanel(value="metadata", style={'flex': '1', 'overflow': 'auto'}, children=[
                                                     html.Div(id="metadata-content", className="tab-content", style={
                                                         'display': 'none',
                                                         'padding': '0',
@@ -924,8 +927,9 @@ _layout_body = html.Div(
                                                             ]
                                                         )
                                                     ]),
-                                                    
+                                                    ]),
                                                     # Calibration Tab
+                                                    dmc.TabsPanel(value="calibration", style={'flex': '1', 'overflow': 'auto'}, children=[
                                                     html.Div(id="calibration-content", className="tab-content", style={
                                                         'display': 'none',
                                                         'padding': '15px',
@@ -1023,8 +1027,9 @@ _layout_body = html.Div(
                                                             ]),
                                                         ])
                                                     ]),
-
+                                                    ]),
                                                     # MS Viewer Tab
+                                                    dmc.TabsPanel(value="ms-viewer", style={'flex': '1', 'overflow': 'auto'}, children=[
                                                     html.Div(id="ms-viewer-content", className="tab-content", style={
                                                         'display': 'none',
                                                         'padding': '15px',
@@ -1091,7 +1096,9 @@ _layout_body = html.Div(
                                                                       'borderRadius': '6px'}),
                                                         ])
                                                     ]),
-                                                ], style={'flex': '1', 'overflow': 'hidden'})
+                                                    ]),
+                                                    ],
+                                                ),
                                             ],
                                         ),
                                     ],
@@ -1191,21 +1198,6 @@ def _toolbox_content_style(tab_name: str, active_tab: str) -> dict:
     return style_map[tab_name]
 
 
-def _analysis_content_style(tab_name: str, active_tab: str) -> dict:
-    """Return the correct style for an analysis tab content container.
-
-    Only toggles display. Height/overflow are handled by the panel CSS
-    and the resize handler — we must NOT override them here.
-    """
-    is_active = tab_name == active_tab
-    return {
-        'display': 'block' if is_active else 'none',
-        'height': '100%',
-        'overflowY': 'auto',
-        'padding': '0' if tab_name == 'metadata' else '15px',
-    }
-
-
 @app.callback(
     Output('toolbox-tab', 'data'),
     [Input('pub-plotter-tab', 'n_clicks'),
@@ -1267,66 +1259,35 @@ clientside_callback(
 
 # File-tree selection highlighting is now rendered server-side from active-file.
 
+# Analysis tabs (DMC) <-> active-tab store, kept in sync both ways.
+# dmc.Tabs owns the visible panel; the store stays the source of truth for
+# the many callbacks that read/write active-tab (context restore, panel memory).
+# Classic Dash circular sync: prevent_initial_call + no-op guards break the loop.
 @app.callback(
-    Output('active-tab', 'data'),
-    [Input('data-overview-tab', 'n_clicks'),
-     Input('peak-analysis-tab', 'n_clicks'),
-     Input('across-samples-tab', 'n_clicks'),
-     Input('metadata-tab', 'n_clicks'),
-     Input('calibration-tab', 'n_clicks'),
-     Input('ms-viewer-tab', 'n_clicks')],
+    Output('active-tab', 'data', allow_duplicate=True),
+    Input('analysis-tabs', 'value'),
+    State('active-tab', 'data'),
     prevent_initial_call=True,
 )
-def update_active_tab(_, __, ___, ____, _____, ______):
-    """Update active-tab from the clicked analysis tab button."""
-    ctx = dash.callback_context
-    if not ctx.triggered:
-        return dash.no_update
-
-    triggered_id = ctx.triggered[0]['prop_id'].split('.')[0]
-    tab_map = {
-        'data-overview-tab': 'data-overview',
-        'peak-analysis-tab': 'peak-analysis',
-        'across-samples-tab': 'across-samples',
-        'metadata-tab': 'metadata',
-        'calibration-tab': 'calibration',
-        'ms-viewer-tab': 'ms-viewer',
-    }
-    return tab_map.get(triggered_id, dash.no_update)
+def analysis_tab_to_store(tab_value, current):
+    """Mirror a user tab click into the active-tab store."""
+    if tab_value and tab_value != current:
+        return tab_value
+    return dash.no_update
 
 
 @app.callback(
-    [Output('data-overview-tab', 'className'),
-     Output('peak-analysis-tab', 'className'),
-     Output('across-samples-tab', 'className'),
-     Output('metadata-tab', 'className'),
-     Output('calibration-tab', 'className'),
-     Output('ms-viewer-tab', 'className'),
-     Output('data-overview-content', 'style'),
-     Output('peak-analysis-content', 'style'),
-     Output('across-samples-content', 'style'),
-     Output('metadata-content', 'style'),
-     Output('calibration-content', 'style'),
-     Output('ms-viewer-content', 'style')],
+    Output('analysis-tabs', 'value'),
     Input('active-tab', 'data'),
+    State('analysis-tabs', 'value'),
+    prevent_initial_call=True,
 )
-def sync_active_tab_ui(active_tab):
-    """Keep analysis tab buttons and content in sync with the store."""
-    selected_tab = active_tab or 'data-overview'
-    return (
-        'tab-button active' if selected_tab == 'data-overview' else 'tab-button',
-        'tab-button active' if selected_tab == 'peak-analysis' else 'tab-button',
-        'tab-button active' if selected_tab == 'across-samples' else 'tab-button',
-        'tab-button active' if selected_tab == 'metadata' else 'tab-button',
-        'tab-button active' if selected_tab == 'calibration' else 'tab-button',
-        'tab-button active' if selected_tab == 'ms-viewer' else 'tab-button',
-        _analysis_content_style('data-overview', selected_tab),
-        _analysis_content_style('peak-analysis', selected_tab),
-        _analysis_content_style('across-samples', selected_tab),
-        _analysis_content_style('metadata', selected_tab),
-        _analysis_content_style('calibration', selected_tab),
-        _analysis_content_style('ms-viewer', selected_tab),
-    )
+def store_to_analysis_tab(active_tab, tab_value):
+    """Reflect external active-tab changes (context restore, panel memory) into the UI."""
+    target = active_tab or 'data-overview'
+    if target != tab_value:
+        return target
+    return dash.no_update
 
 
 @app.callback(
