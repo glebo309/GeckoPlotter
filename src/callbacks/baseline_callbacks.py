@@ -302,7 +302,7 @@ def register_baseline_callbacks(app: dash.Dash, data_manager) -> None:
         [Input('main-plot', 'relayoutData'),
          Input('manual-draw-line-store', 'data')],
         [State('baseline-mode', 'data'),
-         State('easy-integration', 'value'),
+         State('easy-integration', 'checked'),
          State('active-file', 'data'),
          State('main-plot', 'figure'),
          State('peak-change-trigger', 'data'),
@@ -342,7 +342,7 @@ def register_baseline_callbacks(app: dash.Dash, data_manager) -> None:
             log.debug(f"  draw_line keys={list(draw_line.keys())} subplot_raw={draw_line.get('subplot')}")
             calc_pts = display_pts
 
-            if easy_mode and 'easy' in easy_mode:
+            if easy_mode:
                 calc_pts = [(display_pts[0][0], 0), (display_pts[1][0], 0)]
 
             time_arr, signal_arr = _get_chrom(target_file)
@@ -457,7 +457,7 @@ def register_baseline_callbacks(app: dash.Dash, data_manager) -> None:
             display_p1 = (x1, y1)
             calc_p0 = display_p0
             calc_p1 = display_p1
-            if easy_mode and 'easy' in easy_mode:
+            if easy_mode:
                 calc_p0 = (x0, 0)
                 calc_p1 = (x1, 0)
 
