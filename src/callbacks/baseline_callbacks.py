@@ -363,6 +363,8 @@ def register_baseline_callbacks(app: dash.Dash, data_manager) -> None:
             if not res:
                 raise PreventUpdate
 
+            data_manager.peak_service.save_undo()
+
             # Check overlap with existing peaks — replace if >50% overlap
             line_x_min = min(display_pts[0][0], display_pts[1][0])
             line_x_max = max(display_pts[0][0], display_pts[1][0])
@@ -723,6 +725,7 @@ def register_baseline_callbacks(app: dash.Dash, data_manager) -> None:
         if active_file:
             peak_fid = active_file
             log.debug(f"clear_manual_peaks: active={active_file} -> peak_fid={peak_fid}, selected={selected_peak_id}")
+            data_manager.peak_service.save_undo()
             if selected_peak_id:
                 data_manager.peak_service.remove_peak(peak_fid, selected_peak_id)
             else:
@@ -770,6 +773,7 @@ def register_baseline_callbacks(app: dash.Dash, data_manager) -> None:
             raise PreventUpdate
 
         log.info(f"⌨️ keyboard delete: removing peak from {peak_fid} (active={active_file})")
+        data_manager.peak_service.save_undo()
         data_manager.peak_service.remove_peak(peak_fid, selected_peak_id)
         data_manager.peak_service.group_peaks_across_samples(
             file_overlay_map=data_manager.build_file_overlay_map())
@@ -786,6 +790,90 @@ def register_baseline_callbacks(app: dash.Dash, data_manager) -> None:
             return fig_patch, None, (peak_counter or 0) + 1, dash.no_update
 
         return current_figure, None, (peak_counter or 0) + 1, dash.no_update
+
+    # ── Keyboard: Escape (deselect), Arrows (cycle peaks), S (toggle layout) ──
+
+    @app.callback(
+        [Output('selected-peak-idx', 'data', allow_duplicate=True),
+         Output('main-plot', 'figure', allow_duplicate=True),
+         Output('pt-layout-mode', 'value', allow_duplicate=True),
+         Output('baseline-mode', 'data', allow_duplicate=True)],
+        Input('keyboard-action-trigger', 'data'),
+        [State('selected-peak-idx', 'data'),
+         State('active-file', 'data'),
+         State('main-plot', 'figure'),
+         State('current-plot-settings', 'data'),
+         State('pt-layout-mode', 'value'),
+         State('baseline-mode', 'data')],
+        prevent_initial_call=True,
+    )
+    def handle_keyboard_action(event, selected_peak_id, active_file, current_figure,
+                               plot_settings, layout_mode, baseline_mode):
+        if not event or not event.get('action'):
+            raise PreventUpdate
+
+        action = event['action']
+
+        if action == 'escape':
+            new_mode = 'navigate' if baseline_mode in ('draw', 'edit', 'deconvolve') else dash.no_update
+            return None, dash.no_update, dash.no_update, new_mode
+
+        if action == 'toggle_layout':
+            new_val = 'stacked' if layout_mode == 'overlay' else 'overlay'
+            return dash.no_update, dash.no_update, new_val, dash.no_update
+
+        if action in ('prev_peak', 'next_peak') and active_file:
+            all_peaks = data_manager.peak_service.get_peaks(active_file)
+            if not all_peaks:
+                raise PreventUpdate
+            sorted_peaks = sorted(all_peaks, key=lambda p: p.rt)
+            peak_ids = [p.peak_id for p in sorted_peaks]
+
+            if not selected_peak_id or selected_peak_id not in peak_ids:
+                target_id = peak_ids[0] if action == 'next_peak' else peak_ids[-1]
+            else:
+                cur_idx = peak_ids.index(selected_peak_id)
+                if action == 'next_peak':
+                    target_id = peak_ids[(cur_idx + 1) % len(peak_ids)]
+                else:
+                    target_id = peak_ids[(cur_idx - 1) % len(peak_ids)]
+
+            if not _is_stacked(plot_settings):
+                time_arr, signal_arr = _get_chrom(active_file)
+                if time_arr is not None:
+                    fig_patch = patch_figure_with_peaks(
+                        all_peaks, current_figure, time_arr, signal_arr, target_id)
+                    return target_id, fig_patch, dash.no_update, dash.no_update
+
+            return target_id, dash.no_update, dash.no_update, dash.no_update
+
+        raise PreventUpdate
+
+    # ── Undo / Redo ───────────────────────────────────────────────────
+
+    @app.callback(
+        [Output('peak-change-trigger', 'data', allow_duplicate=True),
+         Output('render-trigger', 'data', allow_duplicate=True),
+         Output('selected-peak-idx', 'data', allow_duplicate=True)],
+        [Input('undo-trigger', 'data'),
+         Input('redo-trigger', 'data')],
+        [State('peak-change-trigger', 'data'),
+         State('render-trigger', 'data')],
+        prevent_initial_call=True,
+    )
+    def handle_undo_redo(undo_ts, redo_ts, peak_counter, render_counter):
+        trigger_id = callback_context.triggered[0]['prop_id'].rsplit('.', 1)[0] if callback_context.triggered else ''
+        if trigger_id == 'undo-trigger' and undo_ts:
+            changed = data_manager.peak_service.undo()
+        elif trigger_id == 'redo-trigger' and redo_ts:
+            changed = data_manager.peak_service.redo()
+        else:
+            raise PreventUpdate
+        if not changed:
+            raise PreventUpdate
+        data_manager.peak_service.group_peaks_across_samples(
+            file_overlay_map=data_manager.build_file_overlay_map())
+        return (peak_counter or 0) + 1, (render_counter or 0) + 1, None
 
     # ── Peak count indicator in toolbox ───────────────────────────────
 

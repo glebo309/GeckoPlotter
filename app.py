@@ -156,7 +156,8 @@ _layout_body = html.Div(
         dcc.Store(id='keyboard-delete-trigger', data=0),  # Counter bumped by JS on Backspace/Delete keypress
         dcc.Store(id='undo-trigger', data=0),
         dcc.Store(id='redo-trigger', data=0),
-        dcc.Store(id='keyboard-action-trigger', data=None),
+        dcc.Store(id='keyboard-action-trigger', data=None),  # {action: 'escape'|'prev_peak'|'next_peak'|'toggle_layout', ts}
+        dcc.Store(id='undo-state', data={'can_undo': False, 'can_redo': False}),
         dcc.Store(id='hidden-files', data=[]),  # List of hidden file IDs for CSS dimming
         dcc.Store(id='group-collapse-state', data={}),  # {group_id: bool} collapse state
         dcc.Store(id='group-move-event', data=None),  # {file_id, source_group, target_group|null}

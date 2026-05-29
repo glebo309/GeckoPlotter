@@ -103,6 +103,7 @@ def register_context_menu_callbacks(app: dash.Dash, data_manager) -> None:
         fid, _peak = _find_peak(store['peak_id'])
         if fid is None:
             return False, dash.no_update, dash.no_update
+        ps.save_undo()
         ps.remove_peak(fid, store['peak_id'])
         ps.group_peaks_across_samples(
             file_overlay_map=data_manager.build_file_overlay_map())
@@ -179,6 +180,7 @@ def register_context_menu_callbacks(app: dash.Dash, data_manager) -> None:
         if not targets:
             return False, dash.no_update, dash.no_update, 'Only one file in group.'
 
+        ps.save_undo()
         matched = 0
         for fid in targets:
             time_arr, signal_arr = get_xy_arrays(data_manager, fid)

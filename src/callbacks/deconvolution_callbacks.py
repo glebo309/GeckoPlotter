@@ -126,6 +126,7 @@ def _apply_deconv(data_manager, result, active_file, selected_peak_id):
     new_peaks = _svc.result_to_peaks(result, active_file, region_rt)
     if not new_peaks:
         return 0
+    data_manager.peak_service.save_undo()
     if selected_peak_id:
         data_manager.peak_service.remove_peak(active_file, selected_peak_id)
     for p in new_peaks:

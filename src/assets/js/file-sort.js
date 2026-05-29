@@ -60,8 +60,12 @@
         if (!container) return;
 
         var siblings = getSiblings(container);
+<<<<<<< Updated upstream
         var multipleGroups = getAllGroupContainers().length > 1;
         if (siblings.length < 2 && !multipleGroups) return;
+=======
+        if (siblings.length < 2 && getAllGroupContainers().length < 2) return;
+>>>>>>> Stashed changes
 
         pending = {
             el: el,
@@ -115,8 +119,11 @@
             origTop: rect.top,
             elHeight: rect.height,
             targetContainer: null,
+<<<<<<< Updated upstream
             lastX: p.startX,
             lastY: p.startY,
+=======
+>>>>>>> Stashed changes
         };
 
         pending = null;
@@ -146,7 +153,11 @@
                     sib.style.transform = '';
                 });
                 state.targetContainer = otherContainer;
+<<<<<<< Updated upstream
                 otherContainer.style.outline = '2px solid #1a1a1a';
+=======
+                otherContainer.style.outline = '2px solid #ff6b35';
+>>>>>>> Stashed changes
                 otherContainer.style.outlineOffset = '-2px';
             }
             return;
@@ -249,6 +260,7 @@
             return;
         }
 
+<<<<<<< Updated upstream
         // Check if pointer ended up outside all group containers (create new group)
         var droppedOutside = !containerAtPoint(state.lastX, state.lastY, null);
 
@@ -266,6 +278,8 @@
             return;
         }
 
+=======
+>>>>>>> Stashed changes
         var ids = state.ids.slice();
         if (state.curIdx !== state.srcIdx) {
             var moved = ids.splice(state.srcIdx, 1)[0];

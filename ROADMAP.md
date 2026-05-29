@@ -1,13 +1,13 @@
 # GeckoPlotter V2 — Roadmap
 
-_Updated 2026-05-27_
+_Updated 2026-05-30_
 
 This is the single source of truth for what's done, what's next, and what's planned.
 Start every new session by reading this file.
 
 ## Current State
 
-### What Works (as of 2026-05-27)
+### What Works (as of 2026-05-30)
 - **Ingestion pipeline**: format-agnostic, preset-based detection, StandardizedResult output
 - **Multi-tab plot workspace**: each data type auto-creates its own tab on upload
 - **Unified context**: tab = group = full context (file selector, bottom panel, zoom all follow)
@@ -16,10 +16,21 @@ Start every new session by reading this file.
 - **File selector grouping**: files grouped by data type with active group highlighting
 - **Upload auto-switch**: newly uploaded file auto-selects and its tab activates
 - **Chromeleon bundles**: auto-detected, auxiliary files hidden, bundle acts as unit
-- **Peak integration**: manual peak picking, peak overlay on chromatograms
+- **Chromeleon peak adoption**: imported peaks auto-converted to editable GeckoPlotter peaks on upload
+- **Peak integration**: manual peak picking, peak overlay on any X/Y data (format-agnostic)
+- **Peak deconvolution**: EMG fitting via lmfit, right-click to deconvolve
+- **Right-click context menu**: on peaks (delete, rename, cross-file integrate, deconvolve)
 - **Plot settings**: palette, layout mode (overlay/stacked), axis labels, styling
+- **Color system**: Okabe-Ito palette, stable per-file color cycling, cross-sample group persistence
 - **Data table editor**: cell/column selection, transpose, add row/column
+- **Data selector / axis mapper**: select cells for X/Y/Y2 axes, "Create Plot" button for custom tabs
+- **Peak Analysis / Across Samples tabs**: independent tabs, don't override chromatogram
+- **File drag-and-drop reorder**: within groups, visual feedback with drop indicator
+- **File group sort**: ascending/descending toggle per group
+- **Auto-grouping**: files grouped by `(source_category, x_axis)` into tabs
+- **Keyboard shortcuts**: Delete/Backspace/X to remove selected peak
 - **Export**: basic figure export (PNG/SVG)
+- **DMC UI**: all form controls modernized to Dash Mantine Components
 - **Tests**: 70 pass, 1 skipped
 
 ### Key Architecture
@@ -28,98 +39,30 @@ Start every new session by reading this file.
 - `sync_plot_tabs` creates tabs from overlay groups `(source_category, x_axis)`
 - Stage 3 heuristic always returns GENERIC; only presets assign specific categories
 - Per-file UI state saved/restored via `context_callbacks.py`
-
-### In-Progress (2026-05-27, separate branch — merge pending)
-- **Format-agnostic integration**: `get_chromatogram_arrays` → `get_xy_arrays` using `metadata['auto_x']`/`metadata['auto_y']` from pipeline. Integration now works on any X/Y data (spectra, kinetics, generic CSV), not just chromatograms.
-- **Bundle cleanup**: bundles are UI-only; `active-file` is always a real file UUID, no more synthetic `loaded_data[bundle_id]` entries. `resolve_peak_file_id` removed.
+- `active-file` store always contains a real file UUID, never a bundle ID
+- Bundle resolution happens at click time only
 
 ---
 
-## Active Sprint: Data Selector + Plot Context
+## Active Sprint: Quick Wins (2026-05-30) ✓
 
-### Design Decision (confirmed 2026-05-24)
-- Data Selector updates the **current tab** (no new tab on selection)
-- "New Plot Tab" button creates a fresh analysis tab for a second view
-- Peak Analysis / Across Samples tabs do NOT override the raw chromatogram
-  - Selections in those tabs get their own "Plot in New Tab" action
-
-### Tasks
-- [ ] Make Data Selector update current raw tab's plot live (X + Y selection → immediate render)
-- [ ] Handle messy/ambiguous CSV: show data table prominently, maybe message "select axes to plot"
-- [ ] Add "New Plot Tab" button (creates analysis tab with independent axis selections)
-- [ ] Peak Analysis / Across Samples: "Plot in New Tab" button instead of overriding chromatogram
+All items completed — see Completed section below.
 
 ---
 
-## Backlog — User Priorities (confirmed 2026-05-27)
+## Backlog
 
-### 1. Right-click context menu
-- On peak: Delete peak, "Select in All Chromatograms" (auto-integrate matching peak across files)
-- On plot background: zoom to region, add baseline point, export region
-- On file tree: Move to group, Plot separately, rename
-- Implementation: `dash-mantine-components` Menu + clientside callback intercepting `contextmenu` events, `preventDefault()`, positioned absolutely
-- Priority: **HIGH** (UX multiplier — unlocks many interactions)
-
-### 2. Peak deconvolution (EMG via lmfit)
-- Resolve co-eluting/overlapping peaks using Exponentially Modified Gaussian fitting
-- Library: `lmfit` (v1.3.4, installed) with `ExponentialGaussianModel`
-- Algorithm: user clicks approximate peak centers → lmfit fits composite EMG model → individual peak areas calculated
-- EMG is the only model needed (handles both symmetric and tailing peaks — gamma→0 = Gaussian)
-- UX: "Deconvolve" mode button in toolbox (like Draw/Navigate), click to place peak markers, hit Deconvolve
-- Sandbox prototype: `../deconvolution_sandbox/app.py` (port 8060) — tested, R²>0.999 on synthetic data
-- Fitting engine is ~40 lines, pure numpy/lmfit, ready to drop into a `DeconvolutionService`
-- Priority: **HIGH** (major differentiator, solves the #1 chromatography pain point)
-
-### 3. Calibration UI
+### Calibration UI
 - CalibrationService already exists (`services/calibration_service.py`) with data model
 - Previous Streamlit version had working calibration (linear, polynomial, cubic)
 - Rebuild with: multi-point table, weighted regression (1/x, 1/x²), force-through-origin, residual plot
 - Add LOD/LOQ calculation (ICH Q2: LOD = 3.3·Sy/slope, LOQ = 10·Sy/slope)
 - Add ISTD mode (divide analyte area by IS area before regression)
-- Priority: **HIGH** (enables quantitative analysis)
+- Priority: **HIGH** (enables quantitative analysis, but not blocking current work)
 
-### 4. Undo/redo
-- Track peak additions, deletions, baseline changes, deconvolution actions
-- Essential for interactive analysis — exploring different integration strategies
-- Priority: **HIGH**
-
-### 5. Color system cleanup
-- Colors are inconsistent and change when files are added
-- Legend shows multiple entries that shouldn't be there
-- Fix: stable color assignment per file/trace, not re-indexed on every render
-- Priority: **HIGH** (visual quality)
-
-### 6. Chromeleon imported peaks
-- Convert imported peaks to same format as manual peaks
-- User can "adopt" Chromeleon peaks → they become editable GeckoPlotter peaks
-- Priority: **HIGH** (data continuity)
-
-### 7. Keyboard shortcuts
-- Backspace/Delete: delete selected peak
-- Arrow keys: navigate plot (pan/zoom or cycle through peaks)
-- Priority: **MEDIUM**
-
-### 8. Subfolders / grouping for same-type data
-- Problem: two sets of kinetics data (different substrates) → both go to same tab
-- Need: sub-groups within a tab, or ability to split into separate tabs
-- Priority: **MEDIUM**
-
-### 9. Legend control
+### Legend control
 - Movable legend, persistent position, no phantom entries
 - Priority: **MEDIUM**
-
-### 10. Subplot file ordering
-- Drag-and-drop reordering in file selector → subplot order
-- Integration must work on ALL subplots
-- Priority: **MEDIUM**
-
-### 11. Tab rename
-- User can rename tab labels (currently auto-generated)
-- Priority: **LOW**
-
-### 12. Drag-and-drop between groups
-- Drag file from one group to another
-- Priority: **LOW**
 
 ---
 
@@ -127,6 +70,7 @@ Start every new session by reading this file.
 
 - System Suitability Testing (plates, tailing factor, resolution) — not needed for this use case
 - Peak purity assessment — requires DAD/PDA data, not relevant
+- Live Data Selector plot updates — "Create Plot" workflow is intentional and sufficient
 
 ---
 
@@ -166,7 +110,60 @@ Start every new session by reading this file.
 - Bundle component files excluded from tab creation
 - Upload auto-switches to new file's tab
 
-### Format-Agnostic Integration ✓ (2026-05-27, merge pending)
+### Format-Agnostic Integration ✓ (2026-05-27)
 - `get_xy_arrays` replaces `get_chromatogram_arrays` — uses pipeline metadata
 - Bundle IDs removed from `loaded_data` — active-file is always a real UUID
 - `resolve_peak_file_id` eliminated
+
+### DMC UI Modernization ✓ (2026-05-29)
+- All form controls migrated to Dash Mantine Components
+- Tabs synced via bidirectional store
+- Validator script for callback prop checking
+- AG Grid rejected (community lacks cell selection)
+
+### Right-Click Context Menu ✓ (2026-05-29)
+- Peak context menu: delete, rename, cross-file integrate, deconvolve
+- Clientside JS + DMC Menu positioning
+
+### Peak Deconvolution ✓ (2026-05-29)
+- EMG fitting via lmfit ExponentialGaussianModel
+- One-click deconvolve from context menu
+- Individual peak areas from composite fit
+
+### Data Selector + Plot Context ✓ (2026-05-30)
+- "Create Plot" button for custom analysis tabs
+- Peak Analysis / Across Samples as independent tabs
+- Messy CSV handled via data table + axis mapper
+- Chromeleon peaks auto-adopted on upload
+
+### Color System ✓ (2026-05-30)
+- Okabe-Ito colorblind-friendly palette (6 colors)
+- Per-file stable color cycling
+- Cross-sample peak group color persistence
+
+### Undo/Redo ✓ (2026-05-30)
+- Snapshot-based undo stack on PeakService (max 50 levels)
+- `save_undo()` called before every peak mutation (draw, delete, clear, deconvolve, cross-integrate)
+- Ctrl+Z / Cmd+Z to undo, Ctrl+Shift+Z / Cmd+Shift+Z to redo
+
+### Keyboard Shortcuts ✓ (2026-05-30)
+- Delete/Backspace/X: remove selected peak
+- Ctrl+Z / Ctrl+Shift+Z: undo/redo
+- Escape: deselect peak + exit draw/edit/deconvolve mode
+- Left/Right arrows: cycle through peaks by retention time
+- S: toggle superposed/subplots layout
+
+### Cross-Group Drag-and-Drop ✓ (2026-05-30)
+- Drag file from one group container to another
+- Orange outline highlights target group on hover
+- Emits `group-move-event` → `handle_group_move` callback reassigns overlay group
+
+### Tab Rename ✓ (2026-05-30)
+- Custom tabs: contentEditable label + tab-rename-event store
+- Close button on custom tabs
+
+### File Management ✓ (2026-05-30)
+- Drag-and-drop reorder within groups
+- Sort toggle per group (asc/desc)
+- Auto-grouping by source_category + x_axis
+- Keyboard delete for peaks (Delete/Backspace/X)

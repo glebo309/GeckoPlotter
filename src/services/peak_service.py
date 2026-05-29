@@ -7,8 +7,9 @@ cross-sample grouping, and integration with calibration models.
 
 from __future__ import annotations
 
+import copy
 import uuid
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field, asdict, replace
 from typing import Dict, List, Optional, Tuple
 
 import numpy as np
@@ -61,6 +62,8 @@ class Peak:
 class PeakService:
     """Domain service for peak detection, storage, and cross-sample analysis."""
 
+    MAX_UNDO = 50
+
     def __init__(self) -> None:
         self._peaks: Dict[str, List[Peak]] = {}
         self._color_index: int = 0
@@ -68,6 +71,46 @@ class PeakService:
         self._imported_files: set = set()
         # Nested: overlay_group -> compound_gid -> color
         self._group_colors: Dict[str, Dict[str, str]] = {}
+        self._undo_stack: List[Dict[str, List[Peak]]] = []
+        self._redo_stack: List[Dict[str, List[Peak]]] = []
+
+    # ------------------------------------------------------------------
+    # Undo / redo
+    # ------------------------------------------------------------------
+
+    def _snapshot(self) -> Dict[str, List[Peak]]:
+        return {fid: [replace(p) for p in peaks] for fid, peaks in self._peaks.items()}
+
+    def save_undo(self) -> None:
+        """Push current peak state onto the undo stack. Call before any mutation."""
+        self._undo_stack.append(self._snapshot())
+        if len(self._undo_stack) > self.MAX_UNDO:
+            self._undo_stack.pop(0)
+        self._redo_stack.clear()
+
+    def undo(self) -> bool:
+        """Restore previous peak state. Returns True if anything changed."""
+        if not self._undo_stack:
+            return False
+        self._redo_stack.append(self._snapshot())
+        self._peaks = self._undo_stack.pop()
+        return True
+
+    def redo(self) -> bool:
+        """Re-apply last undone action. Returns True if anything changed."""
+        if not self._redo_stack:
+            return False
+        self._undo_stack.append(self._snapshot())
+        self._peaks = self._redo_stack.pop()
+        return True
+
+    @property
+    def can_undo(self) -> bool:
+        return bool(self._undo_stack)
+
+    @property
+    def can_redo(self) -> bool:
+        return bool(self._redo_stack)
 
     # ------------------------------------------------------------------
     # Color cycling
