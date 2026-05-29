@@ -267,32 +267,37 @@ _layout_body = html.Div(
                                     style={'height': '50%', 'display': 'flex', 'flexDirection': 'column'},
                                     children=[
                                         html.Div('Toolbox', className='panel-header'),
-                                        html.Div(
+                                        # Toolbox tabs (DMC). keepMounted keeps inactive panels mounted so
+                                        # callbacks reading controls in other panels keep working off-tab.
+                                        dmc.Tabs(
+                                            id='toolbox-tabs',
+                                            value='pub-plotter',
+                                            keepMounted=True,
                                             className='toolbox-tabs',
+                                            style={'display': 'flex', 'flexDirection': 'column',
+                                                   'flex': '1', 'overflow': 'hidden'},
                                             children=[
-                                                html.Button('Data Selector', id='pub-plotter-tab', className='toolbox-tab-button active', n_clicks=0),
-                                                html.Button('Plot Settings', id='plot-tools-tab', className='toolbox-tab-button', n_clicks=0, style={'whiteSpace': 'nowrap'}),
-                                                html.Button('Integration', id='integration-tab', className='toolbox-tab-button', n_clicks=0),
-                                                html.Button('Export', id='export-tab', className='toolbox-tab-button', n_clicks=0),
-                                            ],
-                                            style={'display': 'flex', 'borderBottom': '1px solid #e0e0e0', 'backgroundColor': '#f8f9fa'}
-                                        ),
-                                        html.Div(
-                                            className='panel-content toolbox-wrapper',
-                                            style={'flex': '1', 'overflow': 'auto'},
-                                            children=[
-                                                # Publication Plotter Tab (NEW - Active by default)
+                                            dmc.TabsList([
+                                                dmc.TabsTab("Data Selector", value="pub-plotter"),
+                                                dmc.TabsTab("Plot Settings", value="plot-tools"),
+                                                dmc.TabsTab("Integration", value="integration"),
+                                                dmc.TabsTab("Export", value="export"),
+                                            ]),
+                                            # Data Selector Tab
+                                            dmc.TabsPanel(value="pub-plotter", style={'flex': '1', 'overflow': 'auto'}, children=[
                                                 html.Div(
                                                     id='pub-plotter-container',
                                                     className='toolbox-tab-content active',
                                                     style={'padding': '10px', 'overflowY': 'auto', 'maxHeight': 'calc(100% - 40px)'},
                                                     children=create_axis_mapper_layout(),
                                                 ),
-                                                # Plot Settings Tab
+                                            ]),
+                                            # Plot Settings Tab
+                                            dmc.TabsPanel(value="plot-tools", style={'flex': '1', 'overflow': 'auto'}, children=[
                                                 html.Div(
                                                     id='plot-tools-container',
                                                     className='toolbox-tab-content',
-                                                    style={'display': 'none', 'padding': '10px', 'overflowY': 'auto', 'maxHeight': 'calc(100% - 40px)'},
+                                                    style={'display': 'block', 'padding': '10px', 'overflowY': 'auto', 'maxHeight': 'calc(100% - 40px)'},
                                                     children=[
                                                         # ── Dynamic Header ──
                                                         html.Div(id='pt-panel-header', children='Analysis Plot Settings',
@@ -525,11 +530,13 @@ _layout_body = html.Div(
                                                         ]),
                                                     ],
                                                 ),
-                                                # Integration Tab
+                                            ]),
+                                            # Integration Tab
+                                            dmc.TabsPanel(value="integration", style={'flex': '1', 'overflow': 'auto'}, children=[
                                                 html.Div(
                                                     id='integration-container',
                                                     className='toolbox-tab-content',
-                                                    style={'display': 'none', 'padding': '10px', 'overflowY': 'auto', 'maxHeight': 'calc(100% - 40px)'},
+                                                    style={'display': 'block', 'padding': '10px', 'overflowY': 'auto', 'maxHeight': 'calc(100% - 40px)'},
                                                     children=[
                                                         # ── Manual Baseline Integration ──
                                                         html.Div('Manual Integration', className='toolbox-section-title'),
@@ -628,11 +635,13 @@ _layout_body = html.Div(
                                                                       labelStyle={'display': 'block', 'marginBottom': '4px'}),
                                                     ],
                                                 ),
-                                                # Export Tab
+                                            ]),
+                                            # Export Tab
+                                            dmc.TabsPanel(value="export", style={'flex': '1', 'overflow': 'auto'}, children=[
                                                 html.Div(
                                                     id='export-container',
                                                     className='toolbox-tab-content',
-                                                    style={'display': 'none', 'padding': '10px', 'overflowY': 'auto', 'maxHeight': 'calc(100% - 40px)'},
+                                                    style={'display': 'block', 'padding': '10px', 'overflowY': 'auto', 'maxHeight': 'calc(100% - 40px)'},
                                                     children=[
                                                         html.Div('Figure Export', className='toolbox-section-title'),
                                                         html.Div([
@@ -682,6 +691,7 @@ _layout_body = html.Div(
                                                         dcc.Download(id='exp-session-download'),
                                                     ],
                                                 ),
+                                            ]),
                                             ],
                                         ),
                                     ],
@@ -1169,86 +1179,35 @@ register_calibration_callbacks(app, data_manager)
 register_plot_settings_callbacks(app, data_manager)
 register_lcms_callbacks(app, data_manager)
 
-def _toolbox_content_style(tab_name: str, active_tab: str) -> dict:
-    """Return the correct style for a toolbox tab content container."""
-    is_active = tab_name == active_tab
-    style_map = {
-        'pub-plotter': {
-            'display': 'block' if is_active else 'none',
-        },
-        'plot-tools': {
-            'display': 'block' if is_active else 'none',
-            'padding': '10px',
-            'overflowY': 'auto',
-            'maxHeight': 'calc(100% - 40px)',
-        },
-        'integration': {
-            'display': 'block' if is_active else 'none',
-            'padding': '10px',
-            'overflowY': 'auto',
-            'maxHeight': 'calc(100% - 40px)',
-        },
-        'export': {
-            'display': 'block' if is_active else 'none',
-            'padding': '10px',
-            'overflowY': 'auto',
-            'maxHeight': 'calc(100% - 40px)',
-        },
-    }
-    return style_map[tab_name]
-
-
+# Toolbox tabs (DMC) <-> toolbox-tab store, kept in sync both ways.
+# dmc.Tabs owns the visible panel; the store stays the source of truth for
+# callbacks that read/write toolbox-tab (e.g. context restore). Classic Dash
+# circular sync: prevent_initial_call + no-op guards break the loop.
 @app.callback(
-    Output('toolbox-tab', 'data'),
-    [Input('pub-plotter-tab', 'n_clicks'),
-     Input('plot-tools-tab', 'n_clicks'),
-     Input('integration-tab', 'n_clicks'),
-     Input('export-tab', 'n_clicks')],
+    Output('toolbox-tab', 'data', allow_duplicate=True),
+    Input('toolbox-tabs', 'value'),
+    State('toolbox-tab', 'data'),
     prevent_initial_call=True,
 )
-def update_toolbox_tab(_, __, ___, ____):
-    """Update toolbox-tab from the clicked button.
-
-    This replaces brittle clientside DOM mutation with a plain Dash callback.
-    """
-    ctx = dash.callback_context
-    if not ctx.triggered:
-        return dash.no_update
-
-    triggered_id = ctx.triggered[0]['prop_id'].split('.')[0]
-    tab_map = {
-        'pub-plotter-tab': 'pub-plotter',
-        'plot-tools-tab': 'plot-tools',
-        'integration-tab': 'integration',
-        'export-tab': 'export',
-    }
-    return tab_map.get(triggered_id, dash.no_update)
+def toolbox_tab_to_store(tab_value, current):
+    """Mirror a user toolbox-tab click into the toolbox-tab store."""
+    if tab_value and tab_value != current:
+        return tab_value
+    return dash.no_update
 
 
 @app.callback(
-    [Output('pub-plotter-tab', 'className'),
-     Output('plot-tools-tab', 'className'),
-     Output('integration-tab', 'className'),
-     Output('export-tab', 'className'),
-     Output('pub-plotter-container', 'style'),
-     Output('plot-tools-container', 'style'),
-     Output('integration-container', 'style'),
-     Output('export-container', 'style')],
+    Output('toolbox-tabs', 'value'),
     Input('toolbox-tab', 'data'),
+    State('toolbox-tabs', 'value'),
+    prevent_initial_call=True,
 )
-def sync_toolbox_tab_ui(toolbox_tab):
-    """Keep toolbox buttons and content in sync with the store."""
-    active_tab = toolbox_tab or 'pub-plotter'
-    return (
-        'toolbox-tab-button active' if active_tab == 'pub-plotter' else 'toolbox-tab-button',
-        'toolbox-tab-button active' if active_tab == 'plot-tools' else 'toolbox-tab-button',
-        'toolbox-tab-button active' if active_tab == 'integration' else 'toolbox-tab-button',
-        'toolbox-tab-button active' if active_tab == 'export' else 'toolbox-tab-button',
-        _toolbox_content_style('pub-plotter', active_tab),
-        _toolbox_content_style('plot-tools', active_tab),
-        _toolbox_content_style('integration', active_tab),
-        _toolbox_content_style('export', active_tab),
-    )
+def store_to_toolbox_tab(toolbox_tab, tab_value):
+    """Reflect external toolbox-tab changes (context restore) into the UI."""
+    target = toolbox_tab or 'pub-plotter'
+    if target != tab_value:
+        return target
+    return dash.no_update
 
 # Clientside callback for resize functionality
 clientside_callback(
