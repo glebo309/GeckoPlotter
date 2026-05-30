@@ -73,6 +73,18 @@ class PeakService:
         self._group_colors: Dict[str, Dict[str, str]] = {}
         self._undo_stack: List[Dict[str, List[Peak]]] = []
         self._redo_stack: List[Dict[str, List[Peak]]] = []
+        self._palette: List[str] = list(OKABE_ITO_PALETTE)
+        self._palette_name: str = 'okabe_ito'
+
+    def set_palette(self, name: str, colors: List[str]) -> None:
+        """Update the color palette used for peak groups.
+
+        Clears cached group colors so they are reassigned on the next
+        ``group_peaks_across_samples`` call.
+        """
+        self._palette_name = name
+        self._palette = list(colors)
+        self._group_colors.clear()
 
     # ------------------------------------------------------------------
     # Undo / redo
@@ -119,7 +131,8 @@ class PeakService:
     def _next_color(self, file_id: str = '') -> str:
         """Return next color for a file. Each file starts from color[0]."""
         idx = self._file_color_index.get(file_id, 0)
-        color = OKABE_ITO_PALETTE[idx % len(OKABE_ITO_PALETTE)]
+        pal = self._palette or OKABE_ITO_PALETTE
+        color = pal[idx % len(pal)]
         self._file_color_index[file_id] = idx + 1
         return color
 
@@ -941,33 +954,25 @@ class PeakService:
                     mean_rt = float(np.mean([p.rt for p in group]))
                     grouped.append((f"compound_rt{mean_rt:.1f}", group))
 
-            # Per-overlay-group color namespace
+            # Stable color assignment: cached colors survive across calls,
+            # new groups get the next free palette slot.
+            pal = getattr(self, '_palette', None) or OKABE_ITO_PALETTE
             og_colors = self._group_colors.setdefault(og_key, {})
-            # Build used_colors only from gids that still exist;
-            # stale entries are pruned below.
-            active_gids: set = set()
-            used_colors: set = set()
+            active_gids = {gid for gid, _ in grouped}
+
+            # Prune stale groups FIRST so their slots free up
+            for k in [k for k in og_colors if k not in active_gids]:
+                del og_colors[k]
 
             for gid, group in grouped:
-                active_gids.add(gid)
+                if gid not in og_colors:
+                    og_colors[gid] = pal[len(og_colors) % len(pal)]
 
-                if gid in og_colors:
-                    color = og_colors[gid]
-                else:
-                    color_idx = len(og_colors) % len(OKABE_ITO_PALETTE)
-                    color = OKABE_ITO_PALETTE[color_idx]
-                    og_colors[gid] = color
-
-                used_colors.add(color)
+                color = og_colors[gid]
                 for peak in group:
                     peak.group_id = gid
                     peak.color = color
                 result[gid] = group
-
-            # Prune stale gids so removed peaks free up colors
-            stale = [k for k in og_colors if k not in active_gids]
-            for k in stale:
-                del og_colors[k]
 
         return result
 

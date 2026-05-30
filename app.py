@@ -40,6 +40,8 @@ from callbacks.context_menu_callbacks import register_context_menu_callbacks
 from callbacks.deconvolution_callbacks import register_deconvolution_callbacks
 from callbacks.export_callbacks import register_export_callbacks
 from callbacks.calibration_callbacks import register_calibration_callbacks
+from components.paper_mock import create_paper_mock
+from callbacks.publication_preview_callbacks import register_publication_preview_callbacks
 
 # App setup
 app = dash.Dash(__name__, suppress_callback_exceptions=True, assets_folder='src/assets')
@@ -133,6 +135,7 @@ _layout_body = html.Div(
         # Baseline integration stores (p-line drawing)
         dcc.Store(id='baseline-mode', data='navigate'),  # 'draw' | 'edit' | 'navigate' | 'deconvolve'
         dcc.Store(id='context-menu-store', data=None),  # {peak_id, x, y, ts} from right-click
+        dcc.Store(id='context-menu-close-store', data=0),  # bumped on outside click to close menu
         dcc.Store(id='deconv-markers', data=[]),  # [{x, y}, ...] peak-center markers
         dcc.Store(id='deconv-result', data=None),  # serialized DeconvResult (preview/accept)
         dcc.Store(id='deconv-marker-click-store', data=None),  # browser-side marker click {x, ts}
@@ -161,6 +164,7 @@ _layout_body = html.Div(
         dcc.Store(id='hidden-files', data=[]),  # List of hidden file IDs for CSS dimming
         dcc.Store(id='group-collapse-state', data={}),  # {group_id: bool} collapse state
         dcc.Store(id='group-move-event', data=None),  # {file_id, source_group, target_group|null}
+        dcc.Store(id='pub-custom-dims', data={}),  # Per-preset custom W/H {preset: {w, h}}
         html.Button(id='plot-empty-click-trigger', n_clicks=0, style={'display': 'none'}),
         html.Div(id='clear-transient-shapes-output', style={'display': 'none'}),
         html.Div(id='selected-shapes-sync-output', style={'display': 'none'}),
@@ -250,8 +254,8 @@ _layout_body = html.Div(
                                                 'transition': 'border-color 0.2s',
                                             },
                                             style_active={
-                                                'border': '2px dashed #333',
-                                                'backgroundColor': '#f5f5f5',
+                                                'border': '1.5px dashed rgba(0, 0, 0, 0.2)',
+                                                'backgroundColor': 'rgba(0, 0, 0, 0.02)',
                                             },
                                             children=html.Div(
                                                 className='panel-content',
@@ -317,7 +321,7 @@ _layout_body = html.Div(
                                                         html.Div(id='pt-panel-header', children='Analysis Plot Settings',
                                                                  className='toolbox-section-title',
                                                                  style={'fontSize': '13px', 'fontWeight': '600', 'marginBottom': '8px',
-                                                                        'padding': '4px 0', 'borderBottom': '1px solid #ddd'}),
+                                                                        'padding': '4px 0', 'borderBottom': '1px solid rgba(0, 0, 0, 0.1)'}),
 
                                                         # -- 0. Layout Mode (Raw only) --
                                                         html.Div(id='pt-raw-layout-wrapper', children=[
@@ -333,6 +337,49 @@ _layout_body = html.Div(
                                                                 ], gap='md'),
                                                             ),
                                                         ], style={'display': 'none'}),
+
+                                                        # -- Subplot Grid --
+                                                        html.Div('Subplot Grid', className='toolbox-section-title'),
+                                                        html.Div([
+                                                            html.Div([
+                                                                html.Div([html.Label('Rows', className='form-label'),
+                                                                          dmc.NumberInput(id='pub-subplot-rows', value=1, min=1, max=6, step=1,
+                                                                                          size='xs', style={'width': '100%'})],
+                                                                         style={'flex': '1'}),
+                                                                html.Span('×', style={'fontSize': '14px', 'color': '#555', 'alignSelf': 'flex-end', 'paddingBottom': '6px'}),
+                                                                html.Div([html.Label('Cols', className='form-label'),
+                                                                          dmc.NumberInput(id='pub-subplot-cols', value=1, min=1, max=6, step=1,
+                                                                                          size='xs', style={'width': '100%'})],
+                                                                         style={'flex': '1'}),
+                                                            ], style={'display': 'flex', 'gap': '6px', 'alignItems': 'center'}),
+                                                            dmc.Checkbox(id='pub-zoom-sync', label='Sync zoom across subplots',
+                                                                         size='xs', checked=True,
+                                                                         style={'marginTop': '4px'}),
+                                                        ], style={'marginBottom': '10px'}),
+
+                                                        # -- Figure Dimensions (Publication tab only) --
+                                                        html.Div(id='pt-pub-dimensions-wrapper', style={'display': 'none'}, children=[
+                                                            html.Div('Figure Dimensions', className='toolbox-section-title'),
+                                                            html.Div([
+                                                                html.Div([html.Label('Width', className='form-label'),
+                                                                          dmc.NumberInput(id='pub-fig-width-mm', value=84, min=20, max=210, step=1,
+                                                                                          size='xs', style={'width': '100%'}, suffix=' mm')],
+                                                                         style={'flex': '1'}),
+                                                                html.Span('×', style={'fontSize': '14px', 'color': '#555', 'alignSelf': 'flex-end', 'paddingBottom': '6px'}),
+                                                                html.Div([html.Label('Height', className='form-label'),
+                                                                          dmc.NumberInput(id='pub-fig-height-mm', value=63, min=15, max=297, step=1,
+                                                                                          size='xs', style={'width': '100%'}, suffix=' mm')],
+                                                                         style={'flex': '1'}),
+                                                            ], style={'display': 'flex', 'gap': '6px', 'alignItems': 'center', 'marginBottom': '10px'}),
+                                                        ]),
+
+                                                        # -- Smoothing --
+                                                        html.Div('Smoothing', className='toolbox-section-title'),
+                                                        html.Div([
+                                                            dcc.Slider(id='pt-smooth-window', min=0, max=51, step=None,
+                                                                       marks={0: 'Off', 5: '5', 9: '9', 15: '15', 21: '21', 31: '31', 51: '51'},
+                                                                       value=0),
+                                                        ], style={'marginBottom': '10px'}),
 
                                                         # -- 1. Plot Type (Analysis only) --
                                                         html.Div(id='pt-plot-type-wrapper', children=[
@@ -403,7 +450,8 @@ _layout_body = html.Div(
                                                             html.Label('Color palette', className='form-label'),
                                                             dmc.Select(id='pt-palette', value='okabe_ito', size='xs',
                                                                        data=[{'label': p.replace('_', ' ').title(), 'value': p} for p in
-                                                                             ['okabe_ito', 'plotly', 'd3', 'pastel']],
+                                                                             ['okabe_ito', 'plotly', 'd3', 'pastel',
+                                                                              'batlow', 'hawaii', 'roma']],
                                                                        clearable=False, allowDeselect=False),
                                                         ], style={'marginBottom': '6px'}),
                                                         html.Div([
@@ -478,6 +526,16 @@ _layout_body = html.Div(
                                                         html.Div([html.Label('Title', className='form-label'),
                                                                    dmc.TextInput(id='pt-title', placeholder='Plot title', size='xs')],
                                                                  style={'marginBottom': '6px'}),
+                                                        html.Div([
+                                                            html.Div([html.Label('X axis', className='form-label'),
+                                                                      dmc.TextInput(id='pt-x-label', placeholder='X axis label', size='xs')],
+                                                                     style={'flex': '1'}),
+                                                            html.Div([html.Label('Y axis', className='form-label'),
+                                                                      dmc.TextInput(id='pt-y-label', placeholder='Y axis label', size='xs')],
+                                                                     style={'flex': '1'}),
+                                                        ], style={'display': 'flex', 'gap': '6px', 'marginBottom': '6px'}),
+                                                        dmc.Switch(id='pt-shared-axis-labels', label='Shared axis labels',
+                                                                   checked=False, size='sm', mb=6),
 
                                                         # -- 6. Typography (Both) --
                                                         html.Div('Typography', className='toolbox-section-title'),
@@ -495,17 +553,20 @@ _layout_body = html.Div(
                                                                      style={'flex': '1'}),
                                                         ], style={'display': 'flex', 'gap': '8px', 'marginBottom': '6px'}),
                                                         html.Div([
-                                                            html.Div([html.Label('Title size', className='form-label'),
-                                                                      dmc.NumberInput(id='pt-title-font-size', value=14, min=10, max=32, step=1,
-                                                                                      size='xs', style={'width': '100%'})],
-                                                                     style={'flex': '1'}),
+                                                            html.Div(id='pt-title-size-wrapper', children=[
+                                                                html.Label('Title size', className='form-label'),
+                                                                dmc.NumberInput(id='pt-title-font-size', value=14, min=10, max=32, step=1,
+                                                                                size='xs', style={'width': '100%'}),
+                                                            ], style={'flex': '1'}),
                                                             html.Div([html.Label('Tick size', className='form-label'),
                                                                       dmc.NumberInput(id='pt-tick-font-size', value=10, min=6, max=18, step=1,
                                                                                       size='xs', style={'width': '100%'})],
                                                                      style={'flex': '1'}),
                                                         ], style={'display': 'flex', 'gap': '8px', 'marginBottom': '6px'}),
-                                                        dmc.Switch(id='pt-bold-title', label='Bold title', checked=True,
-                                                                   size='sm', mb=10),
+                                                        html.Div(id='pt-bold-title-wrapper', children=[
+                                                            dmc.Switch(id='pt-bold-title', label='Bold title', checked=True,
+                                                                       size='sm', mb=10),
+                                                        ]),
 
                                                         # -- 7. Legend (Both) --
                                                         html.Div('Legend', className='toolbox-section-title'),
@@ -529,6 +590,7 @@ _layout_body = html.Div(
                                                                 dmc.Checkbox(label='Grid X', value='grid_x'),
                                                                 dmc.Checkbox(label='Grid Y', value='grid_y'),
                                                                 dmc.Checkbox(label='Tick marks', value='ticks'),
+                                                                dmc.Checkbox(label='Minor ticks', value='minor_ticks'),
                                                                 dmc.Checkbox(label='Frame (box)', value='frame'),
                                                             ], gap=4),
                                                         ),
@@ -543,6 +605,16 @@ _layout_body = html.Div(
                                                                           dmc.Select(id='pt-grid-style', value='solid', size='xs',
                                                                                      data=[{'label': s.title(), 'value': s} for s in ['solid', 'dash', 'dot']],
                                                                                      clearable=False, allowDeselect=False)],
+                                                                         style={'flex': '1'}),
+                                                            ], style={'display': 'flex', 'gap': '8px', 'marginBottom': '6px'}),
+                                                            html.Div([
+                                                                html.Div([html.Label('Frame width', className='form-label'),
+                                                                          dmc.NumberInput(id='pt-frame-width', value=1, min=0.5, max=5, step=0.5,
+                                                                                          size='xs', style={'width': '100%'}, decimalScale=1)],
+                                                                         style={'flex': '1'}),
+                                                                html.Div([html.Label('Tick length', className='form-label'),
+                                                                          dmc.NumberInput(id='pt-tick-length', value=5, min=1, max=15, step=1,
+                                                                                          size='xs', style={'width': '100%'})],
                                                                          style={'flex': '1'}),
                                                             ], style={'display': 'flex', 'gap': '8px', 'marginBottom': '10px'}),
                                                         ]),
@@ -592,7 +664,7 @@ _layout_body = html.Div(
                                                         ], style={'marginBottom': '6px'}),
                                                         html.Div(id='ctx-status',
                                                                  style={'fontSize': '11px', 'color': '#2e7d32', 'marginBottom': '6px'}),
-                                                        html.Hr(style={'margin': '10px 0', 'borderColor': '#e0e0e0'}),
+                                                        html.Hr(style={'margin': '10px 0', 'borderColor': 'rgba(0, 0, 0, 0.1)'}),
                                                         # -- Peak Deconvolution (EMG) --
                                                         html.Div('Peak Deconvolution', className='toolbox-section-title'),
                                                         html.Div([
@@ -617,57 +689,14 @@ _layout_body = html.Div(
                                                                                'display': 'none'}),
                                                         ], id='deconv-accept-cancel-row',
                                                            style={'display': 'flex', 'gap': '4px', 'marginBottom': '6px'}),
-                                                        html.Hr(style={'margin': '10px 0', 'borderColor': '#e0e0e0'}),
-                                                        # -- Auto Peak Detection --
-                                                        html.Div('Signal Processing', className='toolbox-section-title'),
-                                                        html.Div([
-                                                            html.Div([html.Label('Smooth window', className='form-label'),
-                                                                      dmc.NumberInput(id='int-smooth-window', value=11, min=3, max=51, step=2,
-                                                                                      size='xs', style={'width': '100%'})],
-                                                                     style={'flex': '1'}),
-                                                            html.Div([html.Label('Poly order', className='form-label'),
-                                                                      dmc.NumberInput(id='int-smooth-poly', value=3, min=1, max=5, step=1,
-                                                                                      size='xs', style={'width': '100%'})],
-                                                                     style={'flex': '1'}),
-                                                        ], style={'display': 'flex', 'gap': '8px', 'marginBottom': '6px'}),
-                                                        html.Div('Baseline', className='toolbox-section-title'),
-                                                        html.Div([
-                                                            html.Label('Method', className='form-label'),
-                                                            dmc.Select(id='int-baseline-method', value='snip', size='xs',
-                                                                       data=[{'label': m, 'value': m} for m in ['snip', 'polynomial', 'none']],
-                                                                       clearable=False, allowDeselect=False),
-                                                        ], style={'marginBottom': '6px'}),
-                                                        html.Div([
-                                                            html.Div([html.Label('Iterations', className='form-label'),
-                                                                      dmc.NumberInput(id='int-baseline-iter', value=40, min=5, max=100, step=5,
-                                                                                      size='xs', style={'width': '100%'})],
-                                                                     style={'flex': '1'}),
-                                                            html.Div([html.Label('Poly order', className='form-label'),
-                                                                      dmc.NumberInput(id='int-baseline-poly', value=5, min=1, max=10, step=1,
-                                                                                      size='xs', style={'width': '100%'})],
-                                                                     style={'flex': '1'}),
-                                                        ], style={'display': 'flex', 'gap': '8px', 'marginBottom': '10px'}),
+                                                        html.Hr(style={'margin': '10px 0', 'borderColor': 'rgba(0, 0, 0, 0.1)'}),
+                                                        # -- Peak Detection --
                                                         html.Div('Peak Detection', className='toolbox-section-title'),
                                                         html.Div([
-                                                            html.Div([html.Label('Threshold', className='form-label'),
-                                                                      dmc.NumberInput(id='int-peak-threshold', value=0.01, min=0.001, max=1, step=0.001,
-                                                                                      decimalScale=3, size='xs', style={'width': '100%'})],
-                                                                     style={'flex': '1'}),
-                                                            html.Div([html.Label('Slope cutoff', className='form-label'),
-                                                                      dmc.NumberInput(id='int-slope-threshold', value=0.001, min=0.0001, max=0.1, step=0.0001,
-                                                                                      decimalScale=4, size='xs', style={'width': '100%'})],
-                                                                     style={'flex': '1'}),
-                                                        ], style={'display': 'flex', 'gap': '8px', 'marginBottom': '6px'}),
-                                                        html.Div([
-                                                            html.Div([html.Label('Extension', className='form-label'),
-                                                                      dmc.NumberInput(id='int-extension', value=1.1, min=1.0, max=2.0, step=0.05,
-                                                                                      decimalScale=2, size='xs', style={'width': '100%'})],
-                                                                     style={'flex': '1'}),
-                                                            html.Div([html.Label('Min width (pts)', className='form-label'),
-                                                                      dmc.NumberInput(id='int-min-width', value=3, min=1, max=20, step=1,
-                                                                                      size='xs', style={'width': '100%'})],
-                                                                     style={'flex': '1'}),
-                                                        ], style={'display': 'flex', 'gap': '8px', 'marginBottom': '10px'}),
+                                                            html.Label('Threshold', className='form-label'),
+                                                            dmc.NumberInput(id='int-peak-threshold', value=0.01, min=0.001, max=1, step=0.001,
+                                                                            decimalScale=3, size='xs', style={'width': '100%'}),
+                                                        ], style={'marginBottom': '6px'}),
                                                         html.Div([
                                                             html.Button('Detect Peaks', id='int-detect-btn', className='btn btn-primary',
                                                                         style={'marginRight': '8px'}),
@@ -678,9 +707,7 @@ _layout_body = html.Div(
                                                             id='int-display-opts',
                                                             value=['peaks'],
                                                             children=dmc.Stack([
-                                                                dmc.Checkbox(label='Show baseline', value='baseline'),
-                                                                dmc.Checkbox(label='Show peak fills', value='peaks'),
-                                                                dmc.Checkbox(label='Show corrected signal', value='corrected'),
+                                                                dmc.Checkbox(label='Peak fills', value='peaks'),
                                                             ], gap=4),
                                                         ),
                                                     ],
@@ -695,21 +722,35 @@ _layout_body = html.Div(
                                                     children=[
                                                         html.Div('Figure Export', className='toolbox-section-title'),
                                                         html.Div([
+                                                            html.Label('Preset', className='form-label'),
+                                                            dmc.Select(id='exp-preset', value='two-col', size='xs',
+                                                                       data=[
+                                                                           {'label': 'Two-column (84 mm)', 'value': 'two-col'},
+                                                                           {'label': 'One-column (174 mm)', 'value': 'one-col'},
+                                                                           {'label': '1.5 column (114 mm)', 'value': '1.5-col'},
+                                                                           {'label': 'PowerPoint (254 mm)', 'value': 'ppt'},
+                                                                           {'label': 'Custom', 'value': 'custom'},
+                                                                       ],
+                                                                       clearable=False, allowDeselect=False),
+                                                        ], style={'marginBottom': '6px'}),
+                                                        html.Div([
                                                             html.Label('Format', className='form-label'),
                                                             dmc.Select(id='exp-fig-format', value='png', size='xs',
                                                                        data=[{'label': f, 'value': f} for f in ['png', 'svg', 'html', 'pdf']],
                                                                        clearable=False, allowDeselect=False),
                                                         ], style={'marginBottom': '6px'}),
-                                                        html.Div([
-                                                            html.Div([html.Label('Width (px)', className='form-label'),
-                                                                      dmc.NumberInput(id='exp-width', value=800, min=400, max=2400, step=100,
-                                                                                      size='xs', style={'width': '100%'})],
-                                                                     style={'flex': '1'}),
-                                                            html.Div([html.Label('Height (px)', className='form-label'),
-                                                                      dmc.NumberInput(id='exp-height', value=500, min=300, max=1600, step=100,
-                                                                                      size='xs', style={'width': '100%'})],
-                                                                     style={'flex': '1'}),
-                                                        ], style={'display': 'flex', 'gap': '8px', 'marginBottom': '6px'}),
+                                                        html.Div(id='exp-custom-dims', children=[
+                                                            html.Div([
+                                                                html.Div([html.Label('Width (px)', className='form-label'),
+                                                                          dmc.NumberInput(id='exp-width', value=800, min=200, max=4000, step=50,
+                                                                                          size='xs', style={'width': '100%'})],
+                                                                         style={'flex': '1'}),
+                                                                html.Div([html.Label('Height (px)', className='form-label'),
+                                                                          dmc.NumberInput(id='exp-height', value=500, min=200, max=3000, step=50,
+                                                                                          size='xs', style={'width': '100%'})],
+                                                                         style={'flex': '1'}),
+                                                            ], style={'display': 'flex', 'gap': '8px', 'marginBottom': '6px'}),
+                                                        ], style={'display': 'none'}),
                                                         html.Div([
                                                             html.Label('DPI scale', className='form-label'),
                                                             dmc.Slider(id='exp-dpi', min=1, max=6, step=1, value=3,
@@ -717,9 +758,15 @@ _layout_body = html.Div(
                                                                               {'value': 3, 'label': '3x'}, {'value': 4, 'label': '4x'},
                                                                               {'value': 6, 'label': '6x'}]),
                                                         ], style={'marginBottom': '10px'}),
+                                                        html.Div(id='exp-preset-info',
+                                                                 style={'fontSize': '11px', 'color': '#666', 'marginBottom': '6px'}),
                                                         html.Button('Export Figure', id='exp-fig-btn', className='btn btn-primary',
-                                                                    style={'width': '100%', 'marginBottom': '10px'}),
+                                                                    style={'width': '100%', 'marginBottom': '6px'}),
                                                         dcc.Download(id='exp-fig-download'),
+                                                        dmc.Button('Open Publication Preview', id='exp-open-pub-btn',
+                                                                   size='xs', variant='light', fullWidth=True,
+                                                                   leftSection=_icon('tabler:article', width=14),
+                                                                   style={'marginBottom': '10px'}),
                                                         html.Div('Data Export', className='toolbox-section-title'),
                                                         html.Div([
                                                             html.Label('Format', className='form-label'),
@@ -766,6 +813,7 @@ _layout_body = html.Div(
                                     children=[
                                         html.Div(
                                             className='panel-content viz-container',
+                                            style={'position': 'relative'},
                                             children=[
                                                 dcc.Graph(
                                                     id='main-plot',
@@ -796,7 +844,8 @@ _layout_body = html.Div(
                                                         'scrollZoom': True,
                                                         'edits': {'shapePosition': True},
                                                     },
-                                                )
+                                                ),
+                                                create_paper_mock(),
                                             ],
                                         ),
                                     ],
@@ -853,6 +902,8 @@ _layout_body = html.Div(
                                                                     cell_selectable=True,
                                                                     column_selectable='single',
                                                                     sort_action='native',
+                                                                    page_size=50,
+                                                                    page_action='native',
                                                                     style_table={'display': 'none'},
                                                                 ),
                                                                 html.Div(
@@ -911,8 +962,8 @@ _layout_body = html.Div(
                                                             dcc.Input(id='group-label-input', type='text',
                                                                       placeholder='Group label...',
                                                                       style={'width': '120px', 'padding': '3px 6px',
-                                                                             'fontSize': '11px', 'border': '1px solid #ccc',
-                                                                             'borderRadius': '3px'}),
+                                                                             'fontSize': '11px', 'border': '1px solid rgba(0, 0, 0, 0.12)',
+                                                                             'borderRadius': '5px'}),
                                                             html.Button('Apply to selected', id='apply-group-btn',
                                                                         style={'padding': '3px 8px', 'fontSize': '11px',
                                                                                'marginLeft': '4px', 'cursor': 'pointer'}),
@@ -1031,8 +1082,8 @@ _layout_body = html.Div(
                                                                            checked=False, size='sm', mb=8),
                                                                 html.Button('Create Model', id='cal-create-btn', className='btn btn-primary',
                                                                             style={'width': '100%', 'marginBottom': '15px'}),
-                                                            ], style={'padding': '12px', 'backgroundColor': '#f8f9fa',
-                                                                      'borderRadius': '6px', 'marginBottom': '15px'}),
+                                                            ], style={'padding': '12px', 'backgroundColor': 'rgba(0,0,0,0.02)',
+                                                                      'borderRadius': '8px', 'marginBottom': '15px'}),
 
                                                             # Standards table
                                                             html.Div([
@@ -1083,8 +1134,8 @@ _layout_body = html.Div(
                                                                           style={'width': '100%', 'height': '300px'}),
                                                                 html.Div(id='cal-results-info',
                                                                          style={'fontSize': '12px', 'padding': '8px',
-                                                                                'backgroundColor': '#f8f9fa', 'borderRadius': '4px',
-                                                                                'marginTop': '8px'}),
+                                                                                'backgroundColor': 'rgba(0,0,0,0.02)',
+                                                                                'borderRadius': '6px', 'marginTop': '8px'}),
                                                             ]),
                                                         ])
                                                     ]),
@@ -1093,36 +1144,15 @@ _layout_body = html.Div(
                                                     dmc.TabsPanel(value="ms-viewer", style={'flex': '1', 'overflow': 'auto'}, children=[
                                                     html.Div(id="ms-viewer-content", className="tab-content", style={
                                                         'display': 'block',
-                                                        'padding': '15px',
+                                                        'padding': '10px 14px',
                                                         'height': '100%',
                                                         'overflowY': 'auto'
                                                     }, children=[
                                                         html.Div([
                                                             html.Div([
-                                                                dcc.Graph(id='ms-spectrum-graph',
-                                                                          figure=go.Figure(layout=go.Layout(
-                                                                              template='plotly_white',
-                                                                              margin=dict(l=50, r=20, t=30, b=40),
-                                                                              xaxis=dict(visible=False),
-                                                                              yaxis=dict(visible=False),
-                                                                              annotations=[dict(
-                                                                                  text='Click on the chromatogram to view a mass spectrum',
-                                                                                  xref='paper', yref='paper',
-                                                                                  x=0.5, y=0.5, showarrow=False,
-                                                                                  font=dict(size=13, color='#999'),
-                                                                              )])),
-                                                                          responsive=True,
-                                                                          style={'width': '100%', 'height': '250px'}),
-                                                                html.Div(id='ms-spectrum-info',
-                                                                         style={'fontSize': '12px', 'padding': '6px 8px',
-                                                                                'backgroundColor': '#f8f9fa',
-                                                                                'borderRadius': '4px', 'marginTop': '4px',
-                                                                                'minHeight': '20px'}),
-                                                            ]),
-                                                            html.Div([
-                                                                html.Div('EIC Extraction', style={
+                                                                html.Div('Target Ion', style={
                                                                     'fontWeight': 'bold', 'fontSize': '13px',
-                                                                    'marginBottom': '8px', 'marginTop': '12px'}),
+                                                                    'marginBottom': '8px'}),
                                                                 html.Div([
                                                                     html.Div([
                                                                         html.Label('Target m/z', className='form-label'),
@@ -1130,32 +1160,79 @@ _layout_body = html.Div(
                                                                                   placeholder='e.g. 294.1',
                                                                                   className='form-input',
                                                                                   style={'width': '100%'}),
-                                                                    ], style={'flex': '2'}),
+                                                                    ], style={'flex': '2', 'minWidth': '120px'}),
                                                                     html.Div([
                                                                         html.Label('Tolerance', className='form-label'),
                                                                         dcc.Input(id='eic-tolerance-input', type='number',
                                                                                   value=0.5, step=0.1,
                                                                                   className='form-input',
                                                                                   style={'width': '100%'}),
-                                                                    ], style={'flex': '1'}),
+                                                                    ], style={'flex': '1', 'minWidth': '90px'}),
                                                                     html.Div([
                                                                         html.Button('Extract', id='eic-extract-btn',
                                                                                     className='btn btn-primary',
-                                                                                    style={'marginTop': '20px', 'width': '100%'}),
-                                                                    ], style={'flex': '1'}),
+                                                                                    style={'width': '100%'}),
+                                                                    ], style={'flex': '1', 'minWidth': '90px', 'paddingTop': '18px'}),
                                                                     html.Div([
                                                                         html.Button('Clear', id='eic-clear-btn',
                                                                                     className='btn',
-                                                                                    style={'marginTop': '20px', 'width': '100%'}),
-                                                                    ], style={'flex': '0.5'}),
+                                                                                    style={'width': '100%'}),
+                                                                    ], style={'flex': '0.7', 'minWidth': '72px', 'paddingTop': '18px'}),
                                                                 ], style={'display': 'flex', 'gap': '8px',
-                                                                          'alignItems': 'flex-start'}),
+                                                                          'alignItems': 'flex-start',
+                                                                          'flexWrap': 'wrap'}),
                                                                 html.Div(id='eic-active-list', style={
                                                                     'marginTop': '8px', 'display': 'flex',
                                                                     'flexWrap': 'wrap', 'gap': '4px'}),
-                                                            ], style={'padding': '10px', 'backgroundColor': '#f8f9fa',
-                                                                      'borderRadius': '6px'}),
-                                                        ])
+                                                            ], style={'padding': '10px', 'backgroundColor': 'rgba(0,0,0,0.02)',
+                                                                      'borderRadius': '8px', 'marginBottom': '10px'}),
+                                                            html.Div([
+                                                                html.Div([
+                                                                    html.Div('Extracted Ion Chromatogram', style={
+                                                                        'fontWeight': 'bold', 'fontSize': '12px',
+                                                                        'margin': '0 0 4px 2px'}),
+                                                                    dcc.Graph(id='eic-graph',
+                                                                              figure=go.Figure(layout=go.Layout(
+                                                                                  template='plotly_white',
+                                                                                  margin=dict(l=50, r=20, t=28, b=36),
+                                                                                  xaxis=dict(visible=False),
+                                                                                  yaxis=dict(visible=False),
+                                                                                  annotations=[dict(
+                                                                                      text='Extract an EIC to view it here',
+                                                                                      xref='paper', yref='paper',
+                                                                                      x=0.5, y=0.5, showarrow=False,
+                                                                                      font=dict(size=13, color='#999'),
+                                                                                  )])),
+                                                                              responsive=True,
+                                                                              style={'width': '100%', 'height': '300px'}),
+                                                                ], style={'flex': '1 1 420px', 'minWidth': '320px'}),
+                                                                html.Div([
+                                                                    html.Div('Apex / Scan Spectrum', style={
+                                                                        'fontWeight': 'bold', 'fontSize': '12px',
+                                                                        'margin': '0 0 4px 2px'}),
+                                                                    dcc.Graph(id='ms-spectrum-graph',
+                                                                              figure=go.Figure(layout=go.Layout(
+                                                                                  template='plotly_white',
+                                                                                  margin=dict(l=50, r=20, t=30, b=40),
+                                                                                  xaxis=dict(visible=False),
+                                                                                  yaxis=dict(visible=False),
+                                                                                  annotations=[dict(
+                                                                                      text='Click TIC/EIC or extract a target ion',
+                                                                                      xref='paper', yref='paper',
+                                                                                      x=0.5, y=0.5, showarrow=False,
+                                                                                      font=dict(size=13, color='#999'),
+                                                                                  )])),
+                                                                              responsive=True,
+                                                                              style={'width': '100%', 'height': '300px'}),
+                                                                    html.Div(id='ms-spectrum-info',
+                                                                             style={'fontSize': '12px', 'padding': '6px 8px',
+                                                                                    'backgroundColor': 'rgba(0,0,0,0.02)',
+                                                                                    'borderRadius': '6px', 'marginTop': '4px',
+                                                                                    'minHeight': '20px'}),
+                                                                ], style={'flex': '1 1 420px', 'minWidth': '320px'}),
+                                                            ], style={'display': 'flex', 'gap': '12px',
+                                                                      'alignItems': 'stretch', 'flexWrap': 'wrap'}),
+                                                        ], style={'display': 'flex', 'flexDirection': 'column', 'gap': '0'})
                                                     ]),
                                                     ]),
                                                     ],
@@ -1181,9 +1258,9 @@ _layout_body = html.Div(
                             id='clear-cache-btn',
                             title='Delete saved settings and cached state',
                             style={
-                                'background': 'none', 'border': '1px solid #555',
-                                'color': '#999', 'fontSize': '11px', 'padding': '1px 8px',
-                                'cursor': 'pointer', 'borderRadius': '3px', 'marginLeft': '10px',
+                                'background': 'none', 'border': '1px solid rgba(255,255,255,0.2)',
+                                'color': 'rgba(255,255,255,0.4)', 'fontSize': '10px', 'padding': '1px 8px',
+                                'cursor': 'pointer', 'borderRadius': '4px', 'marginLeft': '10px',
                             },
                         ),
                     ],
@@ -1246,7 +1323,7 @@ _layout_body = html.Div(
 
 # DMC 2.x requires a MantineProvider ancestor for any DMC component to render.
 app.layout = dmc.MantineProvider(
-    theme={"primaryColor": "teal"},
+    theme={"primaryColor": "dark"},
     children=[_layout_body],
 )
 
@@ -1270,6 +1347,7 @@ register_baseline_callbacks(app, data_manager)
 register_context_menu_callbacks(app, data_manager)
 register_deconvolution_callbacks(app, data_manager)
 register_export_callbacks(app, data_manager)
+register_publication_preview_callbacks(app, data_manager)
 register_calibration_callbacks(app, data_manager)
 register_plot_settings_callbacks(app, data_manager)
 register_lcms_callbacks(app, data_manager)
@@ -1432,6 +1510,20 @@ def update_status(files):
 
     file_count = len(files)
     return f'Loaded {file_count} file{"s" if file_count != 1 else ""}', f'{file_count} file{"s" if file_count != 1 else ""} available'
+
+# Show figure-dimensions section only when Publication tab is active
+clientside_callback(
+    """
+    function(activeTab) {
+        if (activeTab === 'publication') {
+            return {};
+        }
+        return {display: 'none'};
+    }
+    """,
+    Output('pt-pub-dimensions-wrapper', 'style'),
+    Input('active-plot-tab', 'data'),
+)
 
 if __name__ == '__main__':
     log.info("Starting GeckoPlotter V2...")
