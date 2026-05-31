@@ -12,6 +12,7 @@
     var currentIdx = null;
     var sliderObserver = null;
     var raf = 0;
+    var suppressNextClick = false;
 
     function graphRoot() {
         return document.getElementById('main-plot');
@@ -163,10 +164,21 @@
 
     function onDown(evt) {
         if (evt.button === 2 || !inPlot(evt)) return;
+        if (evt.currentTarget === graphRoot() && !nearLine(evt)) return;
         evt.preventDefault();
         evt.stopImmediatePropagation();
         dragging = true;
+        suppressNextClick = true;
         document.body.style.cursor = 'col-resize';
+        scrubAt(evt);
+    }
+
+    function onClick(evt) {
+        if (suppressNextClick) {
+            suppressNextClick = false;
+            return;
+        }
+        if (evt.button === 2 || !inPlot(evt) || nearLine(evt)) return;
         scrubAt(evt);
     }
 
@@ -193,6 +205,7 @@
             root.__geckoScanScrubV5 = true;
             root.addEventListener('mousedown', onDown, true);
             root.addEventListener('touchstart', onDown, true);
+            root.addEventListener('click', onClick, true);
         }
         var c = overlay();
         if (c && !c.__geckoScanScrubV5) {
