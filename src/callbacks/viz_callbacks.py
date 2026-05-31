@@ -1264,6 +1264,27 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
                             figure, deconv_markers, deconv_result,
                             _ov_time, _ov_signal)
 
+        # LC-MS scan cursor is rendered as a DOM overlay in app.py /
+        # scan-line-constraint.js. Keep the Plotly figure free of old scan
+        # traces/shapes so no stale vertical line remains in the SVG.
+        if active_file:
+            _af_entry = data_manager.get_data_by_id(active_file)
+            if _af_entry and data_manager.lcms_service.has_spectral_data(_af_entry):
+                try:
+                    fig_for_line = go.Figure(figure) if isinstance(figure, dict) else figure
+                    fig_for_line.data = tuple(
+                        tr for tr in fig_for_line.data
+                        if getattr(tr, 'name', None) != 'lcms-scan-line'
+                    )
+                    if fig_for_line.layout.shapes:
+                        fig_for_line.update_layout(shapes=[
+                            sh for sh in fig_for_line.layout.shapes
+                            if getattr(sh, 'name', None) != 'lcms-scan-line'
+                        ])
+                    figure = fig_for_line
+                except Exception:
+                    pass
+
         if is_tab_switch:
             effective_zoom = restored_zoom
         else:

@@ -56,11 +56,10 @@ def register_lcms_callbacks(app, data_manager):
          Output('ms-scan-slider', 'max'),
          Output('ms-scan-slider', 'value'),
          Output('ms-scan-label', 'children')],
-        [Input('active-file', 'data'),
-         Input('render-trigger', 'data')],
+        Input('active-file', 'data'),
         prevent_initial_call=True,
     )
-    def configure_scan_slider(active_file, _):
+    def configure_scan_slider(active_file):
         resolved = _resolve_lcms_spectral_entry(data_manager, active_file, lcms_svc)
         file_id, file_data = resolved if resolved else (None, None)
         if not file_data or not lcms_svc.has_spectral_data(file_data):
@@ -95,29 +94,88 @@ def register_lcms_callbacks(app, data_manager):
         return fig, _source_status('slider', status), _scan_label(lcms_svc, file_data, resolved_idx)
 
     @app.callback(
-        Output('main-plot', 'figure', allow_duplicate=True),
-        Input('ms-scan-slider', 'value'),
-        [State('active-file', 'data'),
-         State('active-tab', 'data'),
-         State('main-plot', 'figure')],
+        Output('ms-scan-slider', 'value', allow_duplicate=True),
+        Input('ms-scan-client-input', 'value'),
+        State('ms-scan-slider', 'value'),
         prevent_initial_call=True,
     )
-    def render_scan_line(scan_idx, active_file, active_tab, current_figure):
-        if active_tab != 'ms-viewer' or scan_idx is None or not current_figure:
+    def sync_client_scan_event(input_scan_idx, current_scan_idx):
+        """Bridge browser plot drag/click scan events back into the Dash slider."""
+        if input_scan_idx is None:
             return dash.no_update
-
-        resolved = _resolve_lcms_spectral_entry(data_manager, active_file, lcms_svc)
-        file_id, file_data = resolved if resolved else (None, None)
-        if not file_data or not lcms_svc.has_spectral_data(file_data):
-            return _main_figure_without_scan_line(current_figure)
-
         try:
-            time_arr, _ = lcms_svc.extract_tic(file_data)
-            rt = float(time_arr[int(scan_idx)])
-        except (ValueError, IndexError, TypeError):
-            return _main_figure_without_scan_line(current_figure)
+            scan_idx = int(input_scan_idx)
+            current_idx = int(current_scan_idx) if current_scan_idx is not None else None
+        except (TypeError, ValueError):
+            return dash.no_update
+        if current_idx == scan_idx:
+            return dash.no_update
+        return scan_idx
 
-        return _main_figure_with_scan_line(current_figure, rt)
+    app.clientside_callback(
+        """
+        function(scanIdx, figure) {
+            var hidden = {
+                position: 'absolute',
+                display: 'none',
+                top: '0px',
+                left: '0px',
+                height: '0px',
+                width: '18px',
+                borderLeft: '2px dotted #111',
+                zIndex: 30,
+                pointerEvents: 'auto',
+                cursor: 'col-resize'
+            };
+
+            function visibleStyle(left, top, height) {
+                return {
+                    position: 'absolute',
+                    display: 'block',
+                    top: top + 'px',
+                    left: left + 'px',
+                    height: Math.max(0, height) + 'px',
+                    width: '18px',
+                    borderLeft: '2px dotted #111',
+                    zIndex: 30,
+                    pointerEvents: 'auto',
+                    cursor: 'col-resize'
+                };
+            }
+
+            var sliderRoot = document.getElementById('ms-scan-slider');
+            var active = !!(sliderRoot && sliderRoot.getClientRects && sliderRoot.getClientRects().length);
+            var wrapper = document.getElementById('main-plot');
+            var overlay = document.getElementById('lcms-scan-cursor-overlay');
+            var host = overlay ? overlay.parentElement : null;
+            var plotDrag = wrapper ? wrapper.querySelector('.nsewdrag') : null;
+            var handle = sliderRoot ? sliderRoot.querySelector('[role="slider"]') : null;
+
+            if (!active || scanIdx === null || scanIdx === undefined || !host || !plotDrag || !handle) {
+                return hidden;
+            }
+
+            var maxIdx = Number(handle.getAttribute('aria-valuemax'));
+            if (!Number.isFinite(maxIdx) || maxIdx <= 0) {
+                return hidden;
+            }
+
+            var idx = Math.max(0, Math.min(Math.round(Number(scanIdx)), Math.round(maxIdx)));
+            var rect = plotDrag.getBoundingClientRect();
+            var hostRect = host.getBoundingClientRect();
+            var left = rect.left - hostRect.left + (idx / maxIdx) * rect.width;
+            var top = rect.top - hostRect.top;
+            var height = rect.height;
+
+            window.__geckoLcmsScanState = {idx: idx, left: left, active: active, maxIdx: maxIdx};
+            return visibleStyle(left, top, height);
+        }
+        """,
+        Output('lcms-scan-cursor-overlay', 'style'),
+        Input('ms-scan-slider', 'value'),
+        State('main-plot', 'figure'),
+        prevent_initial_call=True,
+    )
 
     # ------------------------------------------------------------------
     # 2. EIC extraction → overlay on main plot
@@ -383,37 +441,55 @@ def _build_spectrum_at_scan(lcms_svc, file_data, scan_idx):
     except (ValueError, IndexError) as exc:
         return _empty_spectrum(str(exc)), str(exc), 0
 
-    max_int = intensity.max() if intensity.size else 1.0
-    rel_intensity = intensity / max_int * 100 if max_int > 0 else intensity
-
-    xs = []
-    ys = []
-    for x_val, y_val in zip(mz, rel_intensity):
-        xs.extend([x_val, x_val, None])
-        ys.extend([0, y_val, None])
+    display_intensity = np.asarray(intensity, dtype=float)
+    if display_intensity.size:
+        display_intensity = display_intensity - np.nanmin(display_intensity)
+    max_int = np.nanmax(display_intensity) if display_intensity.size else 1.0
+    rel_intensity = display_intensity / max_int * 100 if max_int > 0 else display_intensity
 
     fig = go.Figure()
-    fig.add_trace(go.Scatter(
-        x=xs,
-        y=ys,
-        mode='lines',
-        line=dict(color='#2B6CB0', width=1),
-        hoverinfo='skip',
-        showlegend=False,
-    ))
-    fig.add_trace(go.Scatter(
-        x=mz,
-        y=rel_intensity,
-        mode='markers',
-        marker=dict(color='#2B6CB0', size=3, opacity=0.5),
-        customdata=intensity,
-        hovertemplate=(
-            'm/z: %{x:.4g}<br>'
-            'Intensity: %{customdata:.4g}<br>'
-            'Relative: %{y:.1f}%<extra></extra>'
-        ),
-        showlegend=False,
-    ))
+    if mz.size > 1200:
+        fig.add_trace(go.Scattergl(
+            x=mz,
+            y=rel_intensity,
+            mode='lines',
+            line=dict(color='#2B6CB0', width=1),
+            customdata=intensity,
+            hovertemplate=(
+                'm/z: %{x:.4g}<br>'
+                'Intensity: %{customdata:.4g}<br>'
+                'Relative: %{y:.1f}%<extra></extra>'
+            ),
+            showlegend=False,
+        ))
+    else:
+        xs = []
+        ys = []
+        for x_val, y_val in zip(mz, rel_intensity):
+            xs.extend([x_val, x_val, None])
+            ys.extend([0, y_val, None])
+
+        fig.add_trace(go.Scatter(
+            x=xs,
+            y=ys,
+            mode='lines',
+            line=dict(color='#2B6CB0', width=1),
+            hoverinfo='skip',
+            showlegend=False,
+        ))
+        fig.add_trace(go.Scatter(
+            x=mz,
+            y=rel_intensity,
+            mode='markers',
+            marker=dict(color='#2B6CB0', size=3, opacity=0.45),
+            customdata=intensity,
+            hovertemplate=(
+                'm/z: %{x:.4g}<br>'
+                'Intensity: %{customdata:.4g}<br>'
+                'Relative: %{y:.1f}%<extra></extra>'
+            ),
+            showlegend=False,
+        ))
     fig.update_layout(
         template='plotly_white',
         margin=dict(l=48, r=16, t=20, b=38),

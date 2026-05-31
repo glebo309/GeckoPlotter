@@ -147,6 +147,7 @@ _layout_body = html.Div(
         dcc.Store(id='plot-peak-click-store', data=None),  # Browser-side peak hit-test selection
         dcc.Store(id='manual-draw-line-store', data=None),  # Browser-side custom integration line
         dcc.Store(id='interaction-action-store', data=None),  # Last action for future undo/redo
+        dcc.Input(id='ms-scan-client-input', type='number', value=None, style={'display': 'none'}),
         dcc.Store(id='render-trigger', data=0),  # Counter bumped to trigger master render of main-plot
         dcc.Store(id='zoom-state', data=None),  # Persisted user zoom ranges across figure rebuilds
         dcc.Store(id='plot-tabs', data=[]),  # List of plot tab descriptors [{id, label, type, group_key}]
@@ -843,6 +844,21 @@ _layout_body = html.Div(
                                                         'doubleClick': 'reset+autosize',
                                                         'scrollZoom': True,
                                                         'edits': {'shapePosition': True},
+                                                    },
+                                                ),
+                                                html.Div(
+                                                    id='lcms-scan-cursor-overlay',
+                                                    style={
+                                                        'position': 'absolute',
+                                                        'display': 'none',
+                                                        'top': '0px',
+                                                        'left': '0px',
+                                                        'height': '0px',
+                                                        'width': '18px',
+                                                        'borderLeft': '2px dotted #111',
+                                                        'zIndex': 30,
+                                                        'pointerEvents': 'auto',
+                                                        'cursor': 'col-resize',
                                                     },
                                                 ),
                                                 create_paper_mock(),
