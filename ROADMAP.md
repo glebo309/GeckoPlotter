@@ -44,9 +44,53 @@ Start every new session by reading this file.
 
 ---
 
-## Active Sprint: Quick Wins (2026-05-30) ✓
+## Active Sprint: Publication Preview Polish (2026-05-30)
 
-All items completed — see Completed section below.
+The Publication tab is for **making the final figure** — not for data analysis.
+Goal: make it feel like a pro figure-editing tool with contextual controls.
+
+### Quick wins
+- [x] **TIFF export format** — TIFF added to pub preview export (PNG→TIFF via Pillow, LZW compression, DPI metadata)
+- [x] **Editable DPI** — NumberInput (72–1200) in preset bar, used by readout and all export formats
+- [x] **Presentation preview** — third preset: 16:9 slide mock with title/subtitle, auto-switches container
+- [x] **Shared/combined axis labels** — toggle in Plot Settings Labels section; hides per-subplot labels and adds centered paper-level X/Y annotations
+- [x] **"Open Publication Preview" button** — in Export tab, switches to Publication tab + auto-selects Plot Settings toolbox
+- [ ] **Axis-specific zoom reset** — double-click X axis resets only X range; double-click Y resets only Y (needs custom JS handler)
+
+### Figure style presets
+- [ ] **Style preset dropdown** — "Figure Style" selector in Publication toolbox (applies Plotly template in one click)
+- [ ] **Prism Classic** — white bg, Arial, no grid, bold black axes, outward ticks, Prism color cycle
+- [ ] **Nature** — minimal, Helvetica, thin axes, muted palette, no box frame
+- [ ] **ACS** — Arial, partial box (left+bottom axes only), serif-free, ACS color scheme
+- [ ] **Angewandte** — similar to ACS, compact margins, slightly bolder lines
+- [ ] **Presentation** — larger fonts (18pt+), bolder lines, high-contrast colors for projection
+- [ ] **Dark** — dark background, light axes/text, for slides on dark themes
+
+### Focus mode (Publication activation UX)
+- [ ] **Publication tab hidden by default** — remove from top nav; add "Send to Publication Preview" button in Export toolbox tab
+- [ ] **Focus mode on activation** — when Publication opens:
+  - Collapse bottom panel (Data Overview, Peak Analysis, etc.)
+  - Collapse file tree (toolbox fills left sidebar)
+  - Auto-switch toolbox to Plot Settings tab
+  - Clean split view: settings left, preview right
+  - User can manually drag panels back at any time
+
+### Right-click context menus on publication figure
+- [ ] **Right-click on X axis** → X axis options (label text, range, scale, minor ticks, tick format)
+- [ ] **Right-click on Y axis** → Y axis options (same set per Y axis)
+- [ ] **Right-click on title** → title options (text, font size, position, show/hide)
+- [ ] **Right-click on figure body** → general options (theme, grid, legend position, A/B comparison)
+
+### Click-to-edit labels
+- [ ] **Click axis labels to edit** — click on X/Y label text on the figure → inline edit field appears
+- [ ] **Click title to edit** — same for figure title
+- [ ] **Draggable labels** — shift+drag to reposition, with snap alignment (grid-snap like PowerPoint)
+
+### Toolbox reorganization
+- [ ] **Smarter grouping** — Title + axis labels in one section; layout in another
+- [ ] **Conditional visibility** — hide options that aren't relevant (e.g., no "show title" toggle if title is empty)
+- [ ] **Per-axis minor ticks** — control minor ticks on X only, Y only, or both; hidden behind expandable "More" section
+- [ ] **Collapsible detail sections** — "More options" expand buttons for advanced controls (tick formatting, grid lines, etc.)
 
 ---
 
@@ -60,9 +104,24 @@ All items completed — see Completed section below.
 - Add ISTD mode (divide analyte area by IS area before regression)
 - Priority: **HIGH** (enables quantitative analysis, but not blocking current work)
 
+### HMS data analysis
+- Current HMS ingestion is shaky
+- Port working analysis from Streamlit version (GitHub: StreamLit repo)
+- Priority: **HIGH**
+
 ### Legend control
 - Movable legend, persistent position, no phantom entries
 - Priority: **MEDIUM**
+
+### Session management
+- Save/recall full sessions (partially wired in export_callbacks)
+- Priority: **MEDIUM**
+
+### Polish & animations
+- Smooth transitions when switching views
+- Loading indicator during export (spinner/progress on Export button)
+- Status line feedback for async operations
+- Priority: **LOW** (nice-to-have, do after core features)
 
 ---
 
@@ -87,6 +146,10 @@ All items completed — see Completed section below.
 - Make DataManager own all services (Peak, Integration, Calibration, etc.)
 - Replace legacy persistence with persistence service
 - Route all state through registry/service boundaries
+
+### Streamlit feature port
+- Look at GitHub StreamLit version for analysis features (calibration, HMS)
+- Port working logic, modernize code quality
 
 ---
 

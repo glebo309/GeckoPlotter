@@ -14,6 +14,7 @@ from dash import Input, Output, State, html, dash_table, Patch
 from dash_iconify import DashIconify
 import numpy as np
 import pandas as pd
+import plotly.graph_objects as go
 from services.plot_manager import PlotManager
 from services.data_store import DataStore as DataManager
 from components.data_table_editor import create_data_table_editor
@@ -230,7 +231,11 @@ def _collect_visible_files(dm, active_file_id=None, loaded_files=None, target_gr
     if loaded_files:
         valid_ids = set()
         for rec in loaded_files:
-            valid_ids.add(rec.get('id'))
+            rec_id = rec.get('id')
+            valid_ids.add(rec_id)
+            bundle = dm.get_bundle(rec_id) if hasattr(dm, 'get_bundle') else None
+            if bundle:
+                valid_ids.update(c.component_id for c in bundle.component_list)
         # Also add bundle IDs that map to valid main-file IDs
         for bundle in dm.bundle_manager.bundles.values():
             main = bundle.main_file
@@ -339,6 +344,52 @@ def _tab_label_from_group(group_key):
     return base
 
 
+def _add_signal_processing_overlays(figure, data_manager, file_id, display_opts):
+    """Add smoothed / baseline / corrected traces from stored ProcessedSignal.
+
+    Returns the (possibly new) figure object.
+    """
+    import plotly.graph_objects as go
+
+    processed = data_manager.integration_service.get_processed_signal(file_id)
+    if processed is None:
+        return figure
+
+    fig = go.Figure(figure) if isinstance(figure, dict) else figure
+
+    if 'smoothed' in display_opts:
+        fig.add_trace(go.Scatter(
+            x=processed.time, y=processed.smoothed,
+            mode='lines',
+            line=dict(color='rgba(0, 100, 200, 0.7)', width=1.5),
+            name='Smoothed',
+            showlegend=True,
+            meta='signal_processing',
+        ))
+
+    if 'baseline' in display_opts:
+        fig.add_trace(go.Scatter(
+            x=processed.time, y=processed.baseline,
+            mode='lines',
+            line=dict(color='rgba(220, 50, 50, 0.6)', width=1.5, dash='dash'),
+            name='Baseline',
+            showlegend=True,
+            meta='signal_processing',
+        ))
+
+    if 'corrected' in display_opts:
+        fig.add_trace(go.Scatter(
+            x=processed.time, y=processed.corrected,
+            mode='lines',
+            line=dict(color='rgba(50, 180, 50, 0.7)', width=1.5),
+            name='Corrected',
+            showlegend=True,
+            meta='signal_processing',
+        ))
+
+    return fig
+
+
 def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
     """Register visualization-related callbacks."""
 
@@ -423,6 +474,10 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
         else:
             next_active = new_tabs[0]['id'] if new_tabs else None
 
+        # Always include the Publication preview tab
+        pub_tab = {'id': 'publication', 'label': 'Publication', 'type': 'publication'}
+        new_tabs.append(pub_tab)
+
         return new_tabs, next_active
 
     @app.callback(
@@ -502,6 +557,11 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
         tab_exists = any(t['id'] == target_tab for t in tabs)
 
         new_memory = {**(memory or {}), target_tab: active_file}
+
+        # Don't auto-switch away from the Publication tab; the user
+        # is previewing the figure and just wants a different file.
+        if current_tab == 'publication':
+            return dash.no_update, new_memory
 
         if tab_exists and target_tab != current_tab:
             return target_tab, new_memory
@@ -1033,7 +1093,8 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
          Input('file-order', 'data'),
          Input('pub-table', 'sort_by'),
          Input('peak-table', 'sort_by'),
-         Input('cross-sample-table', 'sort_by')],
+         Input('cross-sample-table', 'sort_by'),
+         Input('peak-change-trigger', 'data')],
         [State('loaded-files', 'data'),
          State('plot-tabs', 'data'),
          State('pub-plot-figure', 'data'),
@@ -1043,14 +1104,15 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
          State('custom-plot-figures', 'data'),
          State('baseline-mode', 'data'),
          State('deconv-markers', 'data'),
-         State('deconv-result', 'data')],
+         State('deconv-result', 'data'),
+         State('int-display-opts', 'value')],
         prevent_initial_call=True
     )
     def master_render(active_tab_id, plot_trigger, active_file, plot_settings, render_trigger,
-                      file_order, pub_sort, peak_sort, cross_sort,
+                      file_order, pub_sort, peak_sort, cross_sort, peak_change_trigger,
                       loaded_files, plot_tabs, pub_plot_figure, selected_peak_id,
                       zoom_state, zoom_memory, custom_figures,
-                      baseline_mode, deconv_markers, deconv_result):
+                      baseline_mode, deconv_markers, deconv_result, display_opts):
         """Single owner of main-plot. Renders the active plot tab's figure."""
         import plotly.graph_objects as go
         from services.plot_settings_service import PlotSettingsService, DEFAULT_PLOT_SETTINGS
@@ -1067,6 +1129,10 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
         tab = next((t for t in plot_tabs if t['id'] == active_tab_id), None)
         if not tab:
             return plot_manager.create_empty_plot("Upload files to get started"), None
+
+        # Publication tab has its own dedicated callback and graph
+        if tab.get('type') == 'publication':
+            return dash.no_update, dash.no_update
 
         # -- Custom plot tab --
         if tab.get('type') == 'custom':
@@ -1139,39 +1205,85 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
 
         figure = plot_manager.create_multi_file_plot(visible_files, layout_mode)
 
-        fig_obj_for_peaks = go.Figure(figure) if isinstance(figure, dict) else figure
-        if layout_mode == 'stacked':
-            flat_files = []
-            for files in visible_files.values():
-                flat_files.extend(files)
-            cleanup_peak_traces(fig_obj_for_peaks)
-            for row_idx, (fname, fdata) in enumerate(flat_files, start=1):
-                fid = _find_file_id(data_manager, fdata)
-                if not fid:
-                    continue
-                peaks = data_manager.peak_service.get_peaks(fid)
-                if not peaks:
-                    continue
-                _ov_time, _ov_signal = get_xy_arrays(data_manager, fid)
+        smooth_window = s.get('smooth_window', 0)
+        if smooth_window >= 3:
+            from scipy.signal import savgol_filter
+            poly_order = min(3, smooth_window - 1)
+            fig_sm = go.Figure(figure) if isinstance(figure, dict) else figure
+            for trace in fig_sm.data:
+                if hasattr(trace, 'y') and trace.y is not None:
+                    y = np.asarray(trace.y, dtype=float)
+                    if len(y) > smooth_window:
+                        trace.y = tuple(savgol_filter(y, smooth_window, poly_order))
+            figure = fig_sm
+
+        show_peaks = 'peaks' in (display_opts or ['peaks'])
+
+        # If the user switched palette, update peak_service and re-group
+        # so peak.color reflects the new palette. Compare by name (robust).
+        from services.plot_settings_service import PlotSettingsService as _PSS
+        _pal_name = s.get('palette', 'okabe_ito')
+        _ps = data_manager.peak_service
+        if getattr(_ps, '_palette_name', None) != _pal_name:
+            _ps.set_palette(_pal_name, _PSS.get_color_palette(_pal_name))
+            _ps.group_peaks_across_samples(
+                file_overlay_map=data_manager.build_file_overlay_map())
+
+        if show_peaks:
+            fig_obj_for_peaks = go.Figure(figure) if isinstance(figure, dict) else figure
+            if layout_mode == 'stacked':
+                flat_files = []
+                for files in visible_files.values():
+                    flat_files.extend(files)
+                cleanup_peak_traces(fig_obj_for_peaks)
+                for row_idx, (fname, fdata) in enumerate(flat_files, start=1):
+                    fid = _find_file_id(data_manager, fdata)
+                    if not fid:
+                        continue
+                    peaks = data_manager.peak_service.get_peaks(fid)
+                    if not peaks:
+                        continue
+                    _ov_time, _ov_signal = get_xy_arrays(data_manager, fid)
+                    if _ov_time is not None:
+                        add_peak_traces(fig_obj_for_peaks, peaks, _ov_time, _ov_signal, selected_peak_id, row=row_idx)
+                figure = fig_obj_for_peaks
+            elif active_file:
+                _ov_time, _ov_signal = get_xy_arrays(data_manager, active_file)
                 if _ov_time is not None:
-                    add_peak_traces(fig_obj_for_peaks, peaks, _ov_time, _ov_signal, selected_peak_id, row=row_idx)
-            figure = fig_obj_for_peaks
-        elif active_file:
-            _ov_time, _ov_signal = get_xy_arrays(data_manager, active_file)
-            if _ov_time is not None:
-                all_peaks = data_manager.peak_service.get_peaks(active_file)
-                if baseline_mode == 'deconvolve' and selected_peak_id:
-                    peaks_to_render = [p for p in all_peaks if p.peak_id != selected_peak_id]
-                else:
-                    peaks_to_render = all_peaks
-                figure = overlay_peaks_on_figure(
-                    peaks_to_render,
-                    figure, _ov_time, _ov_signal, selected_peak_id)
-                if baseline_mode == 'deconvolve':
-                    from callbacks.peak_overlay import add_deconv_overlays
-                    add_deconv_overlays(
-                        figure, deconv_markers, deconv_result,
-                        _ov_time, _ov_signal)
+                    all_peaks = data_manager.peak_service.get_peaks(active_file)
+                    if baseline_mode == 'deconvolve' and selected_peak_id:
+                        peaks_to_render = [p for p in all_peaks if p.peak_id != selected_peak_id]
+                    else:
+                        peaks_to_render = all_peaks
+                    figure = overlay_peaks_on_figure(
+                        peaks_to_render,
+                        figure, _ov_time, _ov_signal, selected_peak_id)
+                    if baseline_mode == 'deconvolve':
+                        from callbacks.peak_overlay import add_deconv_overlays
+                        add_deconv_overlays(
+                            figure, deconv_markers, deconv_result,
+                            _ov_time, _ov_signal)
+
+        # LC-MS scan cursor is rendered as a DOM overlay in app.py /
+        # scan-line-constraint.js. Keep the Plotly figure free of old scan
+        # traces/shapes so no stale vertical line remains in the SVG.
+        if active_file:
+            _af_entry = data_manager.get_data_by_id(active_file)
+            if _af_entry and data_manager.lcms_service.has_spectral_data(_af_entry):
+                try:
+                    fig_for_line = go.Figure(figure) if isinstance(figure, dict) else figure
+                    fig_for_line.data = tuple(
+                        tr for tr in fig_for_line.data
+                        if getattr(tr, 'name', None) != 'lcms-scan-line'
+                    )
+                    if fig_for_line.layout.shapes:
+                        fig_for_line.update_layout(shapes=[
+                            sh for sh in fig_for_line.layout.shapes
+                            if getattr(sh, 'name', None) != 'lcms-scan-line'
+                        ])
+                    figure = fig_for_line
+                except Exception:
+                    pass
 
         if is_tab_switch:
             effective_zoom = restored_zoom

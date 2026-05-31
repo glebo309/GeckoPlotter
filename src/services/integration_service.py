@@ -72,6 +72,7 @@ class IntegrationService:
 
     def __init__(self):
         self._settings: Dict[str, IntegrationSettings] = {}
+        self._processed: Dict[str, ProcessedSignal] = {}
 
     # -- Settings management ------------------------------------------------
 
@@ -103,7 +104,7 @@ class IntegrationService:
         baseline = self._estimate_baseline(smoothed, settings)
         corrected = smoothed - baseline
 
-        return ProcessedSignal(
+        result = ProcessedSignal(
             file_id=file_id,
             time=np.asarray(time, dtype=float),
             raw=np.asarray(raw_signal, dtype=float),
@@ -111,6 +112,14 @@ class IntegrationService:
             baseline=baseline,
             corrected=corrected,
         )
+        self._processed[file_id] = result
+        return result
+
+    def get_processed_signal(self, file_id: str) -> Optional[ProcessedSignal]:
+        return self._processed.get(file_id)
+
+    def clear_processed_signal(self, file_id: str) -> None:
+        self._processed.pop(file_id, None)
 
     # -- Smoothing ----------------------------------------------------------
 

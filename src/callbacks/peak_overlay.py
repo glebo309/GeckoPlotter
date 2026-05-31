@@ -92,7 +92,8 @@ def add_selected_baseline_handle(fig, peak, row=None):
         editable=True,
     )
 
-    add_kw = dict(row=row, col=1) if row else {}
+    _has_grid = row and hasattr(fig, '_grid_ref') and fig._grid_ref
+    add_kw = dict(row=row, col=1) if _has_grid else {}
     fig.add_trace(go.Scatter(
         x=[p0[0], p1[0]],
         y=[p0[1], p1[1]],
@@ -120,30 +121,22 @@ def cleanup_peak_traces(fig):
 def add_peak_traces(fig, all_peaks, time_arr, signal_arr, selected_peak_id=None, row=None):
     """Add peak overlay traces to the figure.
 
-    Parameters
-    ----------
-    fig : go.Figure
-        The figure to add peaks to.
-    all_peaks : list
-        Peak objects from peak_service.get_peaks().
-    time_arr, signal_arr : array-like
-        Chromatogram data for interpolation.
-    selected_peak_id : str, optional
-        Currently selected peak for highlighting.
-    row : int, optional
-        Subplot row (1-based). When set, traces go to that row.
+    Peak colors come from ``peak.color`` which is set by
+    ``group_peaks_across_samples`` using the active palette.
     """
     import plotly.graph_objects as go
 
     if not all_peaks:
         return
 
-    add_kw = dict(row=row, col=1) if row else {}
+    _has_grid = row and hasattr(fig, '_grid_ref') and fig._grid_ref
+    add_kw = dict(row=row, col=1) if _has_grid else {}
 
     for i, peak in enumerate(all_peaks):
         is_selected = peak.peak_id == selected_peak_id
-        fill_color = rgba(peak.color, 0.58 if is_selected else 0.30) if peak.color else FILL_COLORS[i % len(FILL_COLORS)]
-        line_color = peak.color if is_selected else 'rgba(0,0,0,0)'
+        base_color = peak.color
+        fill_color = rgba(base_color, 0.58 if is_selected else 0.30) if base_color else FILL_COLORS[i % len(FILL_COLORS)]
+        line_color = base_color if is_selected else 'rgba(0,0,0,0)'
 
         has_custom_label = bool(peak.label) if hasattr(peak, 'label') else False
 
@@ -214,7 +207,8 @@ def add_deconv_overlays(fig, markers, deconv_payload, time_arr, signal_arr, row=
     """
     import plotly.graph_objects as go
 
-    add_kw = dict(row=row, col=1) if row else {}
+    _has_grid = row and hasattr(fig, '_grid_ref') and fig._grid_ref
+    add_kw = dict(row=row, col=1) if _has_grid else {}
     xref = 'x' if not row or row == 1 else f'x{row}'
     yref = 'y' if not row or row == 1 else f'y{row}'
 

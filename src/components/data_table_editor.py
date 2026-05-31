@@ -123,6 +123,8 @@ def create_data_table_editor(df=None, table_id='pub-table', default_selected_col
             column_selectable='single',
             row_deletable=True,
             sort_action='native',
+            page_size=50,
+            page_action='native',
             selected_columns=sel_cols if sel_cols else [],
             style_table=TABLE_STYLE_TABLE,
             style_cell=TABLE_STYLE_CELL,

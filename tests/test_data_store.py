@@ -123,3 +123,94 @@ def test_data_store_get_dataframe_and_xy_arrays():
 
 def test_data_store_get_xy_arrays_returns_none_for_unknown_bundle():
     assert DataStore().get_xy_arrays("missing") == (None, None)
+
+
+def test_lcms_components_are_addressable_by_component_id():
+    ms = make_component(
+        component_id="ms-pos-1",
+        filename="Sample_01_MS1 +TIC.cdf",
+        role=ComponentRole.MS_POSITIVE,
+    )
+    uv = make_component(
+        component_id="uv-a-1",
+        filename="Sample_01_VWD1A.cdf",
+        role=ComponentRole.VWD_A,
+    )
+    ms.source_category = SourceCategory.LCMS_MS
+    ms.standardized.source_category = SourceCategory.LCMS_MS
+    uv.source_category = SourceCategory.LCMS_UV
+    uv.standardized.source_category = SourceCategory.LCMS_UV
+    bundle = Bundle(
+        bundle_id="lcms-bundle-1",
+        name="Sample_01",
+        bundle_type=BundleType.LCMS,
+        component_list=[ms, uv],
+    )
+    store = DataStore()
+    store.add_bundle(bundle)
+
+    ms_entry = store.get_data_by_id("ms-pos-1")
+    uv_entry = store.get_data_by_id("uv-a-1")
+
+    assert ms_entry["record"]["id"] == "ms-pos-1"
+    assert ms_entry["metadata"]["parent_bundle_id"] == "lcms-bundle-1"
+    assert ms_entry["metadata"]["component_role"] == ComponentRole.MS_POSITIVE.value
+    assert uv_entry["record"]["id"] == "uv-a-1"
+    assert uv_entry["metadata"]["component_role"] == ComponentRole.VWD_A.value
+
+
+def test_lcms_loaded_data_exposes_components_without_parent_duplicate():
+    ms = make_component(
+        component_id="ms-pos-1",
+        filename="Sample_01_MS1 +TIC.cdf",
+        role=ComponentRole.MS_POSITIVE,
+    )
+    uv = make_component(
+        component_id="uv-a-1",
+        filename="Sample_01_VWD1A.cdf",
+        role=ComponentRole.VWD_A,
+    )
+    ms.source_category = SourceCategory.LCMS_MS
+    ms.standardized.source_category = SourceCategory.LCMS_MS
+    uv.source_category = SourceCategory.LCMS_UV
+    uv.standardized.source_category = SourceCategory.LCMS_UV
+    store = DataStore()
+    store.add_bundle(
+        Bundle(
+            bundle_id="lcms-bundle-1",
+            name="Sample_01",
+            bundle_type=BundleType.LCMS,
+            component_list=[ms, uv],
+        )
+    )
+
+    assert set(store.loaded_data) == {"ms-pos-1", "uv-a-1"}
+
+
+def test_lcms_eic_overlays_are_persistent_for_component_entries():
+    ms = make_component(
+        component_id="ms-pos-1",
+        filename="Sample_01_MS1 +TIC.cdf",
+        role=ComponentRole.MS_POSITIVE,
+    )
+    ms.source_category = SourceCategory.LCMS_MS
+    ms.standardized.source_category = SourceCategory.LCMS_MS
+    store = DataStore()
+    store.add_bundle(
+        Bundle(
+            bundle_id="lcms-bundle-1",
+            name="Sample_01",
+            bundle_type=BundleType.LCMS,
+            component_list=[ms],
+        )
+    )
+
+    overlay = {"mz": 123.4, "tolerance": 0.2, "time": [0.0], "intensity": [10.0]}
+    store.add_lcms_eic_overlay("ms-pos-1", overlay)
+
+    assert store.get_data_by_id("ms-pos-1")["eic_overlays"] == [overlay]
+    assert store.loaded_data["lcms-bundle-1"]["eic_overlays"] == [overlay]
+
+    store.clear_lcms_eic_overlays("ms-pos-1")
+
+    assert store.get_data_by_id("ms-pos-1")["eic_overlays"] == []

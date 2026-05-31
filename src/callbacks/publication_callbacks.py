@@ -12,6 +12,7 @@ import time
 from datetime import datetime
 from dash import Input, Output, State, ALL, callback_context, dash
 import base64
+import copy
 
 log = logging.getLogger('geckoplotter.pub')
 if not log.handlers:
@@ -152,6 +153,15 @@ def _refresh_selection_row_ids(sel, df):
     return out
 
 
+def _clean_selection_for_state(sel):
+    """Return a copy of selections without volatile bookkeeping fields."""
+    if not isinstance(sel, dict):
+        return sel
+    cleaned = copy.deepcopy(sel)
+    cleaned.pop('last_updated', None)
+    return cleaned
+
+
 def register_publication_callbacks(app: dash.Dash, data_manager) -> None:
     """Register publication plotter callbacks."""
     
@@ -233,8 +243,8 @@ def register_publication_callbacks(app: dash.Dash, data_manager) -> None:
             file_selections = get_empty_selections()
 
         if isinstance(file_selections, dict):
+            file_selections = _clean_selection_for_state(file_selections)
             file_selections['file_id'] = active_file
-            file_selections['last_updated'] = time.time()
 
         x_col = file_selections.get('x', {}).get('data', {}).get('column_id')
         y1_series = [s.get('column_id') for s in file_selections.get('y1', {}).get('series', []) if s.get('column_id')]
@@ -998,7 +1008,7 @@ def register_publication_callbacks(app: dash.Dash, data_manager) -> None:
             return dash.no_update, dash.no_update
 
         if isinstance(selections, dict):
-            selections = dict(selections)  # copy to avoid mutating Dash store in-place
+            selections = _clean_selection_for_state(selections)
             if active_file:
                 selections['file_id'] = active_file
 
@@ -1008,7 +1018,8 @@ def register_publication_callbacks(app: dash.Dash, data_manager) -> None:
         else:
             current_state = data_manager.get_file_state(active_file)
 
-        existing = current_state.get('pub_selections')
+        existing = _clean_selection_for_state(current_state.get('pub_selections'))
+        selections = _clean_selection_for_state(selections)
         if existing == selections:
             log.debug(f"⏭️  Skipping save for {active_file[:8]}... (selections unchanged)")
             return dash.no_update, dash.no_update

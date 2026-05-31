@@ -1,4 +1,4 @@
-"""Shared modern styling for the dash_table.DataTable instances
+"""Shared styling for dash_table.DataTable instances
 (pub-table, peak-table, cross-sample-table).
 
 Only the *static* style props live here. Dynamic per-cell styling
@@ -10,8 +10,8 @@ TABLE_STYLE_TABLE = {
     'overflowX': 'auto',
     'overflowY': 'auto',
     'maxHeight': '500px',
-    'borderRadius': '4px',
-    'border': '1px solid #d4d4d4',
+    'borderRadius': '6px',
+    'border': '1px solid rgba(0, 0, 0, 0.12)',
 }
 
 TABLE_STYLE_CELL = {
@@ -21,22 +21,22 @@ TABLE_STYLE_CELL = {
     'fontFamily': 'ui-monospace, "SF Mono", Menlo, Consolas, monospace',
     'minWidth': '80px',
     'whiteSpace': 'normal',
-    'color': '#1a1a1a',
+    'color': '#1d1d1f',
 }
 
 TABLE_STYLE_HEADER = {
-    'backgroundColor': '#1a1a1a',
-    'color': '#e0e0e0',
+    'backgroundColor': '#1d1d1f',
+    'color': '#fff',
     'fontWeight': '600',
-    'fontSize': '11px',
-    'letterSpacing': '0.04em',
+    'fontSize': '10px',
+    'letterSpacing': '0.05em',
     'textTransform': 'uppercase',
-    'padding': '8px 10px',
+    'padding': '7px 10px',
     'cursor': 'pointer',
-    'borderBottom': '1px solid #333',
-    'fontFamily': '-apple-system, "Segoe UI", Roboto, sans-serif',
+    'borderBottom': '1px solid #000',
+    'fontFamily': '-apple-system, "SF Pro Text", "Segoe UI", Roboto, sans-serif',
 }
 
 TABLE_STYLE_DATA = {
-    'border': '1px solid #ebebeb',
+    'border': '1px solid rgba(0, 0, 0, 0.06)',
 }

@@ -58,6 +58,44 @@ COLOR_PALETTES: Dict[str, List[str]] = {
         "#F6D6AD",
         "#CBDFBD",
     ],
+    # Crameri scientific colour maps — categorical (CVD-friendly, perceptually uniform)
+    # Ref: Crameri (2018) doi:10.5281/zenodo.1243862
+    "batlow": [
+        "#011959",
+        "#103F60",
+        "#1C6B71",
+        "#44877D",
+        "#7AAB78",
+        "#B8CC6B",
+        "#EEDA71",
+        "#FAB85D",
+        "#E88556",
+        "#D94D4D",
+    ],
+    "hawaii": [
+        "#8C0273",
+        "#8B2B8B",
+        "#77539B",
+        "#5878A2",
+        "#3E98A0",
+        "#3CB491",
+        "#5FCC72",
+        "#96DE51",
+        "#C9EC53",
+        "#F1F1B0",
+    ],
+    "roma": [
+        "#7E1900",
+        "#B14F12",
+        "#D98B3B",
+        "#F2C971",
+        "#FEFEBB",
+        "#87CFBA",
+        "#3D9BA5",
+        "#1D6688",
+        "#1B3764",
+        "#1A0C3C",
+    ],
 }
 
 # ---------------------------------------------------------------------------
@@ -120,8 +158,8 @@ DEFAULT_PLOT_SETTINGS: Dict[str, object] = {
     "show_legend": True,
     "legend_pos": "top-right",
     # Grid & Frame
-    "show_grid_x": True,
-    "show_grid_y": True,
+    "show_grid_x": False,
+    "show_grid_y": False,
     "show_tick_marks": True,
     "tick_direction": "outside",
     "show_frame": True,
@@ -369,9 +407,10 @@ class PlotSettingsService:
         fig.update_layout(legend=legend_kwargs)
 
         # -- Colour palette & trace styling ----------------------------------
+        # Always apply the selected palette to data traces so lines and
+        # peaks share a single colour source of truth.
         palette = cls.get_color_palette(settings.palette)
         line_dash = _DASH_MAP.get(settings.line_style, 'solid')
-        recolor = settings.palette != 'okabe_ito'
 
         data_trace_idx = 0
         for trace in fig.data:
@@ -388,27 +427,22 @@ class PlotSettingsService:
             if is_peak_trace:
                 continue
 
-            if recolor:
-                color = palette[data_trace_idx % len(palette)]
-            else:
-                color = None
+            color = palette[data_trace_idx % len(palette)]
 
             if settings.trace_opacity < 1.0:
                 trace.update(opacity=settings.trace_opacity)
 
             if not is_bar and hasattr(trace, "line") and trace.line is not None:
                 trace.line.width = settings.line_width
-                if color:
-                    trace.line.color = color
+                trace.line.color = color
                 trace.line.dash = line_dash
 
             if is_bar:
-                if color and hasattr(trace, "marker") and trace.marker is not None:
+                if hasattr(trace, "marker") and trace.marker is not None:
                     trace.marker.color = color
             elif hasattr(trace, "marker") and trace.marker is not None:
                 trace.marker.size = settings.marker_size
-                if color:
-                    trace.marker.color = color
+                trace.marker.color = color
                 trace.marker.symbol = settings.marker_symbol
 
             data_trace_idx += 1

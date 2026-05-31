@@ -19,7 +19,18 @@ import plotly.graph_objects as go
 
 
 class LCMSService:
-    """Stateless service for LC-MS data manipulation and visualisation."""
+    """Service for LC-MS data manipulation and visualisation."""
+
+    def __init__(self) -> None:
+        self._eic_cache: Dict[
+            Tuple[int, int, int, int, float, float],
+            Tuple[np.ndarray, np.ndarray],
+        ] = {}
+        self._sorted_scan_cache: Dict[
+            Tuple[int, int, Optional[int], int],
+            np.ndarray,
+        ] = {}
+        self._max_eic_cache_entries = 128
 
     # ------------------------------------------------------------------
     # Internal helpers for navigating the parsed data dict
@@ -137,9 +148,15 @@ class LCMSService:
         if arrays is None:
             raise ValueError("No mass spectral data available.")
 
-        mass_values = np.asarray(arrays["mass_values"], dtype=float)
-        intensity_values = np.asarray(arrays["intensity_values"], dtype=float)
+        mass_values = np.asarray(arrays["mass_values"])
+        intensity_values = np.asarray(arrays["intensity_values"])
         scan_index_arr = np.asarray(arrays["scan_index"], dtype=int)
+        point_count = arrays.get("point_count")
+        point_count_arr = (
+            np.asarray(point_count, dtype=int)
+            if point_count is not None
+            else None
+        )
 
         n_scans = scan_index_arr.size
         if scan_index < 0 or scan_index >= n_scans:
@@ -148,23 +165,30 @@ class LCMSService:
             )
 
         start = int(scan_index_arr[scan_index])
-        end = (
-            int(scan_index_arr[scan_index + 1])
-            if scan_index + 1 < n_scans
-            else mass_values.size
-        )
+        if point_count_arr is not None and scan_index < point_count_arr.size:
+            end = start + int(point_count_arr[scan_index])
+        else:
+            end = (
+                int(scan_index_arr[scan_index + 1])
+                if scan_index + 1 < n_scans
+                else mass_values.size
+            )
+        end = min(max(end, start), mass_values.size)
 
         return mass_values[start:end], intensity_values[start:end]
+
+    def get_scan_index_at_time(self, data: dict, time_minutes: float) -> int:
+        """Return the scan index nearest to *time_minutes*."""
+        time_arr, _ = self.extract_tic(data)
+        if time_arr.size == 0:
+            raise ValueError("No scan times available.")
+        return int(np.argmin(np.abs(time_arr - time_minutes)))
 
     def get_mass_spectrum_at_time(
         self, data: dict, time_minutes: float
     ) -> Tuple[np.ndarray, np.ndarray]:
         """Return the mass spectrum closest to *time_minutes*."""
-        time_arr, _ = self.extract_tic(data)
-        if time_arr.size == 0:
-            raise ValueError("No scan times available.")
-        idx = int(np.argmin(np.abs(time_arr - time_minutes)))
-        return self.get_mass_spectrum(data, idx)
+        return self.get_mass_spectrum(data, self.get_scan_index_at_time(data, time_minutes))
 
     # ------------------------------------------------------------------
     # Extracted-ion chromatogram (EIC)
@@ -186,27 +210,116 @@ class LCMSService:
         if arrays is None:
             raise ValueError("No mass spectral data available for EIC.")
 
-        mass_values = np.asarray(arrays["mass_values"], dtype=float)
-        intensity_values = np.asarray(arrays["intensity_values"], dtype=float)
+        mass_values = np.asarray(arrays["mass_values"])
+        intensity_values = np.asarray(arrays["intensity_values"])
         scan_index_arr = np.asarray(arrays["scan_index"], dtype=int)
+        point_count = arrays.get("point_count")
+        point_count_arr = (
+            np.asarray(point_count, dtype=int)
+            if point_count is not None
+            else None
+        )
 
         n_scans = scan_index_arr.size
+        time_arr = time_arr[:n_scans]
+        cache_key = (
+            id(arrays["mass_values"]),
+            id(arrays["intensity_values"]),
+            id(arrays["scan_index"]),
+            n_scans,
+            round(float(target_mz), 6),
+            round(float(tolerance), 6),
+        )
+        cached = self._eic_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
         eic_intensities = np.zeros(n_scans, dtype=float)
+        sorted_flags = self._get_sorted_scan_flags(
+            mass_values,
+            scan_index_arr,
+            point_count_arr,
+            source_ids=(
+                id(arrays["mass_values"]),
+                id(arrays["scan_index"]),
+                id(point_count) if point_count is not None else None,
+            ),
+        )
 
         lo = target_mz - tolerance
         hi = target_mz + tolerance
 
         for i in range(n_scans):
             start = int(scan_index_arr[i])
-            end = (
-                int(scan_index_arr[i + 1]) if i + 1 < n_scans else mass_values.size
-            )
+            if point_count_arr is not None and i < point_count_arr.size:
+                end = start + int(point_count_arr[i])
+            else:
+                end = (
+                    int(scan_index_arr[i + 1])
+                    if i + 1 < n_scans
+                    else mass_values.size
+                )
+            end = min(max(end, start), mass_values.size)
             mz_slice = mass_values[start:end]
             int_slice = intensity_values[start:end]
-            mask = (mz_slice >= lo) & (mz_slice <= hi)
-            eic_intensities[i] = float(int_slice[mask].sum()) if mask.any() else 0.0
+            if mz_slice.size == 0:
+                continue
 
-        return time_arr[:n_scans], eic_intensities
+            if bool(sorted_flags[i]):
+                left = int(np.searchsorted(mz_slice, lo, side="left"))
+                right = int(np.searchsorted(mz_slice, hi, side="right"))
+                if right > left:
+                    eic_intensities[i] = float(int_slice[left:right].sum())
+            else:
+                mask = (mz_slice >= lo) & (mz_slice <= hi)
+                eic_intensities[i] = float(int_slice[mask].sum()) if mask.any() else 0.0
+
+        result = (time_arr, eic_intensities)
+        self._remember_eic(cache_key, result)
+        return result
+
+    def _get_sorted_scan_flags(
+        self,
+        mass_values: np.ndarray,
+        scan_index_arr: np.ndarray,
+        point_count_arr: Optional[np.ndarray],
+        *,
+        source_ids: Tuple[int, int, Optional[int]],
+    ) -> np.ndarray:
+        """Return cached per-scan sortedness used by EIC search windows."""
+        n_scans = scan_index_arr.size
+        cache_key = (*source_ids, n_scans)
+        cached = self._sorted_scan_cache.get(cache_key)
+        if cached is not None:
+            return cached
+
+        flags = np.ones(n_scans, dtype=bool)
+        for i in range(n_scans):
+            start = int(scan_index_arr[i])
+            if point_count_arr is not None and i < point_count_arr.size:
+                end = start + int(point_count_arr[i])
+            else:
+                end = (
+                    int(scan_index_arr[i + 1])
+                    if i + 1 < n_scans
+                    else mass_values.size
+                )
+            end = min(max(end, start), mass_values.size)
+            mz_slice = mass_values[start:end]
+            if mz_slice.size > 1:
+                flags[i] = bool(np.all(mz_slice[:-1] <= mz_slice[1:]))
+
+        self._sorted_scan_cache[cache_key] = flags
+        return flags
+
+    def _remember_eic(
+        self,
+        cache_key: Tuple[int, int, int, int, float, float],
+        result: Tuple[np.ndarray, np.ndarray],
+    ) -> None:
+        if len(self._eic_cache) >= self._max_eic_cache_entries:
+            self._eic_cache.pop(next(iter(self._eic_cache)))
+        self._eic_cache[cache_key] = result
 
     # ------------------------------------------------------------------
     # Averaged / background-subtracted spectra
