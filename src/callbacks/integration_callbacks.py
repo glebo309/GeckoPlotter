@@ -4,8 +4,8 @@
 """
 Integration toolbox callbacks for GeckoPlotter V2.
 
-Wires the Integration tab controls (smoothing, baseline, peak detection)
-to IntegrationService + PeakService, and overlays results on main-plot.
+Wires the Integration tab controls (peak detection, display options)
+to IntegrationService + PeakService.
 """
 
 import logging
@@ -36,25 +36,12 @@ def register_integration_callbacks(app: dash.Dash, data_manager) -> None:
         Output('peak-change-trigger', 'data', allow_duplicate=True),
         Input('int-detect-btn', 'n_clicks'),
         [State('active-file', 'data'),
-         State('int-smooth-window', 'value'),
-         State('int-smooth-poly', 'value'),
-         State('int-baseline-method', 'value'),
-         State('int-baseline-iter', 'value'),
-         State('int-baseline-poly', 'value'),
          State('int-peak-threshold', 'value'),
-         State('int-slope-threshold', 'value'),
-         State('int-extension', 'value'),
-         State('int-min-width', 'value'),
+         State('current-plot-settings', 'data'),
          State('peak-change-trigger', 'data')],
         prevent_initial_call=True,
     )
-    def detect_peaks(
-        n_clicks, active_file,
-        smooth_window, smooth_poly,
-        baseline_method, baseline_iter, baseline_poly,
-        peak_threshold, slope_threshold, extension_factor, min_width,
-        trigger_counter,
-    ):
+    def detect_peaks(n_clicks, active_file, peak_threshold, plot_settings, trigger_counter):
         if not n_clicks or not active_file:
             return dash.no_update
 
@@ -63,26 +50,26 @@ def register_integration_callbacks(app: dash.Dash, data_manager) -> None:
             log.debug("No plottable X/Y data for integration")
             return dash.no_update
 
-        # Update IntegrationService settings
+        smooth_window = (plot_settings or {}).get('smooth_window', 0)
+        effective_window = max(3, smooth_window) if smooth_window > 0 else 11
+
         data_manager.integration_service.update_settings(
             active_file,
-            smooth_window=int(smooth_window or 11),
-            smooth_poly_order=int(smooth_poly or 3),
-            baseline_method=baseline_method or 'snip',
-            baseline_iterations=int(baseline_iter or 40),
-            baseline_poly_order=int(baseline_poly or 5),
+            smooth_window=effective_window,
+            smooth_poly_order=3,
+            baseline_method='snip',
+            baseline_iterations=40,
+            baseline_poly_order=5,
             peak_threshold=float(peak_threshold or 0.01),
-            slope_threshold=float(slope_threshold or 0.001),
-            extension_factor=float(extension_factor or 1.1),
-            min_peak_width=int(min_width or 3),
+            slope_threshold=0.001,
+            extension_factor=1.1,
+            min_peak_width=3,
         )
 
-        # Process signal
         processed = data_manager.integration_service.process_signal(
             active_file, time_arr, signal_arr,
         )
 
-        # Detect peaks on the corrected signal
         settings = data_manager.integration_service.get_settings(active_file)
         peaks = data_manager.peak_service.detect_peaks(
             file_id=active_file,
@@ -112,6 +99,7 @@ def register_integration_callbacks(app: dash.Dash, data_manager) -> None:
             return dash.no_update
 
         data_manager.peak_service.clear_detected_peaks(active_file)
+        data_manager.integration_service.clear_processed_signal(active_file)
         data_manager.peak_service.group_peaks_across_samples(
             file_overlay_map=data_manager.build_file_overlay_map())
         log.debug(f"Cleared peaks for {active_file}")

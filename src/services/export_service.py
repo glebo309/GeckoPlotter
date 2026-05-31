@@ -127,7 +127,7 @@ class ExportService:
         fig: go.Figure,
         width: int = 800,
         height: int = 500,
-        scale: int = 3,
+        scale: float = 3,
     ) -> bytes:
         """Render a Plotly figure to high-resolution PNG bytes via *kaleido*."""
         try:
@@ -136,12 +136,11 @@ class ExportService:
                 width=width,
                 height=height,
                 scale=scale,
-                engine="kaleido",
             )
         except (ImportError, ValueError) as exc:
             raise RuntimeError(
-                "PNG export requires the 'kaleido' package. "
-                "Install it with: pip install kaleido"
+                "PNG export requires the 'kaleido' package (>=1.0.0). "
+                "Install it with: pip install -U kaleido"
             ) from exc
 
     @staticmethod
@@ -156,12 +155,11 @@ class ExportService:
                 format="svg",
                 width=width,
                 height=height,
-                engine="kaleido",
             )
         except (ImportError, ValueError) as exc:
             raise RuntimeError(
-                "SVG export requires the 'kaleido' package. "
-                "Install it with: pip install kaleido"
+                "SVG export requires the 'kaleido' package (>=1.0.0). "
+                "Install it with: pip install -U kaleido"
             ) from exc
 
     @staticmethod
