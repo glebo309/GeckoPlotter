@@ -26,73 +26,110 @@ def register_lcms_callbacks(app, data_manager):
     # ------------------------------------------------------------------
     @app.callback(
         [Output('ms-spectrum-graph', 'figure'),
-         Output('ms-spectrum-info', 'children')],
-        Input('main-plot', 'clickData'),
-        [State('active-file', 'data'),
-         State('active-tab', 'data')],
+         Output('ms-spectrum-info', 'children'),
+         Output('ms-scan-slider', 'value', allow_duplicate=True),
+         Output('ms-scan-label', 'children', allow_duplicate=True)],
+        [Input('main-plot', 'clickData'),
+         Input('eic-graph', 'clickData')],
+        State('active-file', 'data'),
         prevent_initial_call=True,
     )
-    def update_mass_spectrum(click_data, active_file, active_tab):
-        if active_tab != 'ms-viewer':
-            return dash.no_update, dash.no_update
-
+    def update_mass_spectrum(main_click_data, eic_click_data, active_file):
+        trigger_id = callback_context.triggered[0]['prop_id'].split('.')[0] if callback_context.triggered else ''
+        click_data = eic_click_data if trigger_id == 'eic-graph' else main_click_data
         if not click_data or not active_file:
-            return _empty_spectrum("Click on the chromatogram to view a mass spectrum"), ""
+            return _empty_spectrum("Click on the chromatogram to view a mass spectrum"), "", dash.no_update, dash.no_update
 
-        file_data = data_manager.loaded_data.get(active_file)
+        resolved = _resolve_lcms_spectral_entry(data_manager, active_file, lcms_svc)
+        file_id, file_data = resolved if resolved else (None, None)
         if not file_data or not lcms_svc.has_spectral_data(file_data):
-            return _empty_spectrum("No mass spectral data for this file"), ""
+            return _empty_spectrum("No mass spectral data for this file"), "", dash.no_update, dash.no_update
 
         point = click_data['points'][0]
         rt = point.get('x', 0)
 
+        fig, status, scan_idx = _build_spectrum_at_time(lcms_svc, file_data, rt)
+        return fig, _source_status(trigger_id, status), scan_idx, _scan_label(lcms_svc, file_data, scan_idx)
+
+    @app.callback(
+        [Output('ms-scan-slider', 'min'),
+         Output('ms-scan-slider', 'max'),
+         Output('ms-scan-slider', 'value'),
+         Output('ms-scan-label', 'children')],
+        [Input('active-file', 'data'),
+         Input('render-trigger', 'data')],
+        prevent_initial_call=True,
+    )
+    def configure_scan_slider(active_file, _):
+        resolved = _resolve_lcms_spectral_entry(data_manager, active_file, lcms_svc)
+        file_id, file_data = resolved if resolved else (None, None)
+        if not file_data or not lcms_svc.has_spectral_data(file_data):
+            return 0, 1, 0, 'No scan selected'
+
+        n_scans = max(lcms_svc.get_scan_count(file_data), 1)
+        time_arr, _ = lcms_svc.extract_tic(file_data)
+        apex_idx = 0
+        if time_arr.size:
+            try:
+                _, intensity = lcms_svc.extract_tic(file_data)
+                apex_idx = int(np.argmax(intensity)) if intensity.size else 0
+            except ValueError:
+                apex_idx = 0
+        apex_idx = min(max(apex_idx, 0), n_scans - 1)
+        return 0, n_scans - 1, apex_idx, _scan_label(lcms_svc, file_data, apex_idx)
+
+    @app.callback(
+        [Output('ms-spectrum-graph', 'figure', allow_duplicate=True),
+         Output('ms-spectrum-info', 'children', allow_duplicate=True),
+         Output('ms-scan-label', 'children', allow_duplicate=True)],
+        Input('ms-scan-slider', 'value'),
+        State('active-file', 'data'),
+        prevent_initial_call=True,
+    )
+    def scrub_mass_spectrum(scan_idx, active_file):
+        resolved = _resolve_lcms_spectral_entry(data_manager, active_file, lcms_svc)
+        file_id, file_data = resolved if resolved else (None, None)
+        if scan_idx is None or not file_data or not lcms_svc.has_spectral_data(file_data):
+            return dash.no_update, dash.no_update, dash.no_update
+        fig, status, resolved_idx = _build_spectrum_at_scan(lcms_svc, file_data, int(scan_idx))
+        return fig, _source_status('slider', status), _scan_label(lcms_svc, file_data, resolved_idx)
+
+    @app.callback(
+        Output('main-plot', 'figure', allow_duplicate=True),
+        Input('ms-scan-slider', 'value'),
+        [State('active-file', 'data'),
+         State('active-tab', 'data'),
+         State('main-plot', 'figure')],
+        prevent_initial_call=True,
+    )
+    def render_scan_line(scan_idx, active_file, active_tab, current_figure):
+        if active_tab != 'ms-viewer' or scan_idx is None or not current_figure:
+            return dash.no_update
+
+        resolved = _resolve_lcms_spectral_entry(data_manager, active_file, lcms_svc)
+        file_id, file_data = resolved if resolved else (None, None)
+        if not file_data or not lcms_svc.has_spectral_data(file_data):
+            return _main_figure_without_scan_line(current_figure)
+
         try:
-            mz, intensity = lcms_svc.get_mass_spectrum_at_time(file_data, rt)
-        except (ValueError, IndexError) as e:
-            return _empty_spectrum(str(e)), ""
+            time_arr, _ = lcms_svc.extract_tic(file_data)
+            rt = float(time_arr[int(scan_idx)])
+        except (ValueError, IndexError, TypeError):
+            return _main_figure_without_scan_line(current_figure)
 
-        # Normalise to base peak
-        max_int = intensity.max() if intensity.size else 1.0
-        rel_intensity = intensity / max_int * 100 if max_int > 0 else intensity
-
-        fig = go.Figure()
-        fig.add_trace(go.Bar(
-            x=mz, y=rel_intensity,
-            width=0.4,
-            marker_color='steelblue',
-            hovertemplate='m/z: %{x:.1f}<br>Intensity: %{customdata:.0f}<br>Rel: %{y:.1f}%<extra></extra>',
-            customdata=intensity,
-        ))
-        fig.update_layout(
-            template='plotly_white',
-            margin=dict(l=50, r=20, t=30, b=40),
-            xaxis_title='m/z',
-            yaxis_title='Relative Intensity (%)',
-            hovermode='x unified',
-            bargap=0,
-            uirevision='ms-spectrum',
-        )
-
-        # Top 5 peaks annotation
-        if mz.size > 0:
-            top_n = min(5, mz.size)
-            top_idx = np.argsort(intensity)[-top_n:][::-1]
-            info_parts = [f"RT {rt:.2f} min — Top peaks:"]
-            for i in top_idx:
-                info_parts.append(f"  m/z {mz[i]:.1f} ({rel_intensity[i]:.0f}%)")
-            info_text = "  |  ".join(info_parts[:1] + [", ".join(
-                f"{mz[i]:.1f}" for i in top_idx
-            )])
-        else:
-            info_text = f"RT {rt:.2f} min — no peaks"
-
-        return fig, info_text
+        return _main_figure_with_scan_line(current_figure, rt)
 
     # ------------------------------------------------------------------
     # 2. EIC extraction → overlay on main plot
     # ------------------------------------------------------------------
     @app.callback(
-        Output('render-trigger', 'data', allow_duplicate=True),
+        [Output('render-trigger', 'data', allow_duplicate=True),
+         Output('eic-graph', 'figure', allow_duplicate=True),
+         Output('eic-active-list', 'children', allow_duplicate=True),
+         Output('ms-spectrum-graph', 'figure', allow_duplicate=True),
+         Output('ms-scan-slider', 'value', allow_duplicate=True),
+         Output('ms-scan-label', 'children', allow_duplicate=True),
+         Output('ms-spectrum-info', 'children', allow_duplicate=True)],
         Input('eic-extract-btn', 'n_clicks'),
         [State('eic-mz-input', 'value'),
          State('eic-tolerance-input', 'value'),
@@ -101,12 +138,31 @@ def register_lcms_callbacks(app, data_manager):
         prevent_initial_call=True,
     )
     def extract_eic_trigger(n_clicks, mz_value, tolerance, active_file, current_trigger):
-        if not n_clicks or not mz_value or not active_file:
-            return dash.no_update
+        if not n_clicks:
+            return dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update
+        if mz_value is None:
+            return (
+                dash.no_update,
+                _empty_eic("Enter a target m/z"),
+                dash.no_update,
+                dash.no_update,
+                dash.no_update,
+                dash.no_update,
+                "Enter a target m/z before extracting an EIC",
+            )
 
-        file_data = data_manager.loaded_data.get(active_file)
+        resolved = _resolve_lcms_spectral_entry(data_manager, active_file, lcms_svc)
+        file_id, file_data = resolved if resolved else (None, None)
         if not file_data or not lcms_svc.has_spectral_data(file_data):
-            return dash.no_update
+            return (
+                dash.no_update,
+                _empty_eic("No LC-MS spectral data for this selection"),
+                [],
+                _empty_spectrum("No LC-MS spectral data for this selection"),
+                dash.no_update,
+                dash.no_update,
+                "No LC-MS spectral data for this selection",
+            )
 
         tolerance = tolerance or 0.5
 
@@ -114,19 +170,37 @@ def register_lcms_callbacks(app, data_manager):
             eic_time, eic_intensity = lcms_svc.extract_eic(
                 file_data, float(mz_value), float(tolerance)
             )
-        except (ValueError, KeyError):
-            return dash.no_update
+        except (ValueError, KeyError) as exc:
+            return dash.no_update, _empty_eic(str(exc)), dash.no_update, dash.no_update, dash.no_update, dash.no_update, str(exc)
 
-        # Store EIC data on the file entry for the plot manager to pick up
-        eic_list = file_data.setdefault('eic_overlays', [])
-        eic_list.append({
+        overlay = {
             'mz': float(mz_value),
             'tolerance': float(tolerance),
             'time': eic_time,
             'intensity': eic_intensity,
-        })
+        }
+        if hasattr(data_manager, 'add_lcms_eic_overlay'):
+            data_manager.add_lcms_eic_overlay(file_id, overlay)
+        else:
+            file_data.setdefault('eic_overlays', []).append(overlay)
 
-        return (current_trigger or 0) + 1
+        eic_list = _get_eic_list(data_manager, file_id, file_data)
+        apex_idx = int(np.argmax(eic_intensity)) if eic_intensity.size else 0
+        apex_rt = float(eic_time[apex_idx]) if eic_time.size else 0.0
+        spectrum_fig, spectrum_status, scan_idx = _build_spectrum_at_time(lcms_svc, file_data, apex_rt)
+        status = (
+            f"Extracted EIC m/z {float(mz_value):.4g} +/- {float(tolerance):.3g} "
+            f"| Spectrum source: EIC apex | {spectrum_status}"
+        )
+        return (
+            (current_trigger or 0) + 1,
+            _build_eic_figure(eic_list),
+            _render_eic_list(eic_list),
+            spectrum_fig,
+            scan_idx,
+            _scan_label(lcms_svc, file_data, scan_idx),
+            status,
+        )
 
     @app.callback(
         Output('eic-active-list', 'children'),
@@ -136,26 +210,36 @@ def register_lcms_callbacks(app, data_manager):
     def update_eic_list(_, active_file):
         if not active_file:
             return []
-        file_data = data_manager.loaded_data.get(active_file)
+        resolved = _resolve_lcms_spectral_entry(data_manager, active_file, lcms_svc)
+        file_id, file_data = resolved if resolved else (None, None)
         if not file_data:
             return []
-        eic_list = file_data.get('eic_overlays', [])
-        if not eic_list:
-            return [html.Span("No EICs extracted", style={'color': '#999', 'fontSize': '12px'})]
-        return [
-            html.Span(
-                f"m/z {e['mz']:.1f} ±{e['tolerance']}",
-                style={
-                    'display': 'inline-block', 'padding': '2px 8px',
-                    'backgroundColor': '#f0f0f0', 'borderRadius': '12px',
-                    'fontSize': '11px', 'marginRight': '4px', 'marginBottom': '4px',
-                },
-            )
-            for e in eic_list
-        ]
+        return _render_eic_list(_get_eic_list(data_manager, file_id, file_data))
 
     @app.callback(
-        Output('render-trigger', 'data', allow_duplicate=True),
+        Output('eic-graph', 'figure'),
+        Input('render-trigger', 'data'),
+        State('active-file', 'data'),
+    )
+    def update_eic_graph(_, active_file):
+        if not active_file:
+            return _empty_eic("Select an LC-MS file to extract an EIC")
+
+        resolved = _resolve_lcms_spectral_entry(data_manager, active_file, lcms_svc)
+        file_id, file_data = resolved if resolved else (None, None)
+        if not file_data:
+            return _empty_eic("No LC-MS spectral data for this selection")
+
+        return _build_eic_figure(_get_eic_list(data_manager, file_id, file_data))
+
+    @app.callback(
+        [Output('render-trigger', 'data', allow_duplicate=True),
+         Output('eic-graph', 'figure', allow_duplicate=True),
+         Output('eic-active-list', 'children', allow_duplicate=True),
+         Output('ms-spectrum-graph', 'figure', allow_duplicate=True),
+         Output('ms-scan-slider', 'value', allow_duplicate=True),
+         Output('ms-scan-label', 'children', allow_duplicate=True),
+         Output('ms-spectrum-info', 'children', allow_duplicate=True)],
         Input('eic-clear-btn', 'n_clicks'),
         [State('active-file', 'data'),
          State('render-trigger', 'data')],
@@ -163,11 +247,22 @@ def register_lcms_callbacks(app, data_manager):
     )
     def clear_eic_overlays(n_clicks, active_file, current_trigger):
         if not n_clicks or not active_file:
-            return dash.no_update
-        file_data = data_manager.loaded_data.get(active_file)
-        if file_data:
+            return dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update, dash.no_update
+        resolved = _resolve_lcms_spectral_entry(data_manager, active_file, lcms_svc)
+        file_id, file_data = resolved if resolved else (None, None)
+        if file_id and hasattr(data_manager, 'clear_lcms_eic_overlays'):
+            data_manager.clear_lcms_eic_overlays(file_id)
+        elif file_data:
             file_data.pop('eic_overlays', None)
-        return (current_trigger or 0) + 1
+        return (
+            (current_trigger or 0) + 1,
+            _empty_eic("Extract an EIC to view it here"),
+            _render_eic_list([]),
+            dash.no_update,
+            dash.no_update,
+            dash.no_update,
+            "Cleared EICs",
+        )
 
 
 def _empty_spectrum(message: str) -> go.Figure:
@@ -184,3 +279,270 @@ def _empty_spectrum(message: str) -> go.Figure:
         )],
     )
     return fig
+
+
+def _empty_eic(message: str) -> go.Figure:
+    fig = go.Figure()
+    fig.update_layout(
+        template='plotly_white',
+        margin=dict(l=50, r=20, t=28, b=36),
+        xaxis=dict(visible=False),
+        yaxis=dict(visible=False),
+        annotations=[dict(
+            text=message, xref='paper', yref='paper',
+            x=0.5, y=0.5, showarrow=False,
+            font=dict(size=13, color='#999'),
+        )],
+    )
+    return fig
+
+
+def _source_status(source, status):
+    labels = {
+        'main-plot': 'Spectrum source: TIC click',
+        'eic-graph': 'Spectrum source: EIC click',
+        'slider': 'Spectrum source: scan scrubber',
+    }
+    prefix = labels.get(source)
+    return f"{prefix} | {status}" if prefix else status
+
+
+def _scan_label(lcms_svc, file_data, scan_idx):
+    try:
+        time_arr, _ = lcms_svc.extract_tic(file_data)
+        rt = float(time_arr[int(scan_idx)]) if len(time_arr) > int(scan_idx) else 0.0
+        total = max(lcms_svc.get_scan_count(file_data), 1)
+        return f"Scan {int(scan_idx)} / {total - 1} | RT {rt:.3f} min"
+    except (ValueError, IndexError, TypeError):
+        return f"Scan {int(scan_idx)}"
+
+
+def _main_figure_without_scan_line(current_figure):
+    if not current_figure:
+        return dash.no_update
+
+    figure = {
+        'data': list(current_figure.get('data', [])),
+        'layout': dict(current_figure.get('layout', {})),
+    }
+    shapes = [
+        shape for shape in figure['layout'].get('shapes', [])
+        if shape.get('name') != 'lcms-scan-line'
+    ]
+    if shapes:
+        figure['layout']['shapes'] = shapes
+    else:
+        figure['layout'].pop('shapes', None)
+    return figure
+
+
+def _main_figure_with_scan_line(current_figure, rt):
+    figure = _main_figure_without_scan_line(current_figure)
+    if figure is dash.no_update:
+        return dash.no_update
+
+    layout = figure.setdefault('layout', {})
+    shapes = list(layout.get('shapes', []))
+    shapes.append({
+        'type': 'line',
+        'name': 'lcms-scan-line',
+        'xref': 'x',
+        'yref': 'paper',
+        'x0': rt,
+        'x1': rt,
+        'y0': 0,
+        'y1': 1,
+        'layer': 'above',
+        'editable': False,
+        'line': {
+            'color': '#111111',
+            'width': 1.5,
+            'dash': 'dot',
+        },
+    })
+    layout['shapes'] = shapes
+    layout['uirevision'] = layout.get('uirevision', 'main-plot')
+    return figure
+
+
+def _build_spectrum_at_time(lcms_svc, file_data, rt):
+    try:
+        scan_idx = lcms_svc.get_scan_index_at_time(file_data, rt)
+    except (ValueError, IndexError) as exc:
+        return _empty_spectrum(str(exc)), str(exc), 0
+    return _build_spectrum_at_scan(lcms_svc, file_data, scan_idx)
+
+
+def _build_spectrum_at_scan(lcms_svc, file_data, scan_idx):
+    try:
+        n_scans = max(lcms_svc.get_scan_count(file_data), 1)
+        scan_idx = min(max(int(scan_idx), 0), n_scans - 1)
+        mz, intensity = lcms_svc.get_mass_spectrum(file_data, scan_idx)
+        time_arr, _ = lcms_svc.extract_tic(file_data)
+        rt = float(time_arr[scan_idx]) if time_arr.size > scan_idx else 0.0
+    except (ValueError, IndexError) as exc:
+        return _empty_spectrum(str(exc)), str(exc), 0
+
+    max_int = intensity.max() if intensity.size else 1.0
+    rel_intensity = intensity / max_int * 100 if max_int > 0 else intensity
+
+    xs = []
+    ys = []
+    for x_val, y_val in zip(mz, rel_intensity):
+        xs.extend([x_val, x_val, None])
+        ys.extend([0, y_val, None])
+
+    fig = go.Figure()
+    fig.add_trace(go.Scatter(
+        x=xs,
+        y=ys,
+        mode='lines',
+        line=dict(color='#2B6CB0', width=1),
+        hoverinfo='skip',
+        showlegend=False,
+    ))
+    fig.add_trace(go.Scatter(
+        x=mz,
+        y=rel_intensity,
+        mode='markers',
+        marker=dict(color='#2B6CB0', size=3, opacity=0.5),
+        customdata=intensity,
+        hovertemplate=(
+            'm/z: %{x:.4g}<br>'
+            'Intensity: %{customdata:.4g}<br>'
+            'Relative: %{y:.1f}%<extra></extra>'
+        ),
+        showlegend=False,
+    ))
+    fig.update_layout(
+        template='plotly_white',
+        margin=dict(l=48, r=16, t=20, b=38),
+        xaxis_title='m/z',
+        yaxis_title='Relative Intensity (%)',
+        hovermode='closest',
+        yaxis=dict(range=[0, 105]),
+        uirevision='ms-spectrum',
+    )
+
+    if mz.size > 0:
+        top_n = min(5, mz.size)
+        top_idx = np.argsort(intensity)[-top_n:][::-1]
+        top_peaks = ", ".join(f"{mz[i]:.1f}" for i in top_idx)
+        return fig, f"Scan {scan_idx} at {rt:.3f} min | Top m/z: {top_peaks}", scan_idx
+
+    return fig, f"Scan {scan_idx} at {rt:.3f} min | no peaks", scan_idx
+
+
+def _get_eic_list(data_manager, file_id, file_data):
+    if not file_id or not file_data:
+        return []
+    if hasattr(data_manager, 'get_lcms_eic_overlays'):
+        return data_manager.get_lcms_eic_overlays(file_id)
+    return file_data.get('eic_overlays', [])
+
+
+def _render_eic_list(eic_list):
+    if not eic_list:
+        return [html.Span("No EICs extracted", style={'color': '#999', 'fontSize': '12px'})]
+    return [
+        html.Span(
+            f"m/z {e['mz']:.1f} ±{e['tolerance']}",
+            style={
+                'display': 'inline-block', 'padding': '2px 8px',
+                'backgroundColor': '#f0f0f0', 'borderRadius': '12px',
+                'fontSize': '11px', 'marginRight': '4px', 'marginBottom': '4px',
+            },
+        )
+        for e in eic_list
+    ]
+
+
+def _build_eic_figure(eic_list):
+    if not eic_list:
+        return _empty_eic("Extract an EIC to view it here")
+
+    fig = go.Figure()
+    colors = ['#0072B2', '#D55E00', '#009E73', '#CC79A7', '#E69F00', '#56B4E9']
+    for idx, eic in enumerate(eic_list[-6:]):
+        time = np.asarray(eic.get('time', []), dtype=float)
+        intensity = np.asarray(eic.get('intensity', []), dtype=float)
+        if time.size == 0 or intensity.size == 0:
+            continue
+
+        mz = float(eic.get('mz', 0.0))
+        tolerance = float(eic.get('tolerance', 0.0))
+        label = f"m/z {mz:.4g} +/- {tolerance:.3g}"
+        color = colors[idx % len(colors)]
+        fig.add_trace(go.Scatter(
+            x=time,
+            y=intensity,
+            mode='lines',
+            name=label,
+            line=dict(color=color, width=1.6),
+            hovertemplate=(
+                f"{label}<br>Time: %{{x:.3f}} min"
+                "<br>Intensity: %{y:.4g}<extra></extra>"
+            ),
+        ))
+
+        apex_idx = int(np.argmax(intensity)) if intensity.size else 0
+        if intensity.size and intensity[apex_idx] > 0:
+            fig.add_trace(go.Scatter(
+                x=[time[apex_idx]],
+                y=[intensity[apex_idx]],
+                mode='markers',
+                name=f"{label} apex",
+                marker=dict(color=color, size=7, symbol='x'),
+                showlegend=False,
+                hovertemplate=(
+                    f"{label} apex<br>Time: %{{x:.3f}} min"
+                    "<br>Intensity: %{y:.4g}<extra></extra>"
+                ),
+            ))
+
+    if not fig.data:
+        return _empty_eic("No EIC signal in the selected m/z window")
+
+    fig.update_layout(
+        template='plotly_white',
+        margin=dict(l=50, r=20, t=28, b=36),
+        xaxis_title='Retention Time (min)',
+        yaxis_title='EIC Intensity',
+        hovermode='closest',
+        legend=dict(
+            orientation='h',
+            yanchor='bottom',
+            y=1.02,
+            xanchor='left',
+            x=0,
+            font=dict(size=10),
+        ),
+        uirevision='lcms-eic',
+    )
+    return fig
+
+
+def _resolve_lcms_spectral_entry(data_manager, active_file, lcms_svc):
+    """Resolve bundle or component selection to a spectral LC-MS component."""
+    if active_file:
+        entry = data_manager.get_data_by_id(active_file)
+        if entry and lcms_svc.has_spectral_data(entry):
+            record = entry.get('record') or {}
+            return record.get('id', active_file), entry
+
+        bundle = data_manager.get_bundle(active_file) if hasattr(data_manager, 'get_bundle') else None
+        if not bundle and hasattr(data_manager, 'get_bundle_for_component'):
+            bundle = data_manager.get_bundle_for_component(active_file)
+
+        if bundle:
+            for component in bundle.component_list:
+                entry = data_manager.get_data_by_id(component.component_id)
+                if entry and lcms_svc.has_spectral_data(entry):
+                    return component.component_id, entry
+
+    for candidate_id, candidate in data_manager.loaded_data.items():
+        if candidate and lcms_svc.has_spectral_data(candidate):
+            record = candidate.get('record') or {}
+            return record.get('id', candidate_id), candidate
+
+    return None

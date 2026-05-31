@@ -14,6 +14,7 @@ from dash import Input, Output, State, html, dash_table, Patch
 from dash_iconify import DashIconify
 import numpy as np
 import pandas as pd
+import plotly.graph_objects as go
 from services.plot_manager import PlotManager
 from services.data_store import DataStore as DataManager
 from components.data_table_editor import create_data_table_editor

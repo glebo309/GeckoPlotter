@@ -174,6 +174,7 @@ class DataStore:
         self.file_ui_state: Dict[str, Dict[str, Any]] = {}
         self.visibility_state: Dict[str, bool] = {}
         self.collapse_state: Dict[str, str] = {}
+        self.lcms_eic_overlays: Dict[str, List[Dict[str, Any]]] = {}
 
         # Domain services
         from .peak_service import PeakService
@@ -249,6 +250,7 @@ class DataStore:
         self._bundles.clear()
         self._component_index.clear()
         self._file_index.clear()
+        self.lcms_eic_overlays.clear()
 
     def all_bundles(self) -> Dict[str, Bundle]:
         return dict(self._bundles)
@@ -302,21 +304,81 @@ class DataStore:
         """Compat: returns old-style dict {record, data, metadata, standardized}."""
         bundle = self.get_bundle(file_id)
         if not bundle:
-            return None
+            bundle = self.get_bundle_for_component(file_id)
+            if not bundle:
+                return None
+            component = next(
+                (c for c in bundle.component_list if c.component_id == file_id),
+                None,
+            )
+            return self._component_data_entry(bundle, component) if component else None
+
         p = bundle.primary
-        if not p:
+        return self._component_data_entry(bundle, p, record_id=bundle.bundle_id, record_name=bundle.name) if p else None
+
+    def _component_data_entry(
+        self,
+        bundle: Bundle,
+        component: Optional[Component],
+        *,
+        record_id: Optional[str] = None,
+        record_name: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
+        """Build the old callback-facing data dict for one bundle component."""
+        if component is None:
             return None
-        return {
-            'record': {'id': bundle.bundle_id, 'name': bundle.name,
-                       'type': bundle.bundle_type.value},
-            'data': p.dataframe,
-            'metadata': {**p.metadata,
-                         'auto_x': p.metadata.get('auto_x', bundle.x_columns[0] if bundle.x_columns else None),
-                         'auto_y': p.metadata.get('auto_y', bundle.y_columns if bundle.y_columns else None),
-                         'sample_name': bundle.sample_name,
-                         'file_name': p.original_filename},
-            'standardized': p.standardized,
+
+        x_columns = [
+            column
+            for column, role in component.column_roles.items()
+            if role == ColumnRole.X
+        ]
+        y_columns = [
+            column
+            for column, role in component.column_roles.items()
+            if role == ColumnRole.Y
+        ]
+
+        metadata = {
+            **component.metadata,
+            'auto_x': component.metadata.get('auto_x', x_columns[0] if x_columns else None),
+            'auto_y': component.metadata.get('auto_y', y_columns if y_columns else None),
+            'sample_name': component.standardized.sample_name if component.standardized and component.standardized.sample_name else bundle.sample_name,
+            'file_name': component.original_filename,
+            'parent_bundle_id': bundle.bundle_id,
+            'parent_bundle_name': bundle.name,
+            'component_role': component.role.value,
         }
+
+        return {
+            'record': {
+                'id': record_id or component.component_id,
+                'name': record_name or component.original_filename,
+                'type': component.role.value,
+                'parent_bundle_id': bundle.bundle_id,
+            },
+            'data': component.dataframe,
+            'metadata': metadata,
+            'standardized': component.standardized,
+            'eic_overlays': self.get_lcms_eic_overlays(component.component_id),
+        }
+
+    def add_lcms_eic_overlay(self, file_id: str, overlay: Dict[str, Any]) -> None:
+        """Store an LC-MS EIC overlay against a stable component id."""
+        if not file_id:
+            return
+        self.lcms_eic_overlays.setdefault(file_id, []).append(overlay)
+
+    def get_lcms_eic_overlays(self, file_id: str) -> List[Dict[str, Any]]:
+        """Return EIC overlays for a component id without exposing internals."""
+        if not file_id:
+            return []
+        return list(self.lcms_eic_overlays.get(file_id, []))
+
+    def clear_lcms_eic_overlays(self, file_id: str) -> None:
+        """Clear EIC overlays for one LC-MS component."""
+        if file_id:
+            self.lcms_eic_overlays.pop(file_id, None)
 
     def get_bundle_by_id(self, bundle_id: str):
         """Compat: returns a compat object with .main_file, .bundle_id, .base_name."""
@@ -337,7 +399,18 @@ class DataStore:
     @property
     def loaded_data(self) -> Dict[str, Dict[str, Any]]:
         """Compat property: direct access pattern used by some callbacks."""
-        return self.get_loaded_data()
+        result = {}
+        for bid, bundle in self._bundles.items():
+            if bundle.bundle_type == BundleType.LCMS and len(bundle.component_list) > 1:
+                for component in bundle.component_list:
+                    entry = self._component_data_entry(bundle, component)
+                    if entry:
+                        result[component.component_id] = entry
+            else:
+                entry = self.get_data_by_id(bid)
+                if entry:
+                    result[bid] = entry
+        return result
 
     def get_loaded_files_list(self) -> List[Dict[str, Any]]:
         """Return the format that loaded-files dcc.Store expects."""
