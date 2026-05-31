@@ -76,7 +76,8 @@ def register_publication_preview_callbacks(app, data_manager):
         if not visible_files:
             return go.Figure()
 
-        base_fig = plot_manager.create_multi_file_plot(visible_files, layout_mode)
+        subplot_spacing = s.get('subplot_spacing', 0.08)
+        base_fig = plot_manager.create_multi_file_plot(visible_files, layout_mode, subplot_spacing=subplot_spacing)
         base_obj = go.Figure(base_fig) if isinstance(base_fig, dict) else base_fig
         all_traces = list(base_obj.data)
 
@@ -93,7 +94,8 @@ def register_publication_preview_callbacks(app, data_manager):
 
         if n_panels > 1:
             fig_obj = make_subplots(rows=n_rows, cols=n_cols,
-                                    vertical_spacing=0.08, horizontal_spacing=0.08)
+                                    vertical_spacing=max(0.02, subplot_spacing),
+                                    horizontal_spacing=0.08)
             for i, trace in enumerate(all_traces):
                 panel_idx = i % n_panels
                 r = panel_idx // n_cols + 1

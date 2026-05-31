@@ -40,6 +40,7 @@ class PlotManager:
         self,
         groups: dict,
         layout_mode: str = 'overlay',
+        subplot_spacing: float = 0.08,
     ) -> go.Figure:
         """Build a raw plot combining traces from grouped visible files.
 
@@ -47,6 +48,7 @@ class PlotManager:
         ----------
         groups : dict of {group_key: [(name, file_data), ...]}
         layout_mode : 'overlay' or 'stacked'
+        subplot_spacing : vertical gap between subplots (0-0.3)
         """
         if not groups:
             return self.create_hidden_state_plot()
@@ -63,11 +65,11 @@ class PlotManager:
         if len(groups) == 1:
             files = list(groups.values())[0]
             if layout_mode == 'stacked' and len(files) > 1:
-                return self._create_stacked_plot(files)
+                return self._create_stacked_plot(files, subplot_spacing)
             return self._create_overlay_plot(files)
 
         # Multiple groups → each group gets its own subplot section
-        return self._create_grouped_plot(groups, layout_mode)
+        return self._create_grouped_plot(groups, layout_mode, subplot_spacing)
 
     # -- overlay (superposed) ------------------------------------------------
 
@@ -95,7 +97,7 @@ class PlotManager:
         'other': 'Other',
     }
 
-    def _create_grouped_plot(self, groups: dict, layout_mode: str) -> go.Figure:
+    def _create_grouped_plot(self, groups: dict, layout_mode: str, subplot_spacing: float = 0.08) -> go.Figure:
         """Each data-type group gets its own subplot row with its own legend."""
         from plotly.subplots import make_subplots
 
@@ -104,7 +106,7 @@ class PlotManager:
 
         fig = make_subplots(
             rows=n, cols=1, shared_xaxes=False,
-            vertical_spacing=max(0.03, 0.14 / n),
+            vertical_spacing=max(0.02, subplot_spacing),
         )
 
         for row_idx, key in enumerate(group_keys, start=1):
@@ -145,13 +147,13 @@ class PlotManager:
 
     # -- stacked (separate subplots) ----------------------------------------
 
-    def _create_stacked_plot(self, files: list) -> go.Figure:
+    def _create_stacked_plot(self, files: list, subplot_spacing: float = 0.08) -> go.Figure:
         from plotly.subplots import make_subplots
 
         n = len(files)
         fig = make_subplots(
             rows=n, cols=1, shared_xaxes=True,
-            vertical_spacing=max(0.03, 0.14 / n),
+            vertical_spacing=max(0.02, subplot_spacing),
         )
         trace_idx = 0
         for i, (name, file_data) in enumerate(files):

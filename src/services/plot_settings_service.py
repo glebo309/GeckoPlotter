@@ -117,8 +117,8 @@ _LEGEND_COORDS: Dict[str, dict] = {
 DEFAULT_PLOT_SETTINGS: Dict[str, object] = {
     # Data Selector
     "plot_type": "bar",
-    "x_label": "X",
-    "y1_label": "Y1",
+    "x_label": "Retention Time (min)",
+    "y1_label": "Signal (mAU)",
     "y2_label": "",
     "y1_stats": [],
     "show_raw_points": False,
@@ -148,11 +148,12 @@ DEFAULT_PLOT_SETTINGS: Dict[str, object] = {
     "bar_group_gap": 0.1,
     # Labels
     "title": "",
+    "shared_axis_labels": True,
     # Typography
     "font": "Arial",
-    "font_size": 12,
-    "title_font_size": 14,
-    "tick_font_size": 16,
+    "font_size": 10,
+    "title_font_size": 12,
+    "tick_font_size": 14,
     "bold_title": True,
     # Legend
     "show_legend": True,
@@ -169,6 +170,7 @@ DEFAULT_PLOT_SETTINGS: Dict[str, object] = {
     "grid_style": "solid",
     # Layout
     "layout_mode": "overlay",
+    "subplot_spacing": 0.08,
 }
 
 
@@ -212,12 +214,12 @@ class PlotSettings:
     title: str = ""
     x_label: str = "Retention Time (min)"
     y_label: str = "Signal (mAU)"
-    title_font_size: int = 14
+    title_font_size: int = 12
 
     # -- 6. Typography --
     font: str = "Arial"
-    font_size: int = 12
-    tick_font_size: int = 16
+    font_size: int = 10
+    tick_font_size: int = 14
     bold_title: bool = True
 
     # -- 7. Legend --
@@ -235,13 +237,17 @@ class PlotSettings:
     show_frame: bool = True              # box around plot area
     grid_style: str = "solid"            # solid, dash, dot
 
-    # -- 9. Chromatogram-specific --
+    # -- 9. Subplot labels --
+    shared_axis_labels: bool = True
+
+    # -- 10. Chromatogram-specific --
     show_baseline: bool = False
     show_peaks: bool = True
     peak_opacity: float = 0.3
 
-    # -- 10. Layout --
+    # -- 11. Layout --
     layout_mode: str = "overlay"         # overlay, stacked
+    subplot_spacing: float = 0.08        # vertical gap between subplots (0-0.3)
     plot_height: int = 500
     plot_width: int = 800
 
@@ -355,8 +361,10 @@ class PlotSettingsService:
             showgrid=False,
         )
 
+        axis_title_font = dict(size=settings.tick_font_size)
+
         axis_common_x = dict(
-            title=dict(text=settings.x_label, standoff=20),
+            title=dict(text=settings.x_label or '', standoff=10, font=axis_title_font),
             showgrid=settings.show_grid_x,
             griddash=grid_dash,
             type=settings.x_scale,
@@ -365,10 +373,11 @@ class PlotSettingsService:
             linewidth=settings.frame_width,
             mirror=settings.show_frame,
             minor=minor_cfg,
+            automargin=True,
             **tick_cfg,
         )
         axis_common_y = dict(
-            title=dict(text=settings.y_label, standoff=20),
+            title=dict(text=settings.y_label or '', standoff=10, font=axis_title_font),
             showgrid=settings.show_grid_y,
             griddash=grid_dash,
             type=settings.y_scale,
@@ -377,6 +386,7 @@ class PlotSettingsService:
             linewidth=settings.frame_width,
             mirror=settings.show_frame,
             minor=minor_cfg,
+            automargin=True,
             **tick_cfg,
         )
         if not settings.auto_range:
@@ -394,10 +404,19 @@ class PlotSettingsService:
 
         _categorical_keys = ('ticktext', 'tickvals', 'tickmode')
 
+        x_axes = sorted(k for k in layout_keys if _xaxis_re.match(k))
+        y_axes = sorted(k for k in layout_keys if _yaxis_re.match(k))
+        has_subplots = len(x_axes) > 1 or len(y_axes) > 1
+        last_xaxis = x_axes[-1] if x_axes else 'xaxis'
+
+        shared = settings.shared_axis_labels and has_subplots
+
         for key in layout_keys:
             if _xaxis_re.match(key):
                 existing = layout_json.get(key, {})
                 merged = dict(axis_common_x)
+                if shared and key != last_xaxis:
+                    merged['title'] = dict(text='', standoff=20)
                 if existing.get('tickmode') == 'array' and settings.categorical_x:
                     for ck in _categorical_keys:
                         if ck in existing:
@@ -405,21 +424,49 @@ class PlotSettingsService:
                     merged.pop('type', None)
                 fig.update_layout(**{key: merged})
             elif _yaxis_re.match(key):
-                fig.update_layout(**{key: axis_common_y})
+                merged = dict(axis_common_y)
+                if shared:
+                    merged['title'] = dict(text='', standoff=20)
+                fig.update_layout(**{key: merged})
 
-        if not any(_xaxis_re.match(k) for k in layout_keys):
+        if not x_axes:
             fig.update_layout(xaxis=axis_common_x)
-        if not any(_yaxis_re.match(k) for k in layout_keys):
+        if not y_axes:
             fig.update_layout(yaxis=axis_common_y)
+
+        # Shared Y label as a centered annotation
+        if shared and settings.y_label:
+            fig.add_annotation(
+                text=settings.y_label,
+                xref='paper', yref='paper',
+                x=0, y=0.5,
+                xanchor='right',
+                xshift=-25,
+                showarrow=False,
+                textangle=-90,
+                font=dict(size=settings.tick_font_size),
+            )
 
         # -- Bar gap ---------------------------------------------------------
         fig.update_layout(bargap=settings.bar_gap, bargroupgap=settings.bar_group_gap)
 
         # -- Legend ----------------------------------------------------------
-        legend_kwargs = dict(visible=settings.show_legend)
-        if settings.show_legend:
-            legend_kwargs.update(cls.get_legend_coords(settings.legend_pos))
-        fig.update_layout(legend=legend_kwargs)
+        # Apply visibility to all legends (legend, legend2, legend3, …)
+        _legend_re = re.compile(r'^legend\d*$')
+        legend_keys = [k for k in layout_json if _legend_re.match(k)]
+        if not legend_keys:
+            legend_keys = ['legend']
+        for lk in legend_keys:
+            lk_kwargs = dict(visible=settings.show_legend)
+            if settings.show_legend:
+                existing_legend = layout_json.get(lk, {})
+                if lk == 'legend':
+                    lk_kwargs.update(cls.get_legend_coords(settings.legend_pos))
+                else:
+                    for coord_key in ('x', 'y', 'xanchor', 'yanchor'):
+                        if coord_key in existing_legend:
+                            lk_kwargs[coord_key] = existing_legend[coord_key]
+            fig.update_layout(**{lk: lk_kwargs})
 
         # -- Colour palette & trace styling ----------------------------------
         # Always apply the selected palette to data traces so lines and
@@ -465,7 +512,7 @@ class PlotSettingsService:
         # -- Dimensions & margins --------------------------------------------
         fig.update_layout(
             autosize=True,
-            margin=dict(l=50, r=20, t=30 if not title_text else 50, b=40),
+            margin=dict(l=20, r=20, t=30 if not title_text else 50, b=40, autoexpand=True),
         )
 
         return fig

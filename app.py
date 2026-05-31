@@ -342,6 +342,14 @@ _layout_body = html.Div(
                                                                     dmc.Radio(label='Subplots', value='stacked'),
                                                                 ], gap='md'),
                                                             ),
+                                                            html.Div(id='pt-subplot-spacing-wrapper', children=[
+                                                                html.Label('Subplot spacing', className='form-label',
+                                                                           style={'marginBottom': '2px'}),
+                                                                dcc.Slider(id='pt-subplot-spacing', min=0.02, max=0.25,
+                                                                           step=0.01, value=0.08,
+                                                                           marks={0.02: '2%', 0.08: '8%', 0.15: '15%', 0.25: '25%'},
+                                                                           tooltip={'placement': 'bottom', 'always_visible': False}),
+                                                            ], style={'marginBottom': '10px'}),
                                                         ], style={'display': 'none'}),
 
                                                         # -- Subplot Grid --
@@ -534,14 +542,14 @@ _layout_body = html.Div(
                                                                  style={'marginBottom': '6px'}),
                                                         html.Div([
                                                             html.Div([html.Label('X axis', className='form-label'),
-                                                                      dmc.TextInput(id='pt-x-label', placeholder='X axis label', size='xs')],
+                                                                      dmc.TextInput(id='pt-x-label', value='Retention Time (min)', placeholder='Leave empty for none', size='xs')],
                                                                      style={'flex': '1'}),
                                                             html.Div([html.Label('Y axis', className='form-label'),
-                                                                      dmc.TextInput(id='pt-y-label', placeholder='Y axis label', size='xs')],
+                                                                      dmc.TextInput(id='pt-y-label', value='Signal (mAU)', placeholder='Leave empty for none', size='xs')],
                                                                      style={'flex': '1'}),
                                                         ], style={'display': 'flex', 'gap': '6px', 'marginBottom': '6px'}),
                                                         dmc.Switch(id='pt-shared-axis-labels', label='Shared axis labels',
-                                                                   checked=False, size='sm', mb=6),
+                                                                   checked=True, size='sm', mb=6),
 
                                                         # -- 6. Typography (Both) --
                                                         html.Div('Typography', className='toolbox-section-title'),

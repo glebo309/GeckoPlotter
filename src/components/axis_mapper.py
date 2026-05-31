@@ -63,13 +63,12 @@ def create_axis_mapper_layout():
                        style={'padding': '4px 10px', 'fontSize': '11px'}),
         ], style={'display': 'flex', 'gap': '6px', 'marginBottom': '10px'}),
 
+        # Hidden label inputs (kept for Dash ID registry)
+        dmc.TextInput(id='x-label-input', value='X', size='xs', style={'display': 'none'}),
+
         # X-Axis
         html.Div('X-Axis', className='toolbox-section-title'),
         html.Div([
-            html.Div([
-                html.Label('Label', className='form-label'),
-                dmc.TextInput(id='x-label-input', value='X', size='xs', style={'width': '100%'}),
-            ], style={'flex': '1'}),
             html.Div([
                 html.Label('Data', className='form-label'),
                 html.Button("Select cells", id='btn-x-data', style=selector_button_style('x')),
@@ -80,14 +79,11 @@ def create_axis_mapper_layout():
                    'border': '1px solid #ccc', 'borderRadius': '3px', 'cursor': 'pointer',
                    'backgroundColor': 'white', 'color': '#999'}),
 
+        # Hidden label inputs (kept for Dash ID registry)
+        dmc.TextInput(id='y1-label-input', value='Y1', size='xs', style={'display': 'none'}),
+
         # Y-Axis (Primary)
         html.Div('Y-Axis (Primary)', className='toolbox-section-title'),
-        html.Div([
-            html.Div([
-                html.Label('Label', className='form-label'),
-                dmc.TextInput(id='y1-label-input', value='Y1', size='xs', style={'width': '100%'}),
-            ], style={'flex': '1'}),
-        ], style={'display': 'flex', 'gap': '8px', 'marginBottom': '6px'}),
         html.Div(id='y1-series-container'),
         html.Div([
             html.Button("+ Series", id='add-y1-series',
@@ -121,11 +117,8 @@ def create_axis_mapper_layout():
             dmc.Switch(id='y2-enable', label='Enable', checked=False, size='sm',
                        style={'display': 'inline-block', 'marginLeft': '10px'}),
         ], className='toolbox-section-title'),
+        dmc.TextInput(id='y2-label-input', value='Y₂', size='xs', style={'display': 'none'}),
         html.Div([
-            html.Div([
-                html.Label('Label', className='form-label'),
-                dmc.TextInput(id='y2-label-input', value='Y₂', size='xs', style={'width': '100%'}),
-            ], style={'flex': '1', 'marginBottom': '6px'}),
             html.Div([
                 html.Label('Data', className='form-label'),
                 html.Button("Select cells", id='btn-y2-data', style=selector_button_style('y2')),

@@ -846,6 +846,27 @@ button[id*="collapse-btn"]:active {
     border-color: #1d1d1f !important;
 }
 
+/* Dash Core dcc.Slider → black track + thumb */
+.rc-slider-track {
+    background-color: #1d1d1f !important;
+}
+
+.rc-slider-handle {
+    border-color: #1d1d1f !important;
+    background-color: #fff !important;
+}
+
+.rc-slider-handle:hover,
+.rc-slider-handle:active,
+.rc-slider-handle-dragging {
+    border-color: #1d1d1f !important;
+    box-shadow: 0 0 0 3px rgba(0, 0, 0, 0.12) !important;
+}
+
+.rc-slider-dot-active {
+    border-color: #1d1d1f !important;
+}
+
 /* Switch → black when checked */
 .mantine-Switch-track:has(input:checked) {
     background-color: #1d1d1f !important;

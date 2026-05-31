@@ -1228,7 +1228,8 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
         if not visible_files:
             return plot_manager.create_hidden_state_plot(), set_zoom
 
-        figure = plot_manager.create_multi_file_plot(visible_files, layout_mode)
+        subplot_spacing = s.get('subplot_spacing', 0.08)
+        figure = plot_manager.create_multi_file_plot(visible_files, layout_mode, subplot_spacing=subplot_spacing)
 
         smooth_window = s.get('smooth_window', 0)
         if smooth_window >= 3:
@@ -1317,7 +1318,8 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
 
         try:
             fig_obj = go.Figure(figure) if isinstance(figure, dict) else figure
-            ps = PlotSettingsService.from_dict(s)
+            settings_for_style = dict(s, y_label=s.get('y1_label', 'Y1'))
+            ps = PlotSettingsService.from_dict(settings_for_style)
             PlotSettingsService.apply_to_figure(fig_obj, ps)
             fig_obj.update_layout(uirevision=active_tab_id)
             if effective_zoom:

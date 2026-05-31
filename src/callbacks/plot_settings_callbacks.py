@@ -73,9 +73,9 @@ def register_plot_settings_callbacks(app, data_manager):
             # Data Selector controls
             Output('plot-type', 'value', allow_duplicate=True),
             Output('y1-stats', 'value', allow_duplicate=True),
-            Output('x-label-input', 'value', allow_duplicate=True),
-            Output('y1-label-input', 'value', allow_duplicate=True),
-            Output('y2-label-input', 'value', allow_duplicate=True),
+            Output('x-label-input', 'value', allow_duplicate=True),  # hidden
+            Output('y1-label-input', 'value', allow_duplicate=True),  # hidden
+            Output('y2-label-input', 'value', allow_duplicate=True),  # hidden
             Output('show-raw-points', 'checked', allow_duplicate=True),
             Output('y2-enable', 'checked', allow_duplicate=True),
             Output('y1-series-count', 'data', allow_duplicate=True),
@@ -116,6 +116,10 @@ def register_plot_settings_callbacks(app, data_manager):
             Output('pt-frame-width', 'value', allow_duplicate=True),
             Output('pt-tick-length', 'value', allow_duplicate=True),
             Output('pt-layout-mode', 'value', allow_duplicate=True),
+            Output('pt-shared-axis-labels', 'checked', allow_duplicate=True),
+            Output('pt-x-label', 'value', allow_duplicate=True),
+            Output('pt-y-label', 'value', allow_duplicate=True),
+            Output('pt-subplot-spacing', 'value', allow_duplicate=True),
         ],
         Input('active-plot-context', 'data'),
         prevent_initial_call=True,
@@ -182,6 +186,10 @@ def register_plot_settings_callbacks(app, data_manager):
             s.get('frame_width', 1),
             s.get('tick_length', 5),
             s.get('layout_mode', 'overlay'),
+            bool(s.get('shared_axis_labels', False)),
+            s['x_label'],
+            s['y1_label'],
+            s.get('subplot_spacing', 0.08),
         )
 
     # ------------------------------------------------------------------
@@ -192,9 +200,6 @@ def register_plot_settings_callbacks(app, data_manager):
         # Data Selector controls
         [Input('plot-type', 'value'),
          Input('y1-stats', 'value'),
-         Input('x-label-input', 'value'),
-         Input('y1-label-input', 'value'),
-         Input('y2-label-input', 'value'),
          Input('show-raw-points', 'checked'),
          Input('y2-enable', 'checked'),
          # Plot Settings controls
@@ -231,13 +236,17 @@ def register_plot_settings_callbacks(app, data_manager):
          Input('pt-grid-style', 'value'),
          Input('pt-frame-width', 'value'),
          Input('pt-tick-length', 'value'),
-         Input('pt-layout-mode', 'value')],
+         Input('pt-layout-mode', 'value'),
+         Input('pt-shared-axis-labels', 'checked'),
+         Input('pt-x-label', 'value'),
+         Input('pt-y-label', 'value'),
+         Input('pt-subplot-spacing', 'value')],
         State('current-plot-settings', 'data'),
         prevent_initial_call=True,
     )
     def user_edit_settings(
         # Data Selector
-        ds_plot_type, y1_stats, x_label, y1_label, y2_label,
+        ds_plot_type, y1_stats,
         show_raw, y2_enable,
         # Plot Settings
         pt_plot_type, pt_auto_range, pt_categorical_x,
@@ -252,6 +261,9 @@ def register_plot_settings_callbacks(app, data_manager):
         pt_layout_opts, pt_tick_dir, pt_grid_style,
         pt_frame_width, pt_tick_length,
         pt_layout_mode,
+        pt_shared_axis_labels,
+        pt_x_label, pt_y_label,
+        pt_subplot_spacing,
         # State
         current_settings,
     ):
@@ -270,13 +282,18 @@ def register_plot_settings_callbacks(app, data_manager):
 
         layout_opts = pt_layout_opts or []
 
+        # Axis labels: pt-x-label / pt-y-label are the sole source;
+        # None means the field was never touched → keep current value
+        eff_x_label = pt_x_label if pt_x_label is not None else current_settings.get('x_label', '')
+        eff_y_label = pt_y_label if pt_y_label is not None else current_settings.get('y1_label', '')
+
         new_settings = {
             # Data Selector (normalized)
             'plot_type': plot_type or 'bar',
             'y1_stats': y1_stats or [],
-            'x_label': x_label or 'X',
-            'y1_label': y1_label or 'Y1',
-            'y2_label': y2_label or '',
+            'x_label': eff_x_label,
+            'y1_label': eff_y_label,
+            'y2_label': '',
             'show_raw_points': bool(show_raw),
             'y2_enable': bool(y2_enable),
             'y1_series_count': current_settings.get('y1_series_count', 1),
@@ -325,6 +342,9 @@ def register_plot_settings_callbacks(app, data_manager):
             'grid_style': pt_grid_style or 'solid',
             # Layout
             'layout_mode': pt_layout_mode or 'overlay',
+            # Subplot labels
+            'shared_axis_labels': bool(pt_shared_axis_labels),
+            'subplot_spacing': pt_subplot_spacing if pt_subplot_spacing is not None else 0.08,
         }
 
         # Break hydration loop: if nothing changed, don't propagate
