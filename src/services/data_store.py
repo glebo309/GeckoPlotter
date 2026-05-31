@@ -250,7 +250,12 @@ class DataStore:
         self._bundles.clear()
         self._component_index.clear()
         self._file_index.clear()
+        self.file_ui_state.clear()
+        self.visibility_state.clear()
+        self.collapse_state.clear()
         self.lcms_eic_overlays.clear()
+        if hasattr(self, 'project'):
+            self.project.clear()
 
     def all_bundles(self) -> Dict[str, Bundle]:
         return dict(self._bundles)
@@ -416,10 +421,15 @@ class DataStore:
         """Return the format that loaded-files dcc.Store expects."""
         items = []
         for bundle in self._bundles.values():
+            display_type = (
+                bundle.source_category.value
+                if bundle.source_category != SourceCategory.GENERIC
+                else bundle.bundle_type.value
+            )
             items.append({
                 'id': bundle.bundle_id,
                 'name': bundle.name,
-                'type': bundle.bundle_type.value,
+                'type': display_type,
                 'size_display': '',
             })
         return items
@@ -584,19 +594,37 @@ class DataStore:
         items = []
         for bundle in self._bundles.values():
             is_bundle = len(bundle.component_list) > 1
+            p = bundle.primary
+            well_columns = []
+            if p is not None and p.plot_hint == PlotHint.MULTI_Y:
+                well_columns = list(
+                    p.metadata.get('filled_wells')
+                    or [c for c, r in p.column_roles.items() if r == ColumnRole.Y]
+                )
             item = {
                 'id': bundle.bundle_id,
                 'name': bundle.name,
-                'type': bundle.bundle_type.value,
+                'type': (
+                    bundle.source_category.value
+                    if bundle.source_category != SourceCategory.GENERIC
+                    else bundle.bundle_type.value
+                ),
                 'is_bundle': is_bundle,
                 'icon': '📦' if is_bundle else '📄',
-                'size_display': '',
+                'size_display': f'{len(well_columns)} series' if well_columns else '',
             }
             if is_bundle:
                 item['children'] = [
                     {'id': c.component_id, 'name': c.original_filename,
                      'type': c.role.value, 'is_child': True}
                     for c in bundle.component_list
+                ]
+            elif well_columns:
+                item['children'] = [
+                    {'id': f'{bundle.bundle_id}|{well}', 'name': str(well),
+                     'type': 'uvvis_well', 'is_child': True,
+                     'well_name': well}
+                    for well in well_columns
                 ]
             items.append(item)
         return items

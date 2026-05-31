@@ -5,11 +5,40 @@ import os
 from typing import List, Dict, Any
 import dash
 from dash import dcc, html, Input, Output, State, dash_table
-from dash_iconify import DashIconify
 import pandas as pd
 
 def _icon(name, width=14, height=14, color='#666', **kw):
-    return DashIconify(icon=name, width=width, height=height, color=color, **kw)
+    glyphs = {
+        'tabler:eye': '○',
+        'tabler:trash': '×',
+        'tabler:table': '▦',
+        'tabler:layout-grid': '▦',
+        'tabler:photo': '□',
+        'tabler:chart-line': '⌁',
+        'tabler:chart-area-line': '⌁',
+        'tabler:flask': '◇',
+        'tabler:plus': '+',
+        'tabler:minus': '-',
+        'tabler:spectrum': '⌁',
+        'tabler:file-text': '□',
+        'tabler:file-code': '{}',
+        'tabler:file-question': '?',
+    }
+    style = {
+        'display': 'inline-flex',
+        'alignItems': 'center',
+        'justifyContent': 'center',
+        'width': f'{width}px',
+        'height': f'{height}px',
+        'color': color,
+        'fontSize': f'{max(10, min(width, height))}px',
+        'lineHeight': '1',
+        'fontFamily': 'Arial, sans-serif',
+    }
+    extra_style = kw.pop('style', None)
+    if isinstance(extra_style, dict):
+        style.update(extra_style)
+    return html.Span(glyphs.get(name, '□'), style=style, **kw)
 
 
 
@@ -178,6 +207,8 @@ def _auto_import_peaks(data_manager, bundle):
             time_axis=time_arr,
             signal=signal_arr,
         )
+        data_manager.peak_service.group_peaks_across_samples(
+            file_overlay_map=data_manager.build_file_overlay_map())
         log.debug(f"Auto-imported {len(parsed)} peaks for bundle '{bundle.name}'")
     except Exception as e:
         log.warning(f"Could not auto-import peaks for '{bundle.name}': {e}")
@@ -461,6 +492,7 @@ def render_individual_file_item_selected(item: dict, is_selected: bool = False, 
         'structured': 'tabler:layout-grid',
         'image': 'tabler:photo',
         'chromatogram': 'tabler:chart-line',
+        'spectrum': 'tabler:chart-area-line',
         'spectra': 'tabler:chart-area-line',
         'uvvis_csv': 'tabler:flask',
         'lcms_bundle': 'tabler:flask',
@@ -766,6 +798,10 @@ def register_clear_callbacks(app: dash.Dash, data_manager) -> None:
             return dash.no_update
         import os
         # Clear in-memory persistent state
+        data_manager.file_ui_state.clear()
+        data_manager.visibility_state.clear()
+        data_manager.collapse_state.clear()
+        data_manager.project.clear()
         data_manager._persistent_state.clear()
         if hasattr(data_manager, '_shared_plot_settings'):
             data_manager._shared_plot_settings.clear()

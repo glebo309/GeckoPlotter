@@ -98,6 +98,7 @@ def register_export_callbacks(app: dash.Dash, data_manager) -> None:
                     base64=True,
                 )
             elif fmt == 'pdf':
+                fig = export_svc.prepare_figure_for_static_export(fig, width, height)
                 pdf_bytes = fig.to_image(format='pdf', width=width, height=height,
                                          scale=scale)
                 return dict(
@@ -241,25 +242,19 @@ def register_export_callbacks(app: dash.Dash, data_manager) -> None:
     # ── Save Session ──────────────────────────────────────────────────
 
     @app.callback(
-        Output('exp-session-download', 'data'),
+        [Output('exp-session-download', 'data'),
+         Output('exp-session-status', 'children')],
         Input('exp-session-btn', 'n_clicks'),
         prevent_initial_call=True,
     )
     def save_session(n_clicks):
         if not n_clicks:
-            return dash.no_update
+            return dash.no_update, dash.no_update
 
-        try:
-            data_manager.persist_services()
-            session_json = export_svc.export_session(
-                data_manager,
-                peak_service=data_manager.peak_service,
-                calibration_service=data_manager.calibration_service,
-            )
-            return dict(content=session_json, filename='geckoplotter_session.json')
-        except Exception as e:
-            log.exception(f"Session save failed: {e}")
-            return dash.no_update
+        return (
+            dash.no_update,
+            "Session saving is not implemented yet. It will come in a future build.",
+        )
 
     # ── Load Session ──────────────────────────────────────────────────
 

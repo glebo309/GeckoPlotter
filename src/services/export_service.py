@@ -123,6 +123,38 @@ class ExportService:
     # ------------------------------------------------------------------
 
     @staticmethod
+    def prepare_figure_for_static_export(
+        fig: go.Figure,
+        width: Optional[int] = None,
+        height: Optional[int] = None,
+    ) -> go.Figure:
+        """Make the displayed Plotly JSON safe for Kaleido image export.
+
+        The callbacks pass the already-rendered figure JSON from the active
+        graph.  This method keeps that visual state intact, but gives Plotly
+        enough margin/axis metadata so static PNG/SVG/PDF exports do not clip
+        axis titles, tick labels, or the frame when rendered at a new size.
+        """
+        for axis_name in fig.layout:
+            if str(axis_name).startswith(("xaxis", "yaxis")):
+                fig.layout[axis_name].automargin = True
+
+        existing_margin = fig.layout.margin.to_plotly_json() if fig.layout.margin else {}
+        margin = {
+            "l": max(int(existing_margin.get("l") or 0), 80),
+            "r": max(int(existing_margin.get("r") or 0), 35),
+            "t": max(int(existing_margin.get("t") or 0), 45),
+            "b": max(int(existing_margin.get("b") or 0), 70),
+        }
+        update = {"autosize": False, "margin": margin}
+        if width:
+            update["width"] = int(width)
+        if height:
+            update["height"] = int(height)
+        fig.update_layout(**update)
+        return fig
+
+    @staticmethod
     def export_figure_png(
         fig: go.Figure,
         width: int = 800,
@@ -131,6 +163,7 @@ class ExportService:
     ) -> bytes:
         """Render a Plotly figure to high-resolution PNG bytes via *kaleido*."""
         try:
+            fig = ExportService.prepare_figure_for_static_export(fig, width, height)
             return fig.to_image(
                 format="png",
                 width=width,
@@ -151,6 +184,7 @@ class ExportService:
     ) -> bytes:
         """Render a Plotly figure to SVG bytes via *kaleido*."""
         try:
+            fig = ExportService.prepare_figure_for_static_export(fig, width, height)
             return fig.to_image(
                 format="svg",
                 width=width,

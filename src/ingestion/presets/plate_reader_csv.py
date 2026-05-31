@@ -30,7 +30,7 @@ class PlateReaderCSVPreset(FormatPreset):
     def sniff(path: str, head_bytes: bytes, head_lines: list[str]) -> bool:
         for line in head_lines:
             fields = [f.strip() for f in line.split(",")]
-            if _find_wavelength_field(fields) >= 0 and len(fields) >= 3:
+            if _find_wavelength_field(fields) >= 0 and len(fields) >= 2:
                 return True
         return False
 

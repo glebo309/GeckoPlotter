@@ -161,7 +161,10 @@ DEFAULT_PLOT_SETTINGS: Dict[str, object] = {
     "show_grid_x": False,
     "show_grid_y": False,
     "show_tick_marks": True,
+    "show_minor_ticks": False,
     "tick_direction": "outside",
+    "tick_length": 5,
+    "frame_width": 1,
     "show_frame": True,
     "grid_style": "solid",
     # Layout
@@ -225,7 +228,10 @@ class PlotSettings:
     show_grid_x: bool = True
     show_grid_y: bool = True
     show_tick_marks: bool = True         # tick marks on axes
+    show_minor_ticks: bool = False
     tick_direction: str = "outside"      # inside, outside, none
+    tick_length: int = 5
+    frame_width: float = 1
     show_frame: bool = True              # box around plot area
     grid_style: str = "solid"            # solid, dash, dot
 
@@ -338,11 +344,16 @@ class PlotSettingsService:
 
         tick_cfg = {}
         if settings.show_tick_marks and settings.tick_direction != 'none':
-            tick_cfg = dict(ticks=settings.tick_direction, ticklen=5)
+            tick_cfg = dict(ticks=settings.tick_direction, ticklen=settings.tick_length)
         else:
             tick_cfg = dict(ticks='')
 
         grid_dash = _DASH_MAP.get(settings.grid_style, 'solid')
+        minor_cfg = dict(
+            ticks=settings.tick_direction if settings.show_minor_ticks else '',
+            ticklen=max(1, int(settings.tick_length * 0.6)),
+            showgrid=False,
+        )
 
         axis_common_x = dict(
             title=dict(text=settings.x_label, standoff=20),
@@ -351,7 +362,9 @@ class PlotSettingsService:
             type=settings.x_scale,
             tickfont=dict(size=settings.tick_font_size),
             showline=settings.show_frame,
+            linewidth=settings.frame_width,
             mirror=settings.show_frame,
+            minor=minor_cfg,
             **tick_cfg,
         )
         axis_common_y = dict(
@@ -361,7 +374,9 @@ class PlotSettingsService:
             type=settings.y_scale,
             tickfont=dict(size=settings.tick_font_size),
             showline=settings.show_frame,
+            linewidth=settings.frame_width,
             mirror=settings.show_frame,
+            minor=minor_cfg,
             **tick_cfg,
         )
         if not settings.auto_range:

@@ -32,7 +32,7 @@ def create_data_table_editor(df=None, table_id='pub-table', default_selected_col
             dcc.Store(id='active-sheet-name', data=None),
             html.Div(
                 [
-                    DashIconify(icon='tabler:table', width=36, height=36, color='#bbb'),
+                    DashIconify(icon='tabler:table', width=36, height=36, style={'color': '#bbb'}),
                     html.H4('No data loaded', className='empty-state__title'),
                     html.P('Select a file from the explorer to view and edit data', className='empty-state__subtitle'),
                 ],

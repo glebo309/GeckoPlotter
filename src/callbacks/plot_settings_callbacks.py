@@ -31,6 +31,8 @@ def _build_layout_opts(s):
         opts.append('grid_y')
     if s.get('show_tick_marks', True):
         opts.append('ticks')
+    if s.get('show_minor_ticks', False):
+        opts.append('minor_ticks')
     if s.get('show_frame', True):
         opts.append('frame')
     return opts
@@ -111,6 +113,8 @@ def register_plot_settings_callbacks(app, data_manager):
             Output('pt-layout-opts', 'value', allow_duplicate=True),
             Output('pt-tick-dir', 'value', allow_duplicate=True),
             Output('pt-grid-style', 'value', allow_duplicate=True),
+            Output('pt-frame-width', 'value', allow_duplicate=True),
+            Output('pt-tick-length', 'value', allow_duplicate=True),
             Output('pt-layout-mode', 'value', allow_duplicate=True),
         ],
         Input('active-plot-context', 'data'),
@@ -175,6 +179,8 @@ def register_plot_settings_callbacks(app, data_manager):
             _build_layout_opts(s),
             s['tick_direction'],
             s['grid_style'],
+            s.get('frame_width', 1),
+            s.get('tick_length', 5),
             s.get('layout_mode', 'overlay'),
         )
 
@@ -223,6 +229,8 @@ def register_plot_settings_callbacks(app, data_manager):
          Input('pt-layout-opts', 'value'),
          Input('pt-tick-dir', 'value'),
          Input('pt-grid-style', 'value'),
+         Input('pt-frame-width', 'value'),
+         Input('pt-tick-length', 'value'),
          Input('pt-layout-mode', 'value')],
         State('current-plot-settings', 'data'),
         prevent_initial_call=True,
@@ -242,6 +250,7 @@ def register_plot_settings_callbacks(app, data_manager):
         pt_title_font_size, pt_tick_font_size,
         pt_bold_title, pt_show_legend, pt_legend_pos,
         pt_layout_opts, pt_tick_dir, pt_grid_style,
+        pt_frame_width, pt_tick_length,
         pt_layout_mode,
         # State
         current_settings,
@@ -308,7 +317,10 @@ def register_plot_settings_callbacks(app, data_manager):
             'show_grid_x': 'grid_x' in layout_opts,
             'show_grid_y': 'grid_y' in layout_opts,
             'show_tick_marks': 'ticks' in layout_opts,
+            'show_minor_ticks': 'minor_ticks' in layout_opts,
             'tick_direction': pt_tick_dir or 'outside',
+            'tick_length': pt_tick_length if pt_tick_length is not None else 5,
+            'frame_width': pt_frame_width if pt_frame_width is not None else 1,
             'show_frame': 'frame' in layout_opts,
             'grid_style': pt_grid_style or 'solid',
             # Layout

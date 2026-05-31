@@ -903,6 +903,28 @@ class PeakService:
         if not all_peaks:
             return {}
 
+        def _rt_from_regular_gid(gid: Optional[str]) -> Optional[float]:
+            if not gid or not gid.startswith("compound_rt"):
+                return None
+            try:
+                return float(gid.replace("compound_rt", "", 1))
+            except (TypeError, ValueError):
+                return None
+
+        def _stable_regular_gid(group: List[Peak], mean_rt: float) -> Tuple[str, bool]:
+            existing_gids = [p.group_id for p in group if p.group_id]
+            compatible: List[str] = []
+            for gid in existing_gids:
+                gid_rt = _rt_from_regular_gid(gid)
+                if gid_rt is None or abs(gid_rt - mean_rt) <= max(rt_window, 0.05):
+                    compatible.append(gid)
+            if compatible:
+                counts: Dict[str, int] = {}
+                for gid in compatible:
+                    counts[gid] = counts.get(gid, 0) + 1
+                return max(counts, key=counts.get), True
+            return f"compound_rt{mean_rt:.3f}", bool(existing_gids)
+
         # ── Partition peaks by overlay group ──────────────────────────
         overlay_buckets: Dict[str, List[Peak]] = {}
         for p in all_peaks:
@@ -952,21 +974,24 @@ class PeakService:
                 rt_groups.append(current_group)
                 for group in rt_groups:
                     mean_rt = float(np.mean([p.rt for p in group]))
-                    grouped.append((f"compound_rt{mean_rt:.1f}", group))
+                    gid, had_existing_gid = _stable_regular_gid(group, mean_rt)
+                    grouped.append((gid, group, had_existing_gid))
 
             # Stable color assignment: cached colors survive across calls,
             # new groups get the next free palette slot.
             pal = getattr(self, '_palette', None) or OKABE_ITO_PALETTE
             og_colors = self._group_colors.setdefault(og_key, {})
-            active_gids = {gid for gid, _ in grouped}
-
-            # Prune stale groups FIRST so their slots free up
-            for k in [k for k in og_colors if k not in active_gids]:
-                del og_colors[k]
-
-            for gid, group in grouped:
+            for entry in grouped:
+                if len(entry) == 3:
+                    gid, group, had_existing_gid = entry
+                else:
+                    gid, group = entry
+                    had_existing_gid = False
                 if gid not in og_colors:
-                    og_colors[gid] = pal[len(og_colors) % len(pal)]
+                    seed_color = None
+                    if not had_existing_gid:
+                        seed_color = next((p.color for p in group if p.color), None)
+                    og_colors[gid] = seed_color or pal[len(og_colors) % len(pal)]
 
                 color = og_colors[gid]
                 for peak in group:

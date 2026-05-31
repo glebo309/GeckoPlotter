@@ -45,12 +45,16 @@ class ProjectPersistence:
 
     def __init__(self, state_file: str):
         self._state_file = state_file
+        self._enabled = os.environ.get("GECKO_ENABLE_SESSION_PERSISTENCE") == "1"
         self._data: Dict[str, Any] = {}
         self._load()
 
     # -- File I/O -----------------------------------------------------------
 
     def _load(self) -> None:
+        if not self._enabled:
+            self._data = {}
+            return
         if os.path.exists(self._state_file):
             try:
                 with open(self._state_file, 'r') as f:
@@ -64,6 +68,8 @@ class ProjectPersistence:
 
     def save(self) -> None:
         """Write current state to disk."""
+        if not self._enabled:
+            return
         try:
             tmp = self._state_file + '.tmp'
             with open(tmp, 'w') as f:
@@ -164,6 +170,13 @@ class ProjectPersistence:
     def clear(self) -> None:
         """Reset all persisted state."""
         self._data = {}
+        if not self._enabled:
+            try:
+                if os.path.exists(self._state_file):
+                    os.remove(self._state_file)
+            except OSError:
+                pass
+            return
         self.save()
 
     def remove_file(self, file_id: str) -> None:

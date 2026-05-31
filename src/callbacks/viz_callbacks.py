@@ -93,12 +93,34 @@ def _get_x_axis_name(metadata, fdata):
     return 'unknown'
 
 
+def _get_x_domain_signature(metadata, fdata):
+    """Return a coarse numeric X-domain signature for overlay compatibility."""
+    x_axis = _get_x_axis_name(metadata, fdata)
+    data = fdata.get('data')
+    if data is None or not hasattr(data, 'columns') or x_axis not in data.columns:
+        return 'domain:unknown'
+    try:
+        x = pd.to_numeric(data[x_axis], errors='coerce').dropna()
+    except Exception:
+        return 'domain:unknown'
+    if x.size < 2:
+        return 'domain:unknown'
+
+    lo = float(x.min())
+    hi = float(x.max())
+    if not np.isfinite(lo) or not np.isfinite(hi):
+        return 'domain:unknown'
+    span = abs(hi - lo)
+    decimals = 4 if span < 1 else 2 if span < 100 else 0
+    return f"{round(lo, decimals)}:{round(hi, decimals)}"
+
+
 def _get_overlay_group(metadata, fdata, file_id=None, dm=None):
-    """Return composite key (source_category, x_axis) for overlay grouping.
+    """Return composite key (source_category, x_axis, x_domain) for overlay grouping.
 
     Files overlay when they share both the same source type AND the same
-    X-axis name.  This prevents e.g. a chromatogram (Time vs mAU) from
-    mixing with a generic CSV that also has a Time column.
+    X-axis name/domain.  This prevents e.g. unrelated CSVs with a generic
+    "Time" or "X" column from being placed on the same plot.
 
     If the file has a group override (from cross-group drag-drop), use that.
     """
@@ -107,7 +129,8 @@ def _get_overlay_group(metadata, fdata, file_id=None, dm=None):
         if override:
             return override
     return (_get_source_category(metadata, fdata),
-            _get_x_axis_name(metadata, fdata))
+            _get_x_axis_name(metadata, fdata),
+            _get_x_domain_signature(metadata, fdata))
 
 
 def _get_active_file_group(dm, active_file_id):
@@ -332,14 +355,15 @@ _AUTO_PLOT_CATEGORIES = frozenset({
 
 def _tab_id_from_group(group_key):
     """Create a stable tab ID from an overlay group key tuple."""
-    cat, x_axis = group_key
-    slug = f"{cat}_{x_axis}".replace(' ', '_').replace('(', '').replace(')', '').lower()
+    cat, x_axis, *rest = group_key
+    slug_src = "_".join(str(part) for part in (cat, x_axis, *rest))
+    slug = slug_src.replace(' ', '_').replace('(', '').replace(')', '').replace(':', '_').lower()
     return f"tab-{slug}"
 
 
 def _tab_label_from_group(group_key):
     """Create a human-readable label for a tab from its overlay group key."""
-    cat, x_axis = group_key
+    cat, x_axis, *_rest = group_key
     base = _GROUP_LABELS.get(cat, cat.replace('_', ' ').title())
     return base
 
@@ -444,7 +468,7 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
                 })
 
         for t in existing_tabs:
-            if t.get('type') == 'custom':
+            if t.get('type') in ('custom', 'publication'):
                 new_tabs.append(t)
 
         new_tab_ids = {t['id'] for t in new_tabs}
@@ -474,10 +498,6 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
         else:
             next_active = new_tabs[0]['id'] if new_tabs else None
 
-        # Always include the Publication preview tab
-        pub_tab = {'id': 'publication', 'label': 'Publication', 'type': 'publication'}
-        new_tabs.append(pub_tab)
-
         return new_tabs, next_active
 
     @app.callback(
@@ -494,6 +514,7 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
         for tab in tabs:
             is_active = tab['id'] == active_tab_id
             is_custom = tab.get('type') == 'custom'
+            is_closable = is_custom or tab.get('type') == 'publication'
             label_el = _html.Span(
                 tab['label'],
                 id={'type': 'plot-tab-label', 'index': tab['id']},
@@ -501,7 +522,7 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
                 style={'outline': 'none'},
             )
             tab_children = [label_el]
-            if is_custom:
+            if is_closable:
                 tab_children.append(_html.Span(
                     '×',
                     id={'type': 'plot-tab-close', 'index': tab['id']},
@@ -560,7 +581,7 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
 
         # Don't auto-switch away from the Publication tab; the user
         # is previewing the figure and just wants a different file.
-        if current_tab == 'publication':
+        if current_tab and str(current_tab).startswith('publication'):
             return dash.no_update, new_memory
 
         if tab_exists and target_tab != current_tab:
@@ -1196,6 +1217,10 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
         set_zoom = restored_zoom if is_tab_switch else no_zoom
 
         group_key = tuple(tab.get('group_key', []))
+        active_file_group = _get_active_file_group(data_manager, active_file)
+        zoom_matches_tab = not active_file_group or active_file_group == group_key
+        if not is_tab_switch and not zoom_matches_tab:
+            set_zoom = None
 
         visible_files = _collect_visible_files(
             data_manager, active_file, loaded_files, target_group_override=group_key,
@@ -1247,7 +1272,7 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
                     if _ov_time is not None:
                         add_peak_traces(fig_obj_for_peaks, peaks, _ov_time, _ov_signal, selected_peak_id, row=row_idx)
                 figure = fig_obj_for_peaks
-            elif active_file:
+            elif active_file and _get_active_file_group(data_manager, active_file) == group_key:
                 _ov_time, _ov_signal = get_xy_arrays(data_manager, active_file)
                 if _ov_time is not None:
                     all_peaks = data_manager.peak_service.get_peaks(active_file)
@@ -1288,7 +1313,7 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
         if is_tab_switch:
             effective_zoom = restored_zoom
         else:
-            effective_zoom = zoom_state
+            effective_zoom = zoom_state if zoom_matches_tab else None
 
         try:
             fig_obj = go.Figure(figure) if isinstance(figure, dict) else figure
@@ -1321,7 +1346,7 @@ def create_bundle_data_table(bundle, file_data: Dict[str, Any], data_manager) ->
         
         # Bundle header
         bundle_header = html.Div([
-            html.H5([DashIconify(icon='tabler:package', width=16, height=16, color='#555', style={'marginRight': '6px'}), bundle.base_name],
+            html.H5([DashIconify(icon='tabler:package', width=16, height=16, style={'marginRight': '6px', 'color': '#555'}), bundle.base_name],
                    style={'margin': '0 0 5px 0', 'color': '#1a1a1a', 'fontSize': '16px', 'display': 'flex', 'alignItems': 'center'}),
             html.P([
                 html.Strong("Bundle Type: "), f"{bundle.bundle_type.capitalize()}",
@@ -1333,13 +1358,13 @@ def create_bundle_data_table(bundle, file_data: Dict[str, Any], data_manager) ->
         # File list section
         file_list_items = []
         file_list_items.append(html.Div([
-            DashIconify(icon='tabler:file-text', width=14, height=14, color='#888', style={'marginRight': '5px'}),
+            DashIconify(icon='tabler:file-text', width=14, height=14, style={'marginRight': '5px', 'color': '#888'}),
             html.Strong(main_file.get('name', 'Unknown'), style={'color': '#333'})
         ], style={'padding': '4px 0', 'fontSize': '13px'}))
         
         for aux_file in aux_files:
             file_list_items.append(html.Div([
-                DashIconify(icon='tabler:file-text', width=14, height=14, color='#888', style={'marginRight': '5px'}),
+                DashIconify(icon='tabler:file-text', width=14, height=14, style={'marginRight': '5px', 'color': '#888'}),
                 html.Span(aux_file.get('name', 'Unknown'), style={'color': '#666'})
             ], style={'padding': '4px 0', 'fontSize': '13px'}))
         
@@ -1406,7 +1431,7 @@ def create_data_table(file_data: Dict[str, Any]) -> html.Div:
 
         # File info section
         file_info = html.Div([
-            html.H5([DashIconify(icon='tabler:file-text', width=16, height=16, color='#888', style={'marginRight': '6px'}), record.get('name', 'Unknown')], style={'margin': '0 0 10px 0', 'color': '#333', 'display': 'flex', 'alignItems': 'center'}),
+            html.H5([DashIconify(icon='tabler:file-text', width=16, height=16, style={'marginRight': '6px', 'color': '#888'}), record.get('name', 'Unknown')], style={'margin': '0 0 10px 0', 'color': '#333', 'display': 'flex', 'alignItems': 'center'}),
             html.P([
                 html.Strong("Type: "), f"{record.get('type', 'unknown').capitalize()}",
                 html.Br(),

@@ -517,8 +517,18 @@ def _coerce_numerics(df: pd.DataFrame) -> pd.DataFrame:
 def _infer_source_category(
     df: pd.DataFrame, roles: Dict[str, ColumnRole]
 ) -> SourceCategory:
-    # Stage 3 is the fallback for files that didn't match any preset.
-    # Stay conservative: only presets should assign specific categories.
+    x_cols = [c for c, r in roles.items() if r == ColumnRole.X]
+    y_cols = [c for c, r in roles.items() if r == ColumnRole.Y]
+    x_name = str(x_cols[0]).lower() if x_cols else ""
+    y_names = " ".join(str(c).lower() for c in y_cols)
+
+    # Common UV/Vis exports (PASCO, OceanView, simple spectrometer CSVs)
+    # often miss a preset but still have an unambiguous wavelength axis.
+    if "wavelength" in x_name or re.search(r"\bnm\b", x_name):
+        spectral_y_terms = ("abs", "absorbance", "transmittance", "intensity")
+        if any(term in y_names for term in spectral_y_terms):
+            return SourceCategory.SPECTRUM
+
     return SourceCategory.GENERIC
 
 

@@ -52,13 +52,18 @@ app.title = 'GeckoPlotter'
 data_manager = DataStore()
 
 def _icon(name, width=16, height=16, **kw):
-    return DashIconify(icon=name, width=width, height=height, **kw)
+    color = kw.pop('color', None)
+    style = dict(kw.pop('style', {}) or {})
+    if color:
+        style['color'] = color
+    return DashIconify(icon=name, width=width, height=height, style=style, **kw)
 
 TYPE_ICONS = {
     'table': 'tabler:table',
     'structured': 'tabler:layout-grid',
     'image': 'tabler:photo',
     'chromatogram': 'tabler:chart-line',
+    'spectrum': 'tabler:chart-area-line',
     'spectra': 'tabler:chart-area-line',
     'uvvis_csv': 'tabler:flask',
     'text': 'tabler:file-text',
@@ -764,10 +769,18 @@ _layout_body = html.Div(
                                                         html.Button('Export Figure', id='exp-fig-btn', className='btn btn-primary',
                                                                     style={'width': '100%', 'marginBottom': '6px'}),
                                                         dcc.Download(id='exp-fig-download'),
-                                                        dmc.Button('Open Publication Preview', id='exp-open-pub-btn',
-                                                                   size='xs', variant='light', fullWidth=True,
-                                                                   leftSection=_icon('tabler:article', width=14),
-                                                                   style={'marginBottom': '10px'}),
+                                                        html.Button(
+                                                            'Send Current Plot to Publication',
+                                                            id='exp-open-pub-btn',
+                                                            className='btn btn-secondary',
+                                                            style={
+                                                                'width': '100%',
+                                                                'marginBottom': '10px',
+                                                                'color': '#1a1a1a',
+                                                                'backgroundColor': '#f5f5f5',
+                                                                'border': '1px solid #c8c8c8',
+                                                            },
+                                                        ),
                                                         html.Div('Data Export', className='toolbox-section-title'),
                                                         html.Div([
                                                             html.Label('Format', className='form-label'),
@@ -785,6 +798,8 @@ _layout_body = html.Div(
                                                         html.Div('Session', className='toolbox-section-title'),
                                                         html.Button('Save Session', id='exp-session-btn', className='btn btn-secondary',
                                                                     style={'width': '100%', 'marginBottom': '6px'}),
+                                                        html.Div(id='exp-session-status',
+                                                                 style={'fontSize': '11px', 'color': '#777', 'marginBottom': '6px'}),
                                                         dcc.Upload(html.Button('Load Session', className='btn btn-secondary',
                                                                                style={'width': '100%'}),
                                                                    id='exp-session-upload', style={'width': '100%', 'marginBottom': '6px'}),
@@ -974,6 +989,23 @@ _layout_body = html.Div(
                                                         'height': '100%',
                                                         'overflowY': 'auto'
                                                     }, children=[
+                                                        dash_table.DataTable(
+                                                            id='cross-sample-table',
+                                                            columns=[], data=[],
+                                                            editable=True,
+                                                            cell_selectable=True,
+                                                            column_selectable='single',
+                                                            row_selectable='multi',
+                                                            row_deletable=True,
+                                                            sort_action='native',
+                                                            style_table={'display': 'none'},
+                                                            style_cell=TABLE_STYLE_CELL,
+                                                            style_header=TABLE_STYLE_HEADER,
+                                                            style_header_conditional=[{'if': {'column_id': '_row_id'}, 'display': 'none'}],
+                                                            style_data=TABLE_STYLE_DATA,
+                                                            style_cell_conditional=[{'if': {'column_id': '_row_id'}, 'display': 'none'}],
+                                                            style_data_conditional=[{'if': {'column_id': '_row_id'}, 'display': 'none'}],
+                                                        ),
                                                         html.Div([
                                                             dcc.Input(id='group-label-input', type='text',
                                                                       placeholder='Group label...',
@@ -988,7 +1020,7 @@ _layout_body = html.Div(
                                                                                'marginLeft': '4px', 'cursor': 'pointer',
                                                                                'color': '#999'}),
                                                         ], style={'display': 'flex', 'alignItems': 'center',
-                                                                  'gap': '2px', 'marginBottom': '6px', 'padding': '4px 0'}),
+                                                                  'gap': '2px', 'margin': '8px 0 6px 0', 'padding': '4px 0'}),
                                                         # Static components that survive across-samples-container
                                                         # children replacement by update_across_samples_tab
                                                         html.Div(id='peak-group-selector-wrapper', style={'display': 'none'}, children=[
@@ -1007,23 +1039,6 @@ _layout_body = html.Div(
                                                                        marks={0.05: '0.05', 0.2: '0.2', 0.5: '0.5', 1.0: '1.0'},
                                                                        tooltip={"placement": "bottom", "always_visible": True}),
                                                         ]),
-                                                        dash_table.DataTable(
-                                                            id='cross-sample-table',
-                                                            columns=[], data=[],
-                                                            editable=True,
-                                                            cell_selectable=True,
-                                                            column_selectable='single',
-                                                            row_selectable='multi',
-                                                            row_deletable=True,
-                                                            sort_action='native',
-                                                            style_table={'display': 'none'},
-                                                            style_cell=TABLE_STYLE_CELL,
-                                                            style_header=TABLE_STYLE_HEADER,
-                                                            style_header_conditional=[{'if': {'column_id': '_row_id'}, 'display': 'none'}],
-                                                            style_data=TABLE_STYLE_DATA,
-                                                            style_cell_conditional=[{'if': {'column_id': '_row_id'}, 'display': 'none'}],
-                                                            style_data_conditional=[{'if': {'column_id': '_row_id'}, 'display': 'none'}],
-                                                        ),
                                                         html.Div(id='across-samples-container', children=[
                                                             html.P("Load multiple bundles to compare peaks across samples",
                                                                   style={'color': '#666', 'textAlign': 'center', 'padding': '20px'})
@@ -1066,6 +1081,18 @@ _layout_body = html.Div(
                                                         'overflowY': 'auto'
                                                     }, children=[
                                                         html.Div(id='calibration-container', children=[
+                                                            html.Div(
+                                                                'Calibration is still work in progress. Treat fitted values and exports as provisional.',
+                                                                style={
+                                                                    'fontSize': '12px',
+                                                                    'color': '#7a4b00',
+                                                                    'backgroundColor': '#fff4d8',
+                                                                    'border': '1px solid #f1d28a',
+                                                                    'borderRadius': '6px',
+                                                                    'padding': '8px 10px',
+                                                                    'marginBottom': '12px',
+                                                                },
+                                                            ),
                                                             # Model setup
                                                             html.Div([
                                                                 html.Div('Create Calibration Model', style={
@@ -1200,8 +1227,8 @@ _layout_body = html.Div(
                                                                 html.Div(id='eic-active-list', style={
                                                                     'marginTop': '8px', 'display': 'flex',
                                                                     'flexWrap': 'wrap', 'gap': '4px'}),
-                                                            ], style={'padding': '10px', 'backgroundColor': 'rgba(0,0,0,0.02)',
-                                                                      'borderRadius': '8px', 'marginBottom': '10px'}),
+                                                            ], style={'order': 2, 'padding': '10px', 'backgroundColor': 'rgba(0,0,0,0.02)',
+                                                                      'borderRadius': '8px', 'marginTop': '10px'}),
                                                             html.Div([
                                                                 html.Div([
                                                                     html.Div('Extracted Ion Chromatogram', style={
@@ -1257,7 +1284,7 @@ _layout_body = html.Div(
                                                                                     'borderRadius': '6px', 'marginTop': '4px',
                                                                                     'minHeight': '20px'}),
                                                                 ], style={'flex': '1 1 420px', 'minWidth': '320px'}),
-                                                            ], style={'display': 'flex', 'gap': '12px',
+                                                            ], style={'order': 1, 'display': 'flex', 'gap': '12px',
                                                                       'alignItems': 'stretch', 'flexWrap': 'wrap'}),
                                                         ], style={'display': 'flex', 'flexDirection': 'column', 'gap': '0'})
                                                     ]),
@@ -1465,6 +1492,45 @@ def store_to_analysis_tab(active_tab, tab_value):
 
 
 @app.callback(
+    [Output('plot-tabs', 'data', allow_duplicate=True),
+     Output('active-plot-tab', 'data', allow_duplicate=True),
+     Output('custom-plot-figures', 'data', allow_duplicate=True)],
+    Input('exp-open-pub-btn', 'n_clicks'),
+    [State('plot-tabs', 'data'),
+     State('active-plot-tab', 'data'),
+     State('main-plot', 'figure'),
+     State('custom-plot-figures', 'data')],
+    prevent_initial_call=True,
+)
+def open_publication_preview(n_clicks, tabs, active_plot_tab, main_figure, figures):
+    if not n_clicks or not active_plot_tab:
+        return dash.no_update, dash.no_update, dash.no_update
+    tabs = tabs or []
+    figures = dict(figures or {})
+    source_tab = next((t for t in tabs if t.get('id') == active_plot_tab), None)
+    if not source_tab:
+        return dash.no_update, dash.no_update, dash.no_update
+
+    idx = 1 + sum(1 for t in tabs if t.get('type') == 'publication')
+    pub_id = f'publication-{idx}-{n_clicks}'
+    source_label = source_tab.get('label') or 'Plot'
+    pub_tab = {'id': pub_id, 'label': f'Publication {idx}', 'type': 'publication'}
+
+    entry = {
+        'source_plot_tab': active_plot_tab,
+        'source_label': source_label,
+        'figure': main_figure,
+    }
+    if source_tab.get('type') == 'raw':
+        entry['source_group_key'] = source_tab.get('group_key')
+    elif source_tab.get('type') == 'custom':
+        entry['figure'] = (figures.get(active_plot_tab) or {}).get('figure', main_figure)
+
+    figures[pub_id] = entry
+    return [*tabs, pub_tab], pub_id, figures
+
+
+@app.callback(
     Output('view-mode', 'data'),
     Input('active-plot-tab', 'data'),
     State('plot-tabs', 'data'),
@@ -1542,7 +1608,7 @@ def update_status(files):
 clientside_callback(
     """
     function(activeTab) {
-        if (activeTab === 'publication') {
+        if (activeTab && activeTab.indexOf('publication') === 0) {
             return {};
         }
         return {display: 'none'};

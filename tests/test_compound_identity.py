@@ -36,6 +36,26 @@ def _add_peak(ps, file_id, rt, area=100.0, height=50.0):
     return peak
 
 
+def _add_imported_peak(ps, file_id, rt, color):
+    from services.peak_service import Peak
+    import uuid
+    peak = Peak(
+        peak_id=str(uuid.uuid4()),
+        file_id=file_id,
+        name=f"Imported@{rt}",
+        rt=rt,
+        rt_start=rt - 0.1,
+        rt_end=rt + 0.1,
+        area=100.0,
+        height=50.0,
+        width=0.2,
+        color=color,
+        source='imported',
+    )
+    ps._peaks.setdefault(file_id, []).append(peak)
+    return peak
+
+
 class TestCompoundGrouping:
     def test_same_rt_gets_same_color(self, ps):
         p1 = _add_peak(ps, 'file_a', 5.0)
@@ -68,6 +88,32 @@ class TestCompoundGrouping:
         _add_peak(ps, 'file_c', 5.08)
         ps.group_peaks_across_samples()
         assert p1.color == color_before
+
+    def test_regrouping_keeps_color_when_mean_rt_rounds_differently(self, ps):
+        p1 = _add_peak(ps, 'file_a', 6.44)
+        p2 = _add_peak(ps, 'file_b', 6.44)
+        ps.group_peaks_across_samples(rt_window=0.2)
+        color_before = p1.color
+        group_before = p1.group_id
+
+        _add_peak(ps, 'file_c', 6.56)
+        ps.group_peaks_across_samples(rt_window=0.2)
+
+        assert p1.group_id == group_before
+        assert p2.group_id == group_before
+        assert p1.color == color_before
+        assert p2.color == color_before
+
+    def test_first_grouping_preserves_imported_peak_colors(self, ps):
+        p1 = _add_imported_peak(ps, 'file_a', 5.0, OKABE_ITO_PALETTE[0])
+        p2 = _add_imported_peak(ps, 'file_a', 7.0, OKABE_ITO_PALETTE[1])
+        imported_colors = {p1.peak_id: p1.color, p2.peak_id: p2.color}
+
+        _add_imported_peak(ps, 'file_a', 3.0, OKABE_ITO_PALETTE[2])
+        ps.group_peaks_across_samples()
+
+        assert p1.color == imported_colors[p1.peak_id]
+        assert p2.color == imported_colors[p2.peak_id]
 
     def test_regrouping_after_peak_remove(self, ps):
         p1 = _add_peak(ps, 'file_a', 2.0)

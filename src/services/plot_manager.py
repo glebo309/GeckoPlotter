@@ -212,12 +212,38 @@ class PlotManager:
                 continue
             color = self.default_colors[idx % len(self.default_colors)]
             label = f"{name} — {y_col}" if len(y_cols) > 1 else name
-            fig.add_trace(go.Scatter(
+            trace_cls = go.Scattergl if len(x_vals) > 5000 else go.Scatter
+            fig.add_trace(trace_cls(
                 x=x_vals,
                 y=pd.to_numeric(df[y_col], errors="coerce"),
                 mode="lines",
                 name=label,
                 line=dict(color=color, width=2),
+            ))
+            idx += 1
+
+        eic_overlays = file_data.get('eic_overlays') or []
+        for overlay in eic_overlays:
+            time = overlay.get('time')
+            intensity = overlay.get('intensity')
+            if time is None or intensity is None:
+                continue
+            color = self.default_colors[idx % len(self.default_colors)]
+            mz = overlay.get('mz')
+            tolerance = overlay.get('tolerance')
+            label = f"EIC {mz:.4g} +/- {tolerance:.3g}" if mz is not None and tolerance is not None else "EIC"
+            trace_cls = go.Scattergl if len(time) > 5000 else go.Scatter
+            fig.add_trace(trace_cls(
+                x=time,
+                y=intensity,
+                mode="lines",
+                name=label,
+                line=dict(color=color, width=1.5, dash="dot"),
+                meta="lcms_eic_overlay",
+                hovertemplate=(
+                    f"{label}<br>Time: %{{x:.3f}} min"
+                    "<br>Intensity: %{y:.4g}<extra></extra>"
+                ),
             ))
             idx += 1
 

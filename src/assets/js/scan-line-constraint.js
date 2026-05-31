@@ -44,6 +44,12 @@
         return root ? root.querySelector('[role="slider"]') : null;
     }
 
+    function msViewerActive() {
+        var panel = document.getElementById('ms-viewer-content');
+        if (!panel || !panel.getClientRects || !panel.getClientRects().length) return false;
+        return window.getComputedStyle(panel).display !== 'none';
+    }
+
     function sliderIndex() {
         var handle = sliderHandle();
         if (!handle) return null;
@@ -105,7 +111,7 @@
         var host = overlayHost();
         var r = plotRect();
         var x = idxToX(idx);
-        if (!c || !host || !r || x === null) {
+        if (!msViewerActive() || !c || !host || !r || x === null) {
             if (c) c.style.display = 'none';
             return null;
         }
@@ -123,6 +129,11 @@
 
     function syncFromSlider() {
         raf = 0;
+        if (!msViewerActive()) {
+            var c = overlay();
+            if (c) c.style.display = 'none';
+            return;
+        }
         placeOverlay(sliderIndex());
     }
 
@@ -144,6 +155,7 @@
     }
 
     function inPlot(evt) {
+        if (!msViewerActive()) return false;
         var r = plotRect();
         if (!r) return false;
         var x = clientX(evt);

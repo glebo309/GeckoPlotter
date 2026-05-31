@@ -114,7 +114,7 @@ def register_lcms_callbacks(app, data_manager):
 
     app.clientside_callback(
         """
-        function(scanIdx, figure) {
+        function(scanIdx, activeTab, figure) {
             var hidden = {
                 position: 'absolute',
                 display: 'none',
@@ -151,7 +151,7 @@ def register_lcms_callbacks(app, data_manager):
             var plotDrag = wrapper ? wrapper.querySelector('.nsewdrag') : null;
             var handle = sliderRoot ? sliderRoot.querySelector('[role="slider"]') : null;
 
-            if (!active || scanIdx === null || scanIdx === undefined || !host || !plotDrag || !handle) {
+            if (activeTab !== 'ms-viewer' || !active || scanIdx === null || scanIdx === undefined || !host || !plotDrag || !handle) {
                 return hidden;
             }
 
@@ -172,7 +172,8 @@ def register_lcms_callbacks(app, data_manager):
         }
         """,
         Output('lcms-scan-cursor-overlay', 'style'),
-        Input('ms-scan-slider', 'value'),
+        [Input('ms-scan-slider', 'value'),
+         Input('active-tab', 'data')],
         State('main-plot', 'figure'),
         prevent_initial_call=True,
     )

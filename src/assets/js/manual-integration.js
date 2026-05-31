@@ -8,13 +8,27 @@
         return root.querySelector('.js-plotly-plot') || root;
     }
 
+    var GRAPH_IDS = ['main-plot'];
+
     function graphDivFromEvent(event) {
         if (!event || !event.target || typeof event.target.closest !== 'function') return null;
         var gd = event.target.closest('.js-plotly-plot');
-        if (gd && gd.id === 'main-plot') return gd;
-        var root = event.target.closest('#main-plot');
-        if (!root) return null;
-        return root.querySelector('.js-plotly-plot') || root;
+        if (gd && GRAPH_IDS.indexOf(gd.id) !== -1) return gd;
+        for (var i = 0; i < GRAPH_IDS.length; i++) {
+            var root = event.target.closest('#' + GRAPH_IDS[i]);
+            if (root) {
+                var inner = root.querySelector('.js-plotly-plot') || root;
+                inner.__geckoGraphId = GRAPH_IDS[i];
+                return inner;
+            }
+        }
+        return null;
+    }
+
+    function graphIdOf(gd) {
+        if (!gd) return 'main-plot';
+        if (GRAPH_IDS.indexOf(gd.id) !== -1) return gd.id;
+        return gd.__geckoGraphId || 'main-plot';
     }
 
     function clearTransientShapes(graphId) {
@@ -414,7 +428,7 @@
 
         suspendDrawUntilMouseUp(gd);
         stopPlotlyGesture(event);
-        clearTransientShapes('main-plot');
+        clearTransientShapes(graphIdOf(gd));
         gd.__geckoManualIntegrationLastPlotlyClickAt = Date.now();
         clearEmptyClickTimer(gd);
 
@@ -665,7 +679,7 @@
             stopPlotlyGesture(event);
             gd.__geckoManualIntegrationLastPlotlyClickAt = Date.now();
             clearEmptyClickTimer(gd);
-            clearTransientShapes('main-plot');
+            clearTransientShapes(graphIdOf(gd));
             return;
         }
 
@@ -688,47 +702,18 @@
             Math.abs(event.clientY - last.y) < 8;
     }
 
-    function installEmptyClickHandler() {
-        var gd = getGraphDiv('main-plot');
-        if (!gd) {
-            window.setTimeout(installEmptyClickHandler, 250);
-            return;
-        }
-        if (!document.__geckoManualIntegrationGlobalBlankClickInstalled) {
-            var consumeBlankBeforePlotly = function (event) {
-                if (event.detail && event.detail > 1) return;
-                var eventGd = graphDivFromEvent(event);
-                if (!eventGd) return;
-                handleGraphPointerDown(eventGd, event);
-            };
-            var consumeMouseBeforePlotly = function (event) {
-                var eventGd = graphDivFromEvent(event);
-                if (!eventGd) return;
-                if (eventGd.__geckoManualIntegrationDrawing || eventGd.__geckoManualIntegrationPanning) {
-                    stopPlotlyGesture(event);
-                    return;
-                }
-                if (event.detail && event.detail > 1) return;
-                consumeSelectedBlankClick(eventGd, event);
-            };
-            document.addEventListener('pointerdown', consumeBlankBeforePlotly, true);
-            document.addEventListener('mousedown', consumeMouseBeforePlotly, true);
-            document.addEventListener('keydown', syncMomentaryDrawButton, true);
-            document.addEventListener('keyup', syncMomentaryDrawButton, true);
-            window.addEventListener('blur', function () {
-                setMomentaryDrawActive(false);
-            });
-            document.__geckoManualIntegrationGlobalBlankClickInstalled = true;
-        }
-
-        if (gd.__geckoManualIntegrationClickInstalled) return;
+    function installHandlersOnGraph(graphId) {
+        var gd = getGraphDiv(graphId);
+        if (!gd) return false;
+        if (gd.__geckoManualIntegrationClickInstalled) return true;
+        gd.__geckoGraphId = graphId;
 
         if (typeof gd.on === 'function') {
             gd.on('plotly_click', function (eventData) {
                 gd.__geckoManualIntegrationLastPlotlyClickAt = Date.now();
                 clearEmptyClickTimer(gd);
                 if (eventPeakId(eventData)) {
-                    clearTransientShapes('main-plot');
+                    clearTransientShapes(graphId);
                 }
             });
             gd.on('plotly_doubleclick', function () {
@@ -792,7 +777,6 @@
         });
 
         gd.addEventListener('contextmenu', function (event) {
-            // Suppress the browser/Plotly default menu everywhere on the plot.
             event.preventDefault();
             var peakId = peakIdAtEvent(gd, event);
             if (peakId) {
@@ -801,6 +785,44 @@
         }, true);
 
         gd.__geckoManualIntegrationClickInstalled = true;
+        return true;
+    }
+
+    function installEmptyClickHandler() {
+        var mainInstalled = installHandlersOnGraph('main-plot');
+        if (!mainInstalled) {
+            window.setTimeout(installEmptyClickHandler, 250);
+            return;
+        }
+
+        if (!document.__geckoManualIntegrationGlobalBlankClickInstalled) {
+            var consumeBlankBeforePlotly = function (event) {
+                if (event.detail && event.detail > 1) return;
+                var eventGd = graphDivFromEvent(event);
+                if (!eventGd) return;
+                handleGraphPointerDown(eventGd, event);
+            };
+            var consumeMouseBeforePlotly = function (event) {
+                var eventGd = graphDivFromEvent(event);
+                if (!eventGd) return;
+                if (eventGd.__geckoManualIntegrationDrawing || eventGd.__geckoManualIntegrationPanning) {
+                    stopPlotlyGesture(event);
+                    return;
+                }
+                if (event.detail && event.detail > 1) return;
+                consumeSelectedBlankClick(eventGd, event);
+            };
+            document.addEventListener('pointerdown', consumeBlankBeforePlotly, true);
+            document.addEventListener('mousedown', consumeMouseBeforePlotly, true);
+            document.addEventListener('keydown', syncMomentaryDrawButton, true);
+            document.addEventListener('keyup', syncMomentaryDrawButton, true);
+            window.addEventListener('blur', function () {
+                setMomentaryDrawActive(false);
+            });
+            document.__geckoManualIntegrationGlobalBlankClickInstalled = true;
+        }
+
+        // pub-preview-graph is display-only — no interaction handlers.
     }
 
     window.GeckoPlotterManualIntegration = {

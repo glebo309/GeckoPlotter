@@ -194,8 +194,8 @@ def create_paper_mock():
             ),
         ],
         style={
-            'margin': '0 auto', 'overflow': 'hidden',
-            'width': '80%', 'aspectRatio': '254 / 143',
+            'overflow': 'hidden',
+            'width': '100%', 'aspectRatio': '254 / 143',
         },
     )
 
@@ -221,8 +221,30 @@ def create_paper_mock():
                 'marginBottom': '12px',
             }),
             html.Div(
-                slide_figure_slot,
-                style={'flex': '1', 'display': 'flex', 'alignItems': 'center'},
+                style={'flex': '1', 'display': 'flex', 'gap': '24px',
+                       'alignItems': 'stretch', 'minHeight': '0'},
+                children=[
+                    html.Div(slide_figure_slot, style={
+                        'flex': '1.8', 'display': 'flex', 'alignItems': 'center',
+                    }),
+                    html.Div([
+                        html.Div('Key points', style={
+                            'fontWeight': '700', 'fontSize': '12px',
+                            'marginBottom': '10px', 'color': '#333',
+                        }),
+                        html.Ul([
+                            html.Li('Main observation from the current figure'),
+                            html.Li('Comparison across samples or conditions'),
+                            html.Li('Next experiment or decision point'),
+                        ], style={
+                            'fontSize': '11px', 'lineHeight': '1.55',
+                            'paddingLeft': '18px', 'margin': '0', 'color': '#444',
+                        }),
+                    ], style={
+                        'flex': '1', 'borderLeft': '3px solid #1f77b4',
+                        'paddingLeft': '16px', 'alignSelf': 'center',
+                    }),
+                ],
             ),
         ],
     )

@@ -39,7 +39,8 @@ def register_publication_preview_callbacks(app, data_manager):
 
     def _build_pub_figure(plot_settings, active_file, sub_rows, sub_cols,
                           zoom_sync, selected_peak_id,
-                          loaded_files, plot_tabs, file_order, display_opts):
+                          loaded_files, plot_tabs, file_order, display_opts,
+                          source_group_key=None):
         """Build the publication figure. Shared by render and export."""
         from plotly.subplots import make_subplots
         import numpy as np
@@ -52,7 +53,7 @@ def register_publication_preview_callbacks(app, data_manager):
         n_panels = n_rows * n_cols
 
         raw_tabs = [t for t in (plot_tabs or []) if t.get('type') == 'raw']
-        if not raw_tabs:
+        if source_group_key is None and not raw_tabs:
             empty = go.Figure()
             empty.update_layout(
                 xaxis={'visible': False}, yaxis={'visible': False},
@@ -63,8 +64,11 @@ def register_publication_preview_callbacks(app, data_manager):
             )
             return empty
 
-        source_tab = raw_tabs[0]
-        group_key = tuple(source_tab.get('group_key', []))
+        if source_group_key is None:
+            source_tab = raw_tabs[0]
+            group_key = tuple(source_tab.get('group_key', []))
+        else:
+            group_key = tuple(source_group_key)
         visible_files = _collect_visible_files(
             data_manager, active_file, loaded_files,
             target_group_override=group_key, file_order=file_order)
@@ -87,11 +91,7 @@ def register_publication_preview_callbacks(app, data_manager):
                     if len(y) > smooth_window:
                         trace.y = tuple(savgol_filter(y, smooth_window, poly_order))
 
-        if layout_mode == 'stacked':
-            fig_obj = base_obj
-        elif n_panels == 1:
-            fig_obj = go.Figure(data=all_traces, layout=base_obj.layout)
-        else:
+        if n_panels > 1:
             fig_obj = make_subplots(rows=n_rows, cols=n_cols,
                                     vertical_spacing=0.08, horizontal_spacing=0.08)
             for i, trace in enumerate(all_traces):
@@ -107,6 +107,10 @@ def register_publication_preview_callbacks(app, data_manager):
                         f'xaxis{i}': {'matches': 'x'},
                         f'yaxis{i}': {'matches': 'y'},
                     })
+        elif layout_mode == 'stacked':
+            fig_obj = base_obj
+        else:
+            fig_obj = go.Figure(data=all_traces, layout=base_obj.layout)
 
         # Peak overlays
         show_peaks = 'peaks' in (display_opts or ['peaks'])
@@ -136,11 +140,25 @@ def register_publication_preview_callbacks(app, data_manager):
                             all_peaks, fig_obj, _ov_time, _ov_signal, selected_peak_id)
 
         # Apply plot settings
-        ps = PlotSettingsService.from_dict(s)
+        ps = PlotSettingsService.from_dict(dict(s, y_label=s.get('y1_label', 'Y1')))
         PlotSettingsService.apply_to_figure(fig_obj, ps)
 
         fig_obj.update_layout(autosize=True)
 
+        return fig_obj
+
+    def _active_publication_tab(active_tab_id, plot_tabs):
+        return next(
+            (t for t in (plot_tabs or [])
+             if t.get('id') == active_tab_id and t.get('type') == 'publication'),
+            None,
+        )
+
+    def _style_snapshot_figure(fig_data, plot_settings):
+        fig_obj = go.Figure(fig_data)
+        s = {**DEFAULT_PLOT_SETTINGS, **(plot_settings or {})}
+        ps = PlotSettingsService.from_dict(dict(s, y_label=s.get('y1_label', 'Y1')))
+        PlotSettingsService.apply_to_figure(fig_obj, ps)
         return fig_obj
 
     # ── Toggle paper mock visibility ─────────────────────────────────
@@ -148,10 +166,11 @@ def register_publication_preview_callbacks(app, data_manager):
         [Output('pub-preview-wrapper', 'style'),
          Output('main-plot', 'style')],
         Input('active-plot-tab', 'data'),
+        State('plot-tabs', 'data'),
         prevent_initial_call=True,
     )
-    def toggle_pub_preview(active_tab_id):
-        if active_tab_id == 'publication':
+    def toggle_pub_preview(active_tab_id, plot_tabs):
+        if _active_publication_tab(active_tab_id, plot_tabs):
             return (
                 {'display': 'flex', 'flexDirection': 'column', 'height': '100%',
                  'width': '100%', 'position': 'absolute', 'top': '0', 'left': '0',
@@ -181,6 +200,37 @@ def register_publication_preview_callbacks(app, data_manager):
             return p['mm_w'], p['mm_h']
         return dash.no_update, dash.no_update
 
+    # ── Toggle journal paper vs PowerPoint slide mock ───────────────────
+    @app.callback(
+        [Output('pub-paper-container', 'style'),
+         Output('pub-slide-container', 'style')],
+        Input('pub-preset', 'value'),
+    )
+    def toggle_mock_layout(preset):
+        paper_style = {
+            'flex': '1', 'overflow': 'auto', 'background': '#e8e8e8',
+            'display': 'flex', 'justifyContent': 'center',
+            'alignItems': 'flex-start', 'padding': '20px',
+        }
+        slide_style = {
+            'flex': '1', 'overflow': 'auto', 'background': '#e8e8e8',
+            'display': 'none', 'justifyContent': 'center',
+            'alignItems': 'center', 'padding': '20px',
+        }
+        if preset == 'presentation':
+            return {**paper_style, 'display': 'none'}, {**slide_style, 'display': 'flex'}
+        return paper_style, slide_style
+
+    @app.callback(
+        Output('pub-slide-graph', 'figure'),
+        [Input('pub-preview-graph', 'figure'),
+         Input('pub-preset', 'value')],
+    )
+    def sync_slide_figure(fig, preset):
+        if preset != 'presentation' or not fig:
+            raise dash.exceptions.PreventUpdate
+        return fig
+
     # ── Save custom dims per preset ──────────────────────────────────
     @app.callback(
         Output('pub-custom-dims', 'data'),
@@ -207,12 +257,8 @@ def register_publication_preview_callbacks(app, data_manager):
         prevent_initial_call=True,
     )
     def sync_grid_to_layout_mode(rows, cols):
-        """Auto-switch layout mode when subplot grid changes."""
-        n_rows = max(1, int(rows or 1))
-        n_cols = max(1, int(cols or 1))
-        if n_rows * n_cols > 1:
-            return 'stacked'
-        return 'overlay'
+        """Publication grid is preview-local; do not mutate the raw plot layout."""
+        return dash.no_update
 
     # ── Render figure into pub-preview-graph ─────────────────────────
     # Display-only: peaks are shown but not interactive (no selection,
@@ -231,22 +277,35 @@ def register_publication_preview_callbacks(app, data_manager):
         [State('loaded-files', 'data'),
          State('plot-tabs', 'data'),
          State('file-order', 'data'),
-         State('int-display-opts', 'value')],
+         State('int-display-opts', 'value'),
+         State('custom-plot-figures', 'data')],
         prevent_initial_call=True,
     )
     def render_pub_figure(active_tab_id, plot_settings, preset, render_trigger,
                           active_file, sub_rows, sub_cols, zoom_sync, peak_trigger,
-                          loaded_files, plot_tabs, file_order, display_opts):
-        if active_tab_id != 'publication':
+                          loaded_files, plot_tabs, file_order, display_opts,
+                          custom_figures):
+        pub_tab = _active_publication_tab(active_tab_id, plot_tabs)
+        if not pub_tab:
             raise dash.exceptions.PreventUpdate
 
-        fig_obj = _build_pub_figure(
-            plot_settings, active_file, sub_rows, sub_cols,
-            zoom_sync, None,
-            loaded_files, plot_tabs, file_order, display_opts)
+        entry = (custom_figures or {}).get(active_tab_id, {})
+        source_group_key = entry.get('source_group_key')
+        snapshot = entry.get('figure')
+
+        if source_group_key:
+            fig_obj = _build_pub_figure(
+                plot_settings, active_file, sub_rows, sub_cols,
+                zoom_sync, None,
+                loaded_files, plot_tabs, file_order, display_opts,
+                source_group_key=source_group_key)
+        elif snapshot:
+            fig_obj = _style_snapshot_figure(snapshot, plot_settings)
+        else:
+            fig_obj = go.Figure()
 
         fig_obj.update_layout(
-            uirevision='pub-preview',
+            uirevision=active_tab_id,
             hovermode=False,
             dragmode='zoom',
         )
@@ -328,6 +387,7 @@ def register_publication_preview_callbacks(app, data_manager):
                     content=base64.b64encode(svg_bytes).decode(),
                     filename='figure.svg', base64=True)
             elif fmt == 'pdf':
+                fig = export_svc.prepare_figure_for_static_export(fig, width, height)
                 pdf_bytes = fig.to_image(
                     format='pdf', width=width, height=height, scale=scale)
                 return dict(
