@@ -1,6 +1,6 @@
 # GeckoPlotter V2 — Roadmap
 
-_Updated 2026-05-30_
+_Updated 2026-06-01_
 
 This is the single source of truth for what's done, what's next, and what's planned.
 Start every new session by reading this file.
@@ -20,7 +20,9 @@ Start every new session by reading this file.
 - **Peak integration**: manual peak picking, peak overlay on any X/Y data (format-agnostic)
 - **Peak deconvolution**: EMG fitting via lmfit, right-click to deconvolve
 - **Right-click context menu**: on peaks (delete, rename, cross-file integrate, deconvolve)
-- **Plot settings**: palette, layout mode (overlay/stacked), axis labels, styling
+- **Plot settings**: palette, layout mode (overlay/stacked), axis labels, styling, subplot spacing slider
+- **Shared axis labels**: centered Y annotation across subplots, X label on bottom only
+- **Legend toggle**: show/hide applies to all subplot legends
 - **Color system**: Okabe-Ito palette, stable per-file color cycling, cross-sample group persistence
 - **Data table editor**: cell/column selection, transpose, add row/column
 - **Data selector / axis mapper**: select cells for X/Y/Y2 axes, "Create Plot" button for custom tabs
@@ -29,9 +31,13 @@ Start every new session by reading this file.
 - **File group sort**: ascending/descending toggle per group
 - **Auto-grouping**: files grouped by `(source_category, x_axis)` into tabs
 - **Keyboard shortcuts**: Delete/Backspace/X to remove selected peak
-- **Export**: basic figure export (PNG/SVG)
+- **Export**: PNG/SVG/TIFF with configurable DPI, presentation slide preset
+- **Publication preview**: snapshot-based (send any plot to its own Publication tab)
+- **Persistence opt-in**: no stale file_state.json on reload (GECKO_ENABLE_SESSION_PERSISTENCE=1)
+- **LC-MS**: scan cursor constrained to MS Viewer tab, EIC controls below plots
+- **Crameri palettes**: Batlow, Hawaii, Roma scientific color maps
 - **DMC UI**: all form controls modernized to Dash Mantine Components
-- **Tests**: 70 pass, 1 skipped
+- **Tests**: 142 pass, 1 skipped
 
 ### Key Architecture
 - `StandardizedResult` normalizes all formats (column roles + plot hints + source category)
@@ -54,7 +60,12 @@ Goal: make it feel like a pro figure-editing tool with contextual controls.
 - [x] **Editable DPI** — NumberInput (72–1200) in preset bar, used by readout and all export formats
 - [x] **Presentation preview** — third preset: 16:9 slide mock with title/subtitle, auto-switches container
 - [x] **Shared/combined axis labels** — toggle in Plot Settings Labels section; hides per-subplot labels and adds centered paper-level X/Y annotations
-- [x] **"Open Publication Preview" button** — in Export tab, switches to Publication tab + auto-selects Plot Settings toolbox
+- [x] **"Send to Publication" button** — in Export tab, snapshots the current plot into a new Publication tab (multi-snapshot, per-click)
+- [x] **Subplot spacing slider** — adjustable vertical gap between stacked subplots (2%--25%)
+- [x] **Legend toggle for all subplots** — show/hide applies to legend, legend2, legend3, etc.
+- [x] **Axis labels in Plot Settings** — sole source of axis labels (Data Selector labels removed), empty = no label
+- [x] **Black slider styling** — all dcc.Slider components use dark track/handle
+- [x] **Automargin axes** — Plotly automargin prevents label/tick overlap
 - [ ] **Axis-specific zoom reset** — double-click X axis resets only X range; double-click Y resets only Y (needs custom JS handler)
 
 ### Figure style presets
