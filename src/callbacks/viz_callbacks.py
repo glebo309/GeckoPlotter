@@ -17,6 +17,7 @@ import pandas as pd
 import plotly.graph_objects as go
 from services.plot_manager import PlotManager
 from services.data_store import DataStore as DataManager
+from services.plot_smoothing import smooth_plotly_traces
 from components.data_table_editor import create_data_table_editor
 from components.publication_plot import create_publication_plot
 from callbacks.peak_overlay import overlay_peaks_on_figure, patch_figure_with_peaks, rgba, FILL_COLORS, cleanup_peak_traces, add_peak_traces
@@ -1233,14 +1234,8 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
 
         smooth_window = s.get('smooth_window', 0)
         if smooth_window >= 3:
-            from scipy.signal import savgol_filter
-            poly_order = min(3, smooth_window - 1)
             fig_sm = go.Figure(figure) if isinstance(figure, dict) else figure
-            for trace in fig_sm.data:
-                if hasattr(trace, 'y') and trace.y is not None:
-                    y = np.asarray(trace.y, dtype=float)
-                    if len(y) > smooth_window:
-                        trace.y = tuple(savgol_filter(y, smooth_window, poly_order))
+            smooth_plotly_traces(fig_sm.data, smooth_window)
             figure = fig_sm
 
         show_peaks = 'peaks' in (display_opts or ['peaks'])

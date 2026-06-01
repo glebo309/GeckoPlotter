@@ -390,9 +390,9 @@ _layout_body = html.Div(
                                                         # -- Smoothing --
                                                         html.Div('Smoothing', className='toolbox-section-title'),
                                                         html.Div([
-                                                            dcc.Slider(id='pt-smooth-window', min=0, max=51, step=None,
-                                                                       marks={0: 'Off', 5: '5', 9: '9', 15: '15', 21: '21', 31: '31', 51: '51'},
-                                                                       value=0),
+                                                            dcc.Slider(id='pt-smooth-window', min=0, max=151, step=1,
+                                                                       marks={0: 'Off', 9: '9', 21: '21', 51: '51', 101: '101', 151: '151'},
+                                                                       value=0, updatemode='drag'),
                                                         ], style={'marginBottom': '10px'}),
 
                                                         # -- 1. Plot Type (Analysis only) --

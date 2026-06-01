@@ -144,6 +144,7 @@ DEFAULT_PLOT_SETTINGS: Dict[str, object] = {
     "marker_size": 6,
     "marker_symbol": "circle",
     "trace_opacity": 1.0,
+    "smooth_window": 0,
     "bar_gap": 0.2,
     "bar_group_gap": 0.1,
     # Labels
@@ -207,6 +208,7 @@ class PlotSettings:
     marker_size: float = 6
     marker_symbol: str = "circle"        # circle, square, diamond, cross, x
     trace_opacity: float = 1.0
+    smooth_window: int = 0                # display-only Savitzky-Golay window
     bar_gap: float = 0.2                 # gap between bars (0-1)
     bar_group_gap: float = 0.1           # gap between grouped bars (0-1)
 

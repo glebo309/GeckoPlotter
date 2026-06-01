@@ -82,6 +82,7 @@ def register_plot_settings_callbacks(app, data_manager):
             Output('y1-series-container', 'children', allow_duplicate=True),
             Output('y1-count', 'children', allow_duplicate=True),
             # Plot Settings controls
+            Output('pt-smooth-window', 'value', allow_duplicate=True),
             Output('pt-plot-type', 'value', allow_duplicate=True),
             Output('pt-auto-range', 'checked', allow_duplicate=True),
             Output('pt-categorical-x', 'checked', allow_duplicate=True),
@@ -152,6 +153,7 @@ def register_plot_settings_callbacks(app, data_manager):
             build_y1_series_controls(series_count),
             f"{series_count} series",
             # Plot Settings controls
+            s.get('smooth_window', 0),
             s['plot_type'],
             bool(s['auto_range']),
             bool(s.get('categorical_x', True)),
@@ -203,6 +205,7 @@ def register_plot_settings_callbacks(app, data_manager):
          Input('show-raw-points', 'checked'),
          Input('y2-enable', 'checked'),
          # Plot Settings controls
+         Input('pt-smooth-window', 'value'),
          Input('pt-plot-type', 'value'),
          Input('pt-auto-range', 'checked'),
          Input('pt-categorical-x', 'checked'),
@@ -249,6 +252,7 @@ def register_plot_settings_callbacks(app, data_manager):
         ds_plot_type, y1_stats,
         show_raw, y2_enable,
         # Plot Settings
+        pt_smooth_window,
         pt_plot_type, pt_auto_range, pt_categorical_x,
         pt_x_min, pt_x_max, pt_y_min, pt_y_max,
         pt_x_scale, pt_y_scale,
@@ -317,6 +321,7 @@ def register_plot_settings_callbacks(app, data_manager):
             'marker_size': pt_marker_size if pt_marker_size is not None else 6,
             'marker_symbol': pt_marker_symbol or 'circle',
             'trace_opacity': pt_trace_opacity if pt_trace_opacity is not None else 1.0,
+            'smooth_window': int(pt_smooth_window or 0),
             'bar_gap': pt_bar_gap if pt_bar_gap is not None else 0.2,
             'bar_group_gap': pt_bar_group_gap if pt_bar_group_gap is not None else 0.1,
             # Labels

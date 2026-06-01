@@ -33,6 +33,7 @@ def register_publication_preview_callbacks(app, data_manager):
     from callbacks.peak_overlay import overlay_peaks_on_figure, add_peak_traces, cleanup_peak_traces
     from callbacks.baseline_callbacks import get_xy_arrays
     from services.plot_manager import PlotManager
+    from services.plot_smoothing import smooth_plotly_traces
     from components.paper_mock import PUB_PRESETS
 
     plot_manager = PlotManager()
@@ -43,7 +44,6 @@ def register_publication_preview_callbacks(app, data_manager):
                           source_group_key=None):
         """Build the publication figure. Shared by render and export."""
         from plotly.subplots import make_subplots
-        import numpy as np
 
         s = {**DEFAULT_PLOT_SETTINGS, **(plot_settings or {})}
         layout_mode = s.get('layout_mode', 'overlay')
@@ -84,13 +84,7 @@ def register_publication_preview_callbacks(app, data_manager):
         # Smoothing
         smooth_window = s.get('smooth_window', 0)
         if smooth_window >= 3:
-            from scipy.signal import savgol_filter
-            poly_order = min(3, smooth_window - 1)
-            for trace in all_traces:
-                if hasattr(trace, 'y') and trace.y is not None:
-                    y = np.asarray(trace.y, dtype=float)
-                    if len(y) > smooth_window:
-                        trace.y = tuple(savgol_filter(y, smooth_window, poly_order))
+            smooth_plotly_traces(all_traces, smooth_window)
 
         if n_panels > 1:
             fig_obj = make_subplots(rows=n_rows, cols=n_cols,
