@@ -283,7 +283,10 @@ _layout_body = html.Div(
                                 ),
                                 html.Div(
                                     id='left-vertical-divider',
-                                    className='divider divider-vertical'
+                                    className='divider divider-vertical',
+                                    **{'data-label-above': 'File Explorer',
+                                       'data-label-below': 'Toolbox'},
+                                    children=[html.Span(className='divider-label')],
                                 ),
                                 html.Div(
                                     id='left-bottom-panel',
@@ -823,7 +826,10 @@ _layout_body = html.Div(
                         ),
                         html.Div(
                             id='main-divider',
-                            className='divider divider-horizontal'
+                            className='divider divider-horizontal',
+                            **{'data-label-left': 'Sidebar',
+                               'data-label-right': 'Plot'},
+                            children=[html.Span(className='divider-label')],
                         ),
                         html.Div(
                             id='right-column',
@@ -891,7 +897,10 @@ _layout_body = html.Div(
                                 ),
                                 html.Div(
                                     id='right-vertical-divider',
-                                    className='divider divider-vertical'
+                                    className='divider divider-vertical',
+                                    **{'data-label-above': 'Plot',
+                                       'data-label-below': 'Analysis'},
+                                    children=[html.Span(className='divider-label')],
                                 ),
                                 html.Div(
                                     id='right-bottom-panel',
@@ -1341,6 +1350,7 @@ _layout_body = html.Div(
         ),
 
         html.Div(id='resize-init-trigger', style={'display': 'none'}),
+        html.Div(id='plot-layout-sync-trigger', style={'display': 'none'}),
 
         # -- Right-click context menu (peaks) --
         # Fixed anchor moved to the cursor by a callback; the portal dropdown
@@ -1451,6 +1461,13 @@ clientside_callback(
     Input('resize-init-trigger', 'id'),
 )
 
+clientside_callback(
+    ClientsideFunction(namespace='resize', function_name='syncPlotTabLayout'),
+    Output('plot-layout-sync-trigger', 'children'),
+    [Input('active-plot-tab', 'data'),
+     Input('plot-tabs', 'data')],
+)
+
 # File-tree selection highlight + hidden-file dimming via clientside callback
 clientside_callback(
     """
@@ -1502,7 +1519,8 @@ def store_to_analysis_tab(active_tab, tab_value):
 @app.callback(
     [Output('plot-tabs', 'data', allow_duplicate=True),
      Output('active-plot-tab', 'data', allow_duplicate=True),
-     Output('custom-plot-figures', 'data', allow_duplicate=True)],
+     Output('custom-plot-figures', 'data', allow_duplicate=True),
+     Output('toolbox-tab', 'data', allow_duplicate=True)],
     Input('exp-open-pub-btn', 'n_clicks'),
     [State('plot-tabs', 'data'),
      State('active-plot-tab', 'data'),
@@ -1512,12 +1530,12 @@ def store_to_analysis_tab(active_tab, tab_value):
 )
 def open_publication_preview(n_clicks, tabs, active_plot_tab, main_figure, figures):
     if not n_clicks or not active_plot_tab:
-        return dash.no_update, dash.no_update, dash.no_update
+        return dash.no_update, dash.no_update, dash.no_update, dash.no_update
     tabs = tabs or []
     figures = dict(figures or {})
     source_tab = next((t for t in tabs if t.get('id') == active_plot_tab), None)
     if not source_tab:
-        return dash.no_update, dash.no_update, dash.no_update
+        return dash.no_update, dash.no_update, dash.no_update, dash.no_update
 
     idx = 1 + sum(1 for t in tabs if t.get('type') == 'publication')
     pub_id = f'publication-{idx}-{n_clicks}'
@@ -1535,7 +1553,7 @@ def open_publication_preview(n_clicks, tabs, active_plot_tab, main_figure, figur
         entry['figure'] = (figures.get(active_plot_tab) or {}).get('figure', main_figure)
 
     figures[pub_id] = entry
-    return [*tabs, pub_tab], pub_id, figures
+    return [*tabs, pub_tab], pub_id, figures, 'plot-tools'
 
 
 @app.callback(

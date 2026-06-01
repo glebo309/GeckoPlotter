@@ -249,6 +249,12 @@ def create_paper_mock():
         ],
     )
 
+    slide_page_wrapper = html.Div(
+        id='pub-slide-page-wrapper',
+        style={'display': 'inline-block', 'flexShrink': '0'},
+        children=[slide_page],
+    )
+
     slide_container = html.Div(
         id='pub-slide-container',
         style={
@@ -256,7 +262,7 @@ def create_paper_mock():
             'display': 'none', 'justifyContent': 'center',
             'alignItems': 'center', 'padding': '20px',
         },
-        children=[slide_page],
+        children=[slide_page_wrapper],
     )
 
     paper_page_wrapper = html.Div(

@@ -105,9 +105,9 @@ body {
     background: #fdfdfd;
 }
 
-/* Dividers — visible seam + expanding grab handle */
+/* Dividers — thin visual seam with a real, forgiving hit box */
 .divider {
-    background: rgba(0, 0, 0, 0.40);
+    background: transparent;
     position: relative;
     user-select: none;
     z-index: 10;
@@ -115,27 +115,27 @@ body {
 }
 
 .divider-horizontal {
-    width: 1px;
+    width: 7px;
     cursor: col-resize;
     height: 100%;
 }
 
 .divider-vertical {
-    height: 1px;
+    height: 7px;
     cursor: row-resize;
     width: 100%;
 }
 
-/* Grab zone — wide invisible hit target, always present */
+/* Thin seam drawn in the center of the larger hit box. */
 .divider-horizontal::before {
     content: '';
     position: absolute;
     top: 0;
     bottom: 0;
-    left: -4px;
-    width: 9px;
+    left: 3px;
+    width: 1px;
     cursor: col-resize;
-    background: transparent;
+    background: rgba(0, 0, 0, 0.40);
     transition: background-color 0.15s ease;
 }
 
@@ -144,19 +144,19 @@ body {
     position: absolute;
     left: 0;
     right: 0;
-    top: -4px;
-    height: 9px;
+    top: 3px;
+    height: 1px;
     cursor: row-resize;
-    background: transparent;
+    background: rgba(0, 0, 0, 0.40);
     transition: background-color 0.15s ease;
 }
 
 .divider:hover::before {
-    background: rgba(0, 0, 0, 0.06);
+    background: rgba(0, 0, 0, 0.55);
 }
 
 .divider:active::before {
-    background: rgba(0, 0, 0, 0.10);
+    background: rgba(0, 0, 0, 0.70);
 }
 
 /* Handle pill — centered grip that expands on hover */
@@ -210,6 +210,198 @@ body {
     width: 56px;
     height: 6px;
     background: rgba(0, 0, 0, 0.50);
+}
+
+/* Divider labels — hidden-panel restore handles */
+.divider-label {
+    display: none;
+    position: absolute;
+    padding: 4px 12px;
+    background: #1d1d1f;
+    border: 1px solid #1d1d1f;
+    cursor: pointer;
+    font-size: 11px;
+    font-weight: 600;
+    color: #fff;
+    white-space: nowrap;
+    overflow: hidden;
+    z-index: 22;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.14s ease, transform 0.16s ease, background 0.15s,
+        border-color 0.15s, box-shadow 0.15s;
+    user-select: none;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    letter-spacing: 0.2px;
+    box-shadow: 0 6px 18px rgba(0, 0, 0, 0.18);
+}
+
+.divider.has-label:hover .divider-label,
+.divider.has-label:focus-within .divider-label,
+.divider-label:hover,
+.divider-label:focus {
+    opacity: 1;
+    pointer-events: auto;
+    color: #fff;
+    background: #1d1d1f;
+    border-color: #1d1d1f;
+    box-shadow: 0 8px 22px rgba(0, 0, 0, 0.24);
+}
+
+.divider-label.visible {
+    display: block;
+}
+
+/* Back-compat class from the resize handler; visible labels are collapsed labels. */
+.divider-label.collapsed-state {
+    background: #1d1d1f;
+    color: #fff;
+    border-color: #1d1d1f;
+    font-weight: 600;
+}
+
+.divider-label.collapsed-state:hover {
+    opacity: 1;
+    background: #1d1d1f;
+    border-color: #1d1d1f;
+    color: #fff;
+    box-shadow: 0 8px 22px rgba(0, 0, 0, 0.24);
+}
+
+/* ── Direction-aware positioning ── */
+
+/* Vertical splitters: hidden bottom panel label sits above the splitter. */
+.divider-vertical .divider-label.collapse-below {
+    left: 50%;
+    transform: translateX(-50%) translateY(8px);
+    bottom: 100%;
+    border-radius: 7px;
+    margin-bottom: 8px;
+}
+
+.divider.has-label:hover .divider-label.collapse-below,
+.divider.has-label:focus-within .divider-label.collapse-below {
+    transform: translateX(-50%) translateY(0);
+}
+
+/* Vertical splitters: hidden top panel label sits below the splitter. */
+.divider-vertical .divider-label.collapse-above {
+    left: 50%;
+    transform: translateX(-50%) translateY(-8px);
+    top: 100%;
+    border-radius: 7px;
+    margin-top: 8px;
+}
+
+.divider.has-label:hover .divider-label.collapse-above,
+.divider.has-label:focus-within .divider-label.collapse-above {
+    transform: translateX(-50%) translateY(0);
+}
+
+/* Main splitter: hidden right panel label sits left of the splitter. */
+.divider-horizontal .divider-label.collapse-left {
+    top: 50%;
+    transform: translateY(-50%) translateX(8px);
+    right: 100%;
+    left: auto;
+    border-radius: 7px;
+    margin-right: 8px;
+}
+
+.divider.has-label:hover .divider-label.collapse-left,
+.divider.has-label:focus-within .divider-label.collapse-left {
+    transform: translateY(-50%) translateX(0);
+}
+
+/* Main splitter: hidden left panel label sits right of the splitter. */
+.divider-horizontal .divider-label.collapse-right {
+    top: 50%;
+    transform: translateY(-50%) translateX(-8px);
+    left: 100%;
+    right: auto;
+    border-radius: 7px;
+    margin-left: 8px;
+}
+
+.divider.has-label:hover .divider-label.collapse-right,
+.divider.has-label:focus-within .divider-label.collapse-right {
+    transform: translateY(-50%) translateX(0);
+}
+
+/* Soft Dock: hidden panels expose a broad, quiet hover target. */
+.divider.has-label {
+    z-index: 1000;
+}
+
+.divider.has-label::after {
+    display: none;
+}
+
+.divider-hover-zone {
+    display: none;
+    position: absolute;
+    opacity: 0;
+    pointer-events: none;
+    border: 1px solid rgba(29, 29, 31, 0.08);
+    background: rgba(29, 29, 31, 0.045);
+    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.08);
+    backdrop-filter: blur(1px);
+    transition: opacity 0.18s ease, background 0.18s ease, box-shadow 0.18s ease;
+    z-index: 21;
+}
+
+.divider.has-label .divider-hover-zone {
+    display: block;
+    pointer-events: auto;
+}
+
+.divider.has-label:hover .divider-hover-zone,
+.divider.has-label:focus-within .divider-hover-zone {
+    opacity: 1;
+    background: rgba(29, 29, 31, 0.075);
+    box-shadow: 0 12px 36px rgba(0, 0, 0, 0.11);
+}
+
+.divider-vertical.has-label .divider-hover-zone {
+    left: 50%;
+    width: min(760px, 82vw);
+    height: 72px;
+    transform: translateX(-50%);
+}
+
+.divider-vertical.has-label.hidden-first .divider-hover-zone {
+    top: 100%;
+    border-radius: 0 0 22px 22px;
+    border-top: 0;
+    background: linear-gradient(to bottom, rgba(29, 29, 31, 0.085), rgba(29, 29, 31, 0.018));
+}
+
+.divider-vertical.has-label.hidden-second .divider-hover-zone {
+    bottom: 100%;
+    border-radius: 22px 22px 0 0;
+    border-bottom: 0;
+    background: linear-gradient(to top, rgba(29, 29, 31, 0.085), rgba(29, 29, 31, 0.018));
+}
+
+.divider-horizontal.has-label .divider-hover-zone {
+    top: 50%;
+    width: 72px;
+    height: min(620px, 72vh);
+    transform: translateY(-50%);
+}
+
+.divider-horizontal.has-label.hidden-first .divider-hover-zone {
+    left: 100%;
+    border-radius: 0 22px 22px 0;
+    border-left: 0;
+    background: linear-gradient(to right, rgba(29, 29, 31, 0.085), rgba(29, 29, 31, 0.018));
+}
+
+.divider-horizontal.has-label.hidden-second .divider-hover-zone {
+    right: 100%;
+    border-radius: 22px 0 0 22px;
+    border-right: 0;
+    background: linear-gradient(to left, rgba(29, 29, 31, 0.085), rgba(29, 29, 31, 0.018));
 }
 
 .collapse-button {

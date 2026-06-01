@@ -1,0 +1,447 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Hidden Panel Handle Options</title>
+<style>
+  :root {
+    --ink: #1d1d1f;
+    --muted: #777;
+    --line: #d9d9dc;
+    --paper: #fff;
+    --bg: #f1f1f3;
+    --blue: #58b6f2;
+    --orange: #f2a000;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    padding: 24px;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    background: var(--bg);
+    color: var(--ink);
+  }
+
+  header {
+    max-width: 1220px;
+    margin: 0 auto 18px;
+  }
+
+  h1 {
+    margin: 0 0 6px;
+    font-size: 20px;
+    letter-spacing: 0;
+  }
+
+  .hint {
+    margin: 0;
+    color: #666;
+    font-size: 13px;
+  }
+
+  .grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(280px, 1fr));
+    gap: 18px;
+    max-width: 1220px;
+    margin: 0 auto;
+  }
+
+  .card {
+    background: var(--paper);
+    border: 1px solid #d7d7d9;
+    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.06);
+    min-height: 560px;
+    display: flex;
+    flex-direction: column;
+  }
+
+  .card-head {
+    padding: 14px 16px 10px;
+    border-bottom: 1px solid #e5e5e7;
+  }
+
+  .card-title {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin: 0 0 4px;
+    font-size: 15px;
+    font-weight: 700;
+  }
+
+  .pill {
+    background: #111;
+    color: #fff;
+    padding: 2px 7px;
+    font-size: 10px;
+    font-weight: 700;
+    border-radius: 999px;
+  }
+
+  .card-copy {
+    margin: 0;
+    color: #666;
+    font-size: 12px;
+    line-height: 1.45;
+  }
+
+  .mock {
+    position: relative;
+    flex: 1;
+    margin: 14px;
+    border: 1px solid #303030;
+    background: #fff;
+    overflow: hidden;
+    min-height: 390px;
+  }
+
+  .plot {
+    position: absolute;
+    inset: 18px 18px 34px 48px;
+    border-left: 1px solid #555;
+    border-bottom: 1px solid #555;
+  }
+
+  .axis-y {
+    position: absolute;
+    left: -38px;
+    top: 50%;
+    transform: translateY(-50%) rotate(-90deg);
+    font-size: 13px;
+    color: #444;
+    white-space: nowrap;
+  }
+
+  .axis-x {
+    position: absolute;
+    bottom: -28px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 13px;
+    color: #444;
+    white-space: nowrap;
+  }
+
+  .legend {
+    position: absolute;
+    right: 12px;
+    top: 10px;
+    display: grid;
+    gap: 5px;
+    font-size: 12px;
+    color: #444;
+  }
+
+  .legend span::before {
+    content: "";
+    display: inline-block;
+    width: 24px;
+    height: 2px;
+    margin-right: 8px;
+    vertical-align: middle;
+    background: var(--orange);
+  }
+
+  .legend span + span::before { background: var(--blue); }
+
+  svg {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    overflow: visible;
+  }
+
+  .line-a {
+    fill: none;
+    stroke: var(--orange);
+    stroke-width: 2;
+  }
+
+  .line-b {
+    fill: none;
+    stroke: var(--blue);
+    stroke-width: 2;
+  }
+
+  .edge-zone {
+    position: absolute;
+    z-index: 20;
+    cursor: pointer;
+  }
+
+  .edge-zone.bottom {
+    left: 26%;
+    right: 26%;
+    bottom: 0;
+    height: 46px;
+  }
+
+  .edge-zone.left {
+    left: 0;
+    top: 27%;
+    bottom: 27%;
+    width: 42px;
+  }
+
+  .ghost {
+    position: absolute;
+    pointer-events: none;
+    opacity: 0;
+    transition: opacity 0.14s ease, transform 0.14s ease, filter 0.14s ease;
+  }
+
+  .label {
+    position: absolute;
+    pointer-events: none;
+    background: #1d1d1f;
+    color: #fff;
+    font-size: 11px;
+    font-weight: 700;
+    line-height: 1;
+    opacity: 0;
+    transform: translateY(6px);
+    transition: opacity 0.14s ease, transform 0.14s ease;
+    white-space: nowrap;
+    box-shadow: 0 2px 10px rgba(0, 0, 0, 0.16);
+  }
+
+  .edge-zone:hover .label {
+    opacity: 1;
+    transform: translateY(0);
+  }
+
+  .edge-zone.bottom .label {
+    left: 50%;
+    bottom: 7px;
+    transform: translate(-50%, 6px);
+    padding: 6px 10px;
+    border-radius: 4px 4px 0 0;
+  }
+
+  .edge-zone.bottom:hover .label {
+    transform: translate(-50%, 0);
+  }
+
+  .edge-zone.left .label {
+    top: 50%;
+    left: 7px;
+    transform: translate(-6px, -50%);
+    padding: 8px 7px;
+    writing-mode: vertical-rl;
+    text-orientation: mixed;
+    border-radius: 0 4px 4px 0;
+  }
+
+  .edge-zone.left:hover .label {
+    transform: translate(0, -50%);
+  }
+
+  /* Option A: large faint arrow only inside the approach zone. */
+  .option-a .bottom .ghost {
+    left: 50%;
+    bottom: 8px;
+    transform: translateX(-50%) translateY(8px);
+    width: 120px;
+    height: 30px;
+    border-radius: 999px;
+    background:
+      linear-gradient(45deg, transparent 47%, rgba(0,0,0,0.2) 48%, rgba(0,0,0,0.2) 54%, transparent 55%) 42px 8px / 18px 18px no-repeat,
+      linear-gradient(-45deg, transparent 47%, rgba(0,0,0,0.2) 48%, rgba(0,0,0,0.2) 54%, transparent 55%) 60px 8px / 18px 18px no-repeat;
+  }
+
+  .option-a .left .ghost {
+    top: 50%;
+    left: 4px;
+    transform: translateY(-50%) translateX(-8px);
+    width: 28px;
+    height: 116px;
+    border-radius: 999px;
+    background:
+      linear-gradient(-45deg, transparent 47%, rgba(0,0,0,0.2) 48%, rgba(0,0,0,0.2) 54%, transparent 55%) 8px 46px / 16px 16px no-repeat,
+      linear-gradient(45deg, transparent 47%, rgba(0,0,0,0.2) 48%, rgba(0,0,0,0.2) 54%, transparent 55%) 8px 58px / 16px 16px no-repeat;
+  }
+
+  .option-a .edge-zone:hover .ghost {
+    opacity: 0.55;
+    transform: translateX(-50%) translateY(0);
+  }
+
+  .option-a .left:hover .ghost {
+    transform: translateY(-50%) translateX(0);
+  }
+
+  /* Option B: broad translucent dock lights up a whole region. */
+  .option-b .bottom::before {
+    content: "";
+    position: absolute;
+    inset: 8px 0 0;
+    border-radius: 999px 999px 0 0;
+    background: radial-gradient(ellipse at center bottom, rgba(0,0,0,0.16), rgba(0,0,0,0.04) 55%, transparent 72%);
+    opacity: 0;
+    transition: opacity 0.16s ease;
+  }
+
+  .option-b .left::before {
+    content: "";
+    position: absolute;
+    inset: 0 10px 0 0;
+    border-radius: 0 999px 999px 0;
+    background: radial-gradient(ellipse at left center, rgba(0,0,0,0.16), rgba(0,0,0,0.04) 55%, transparent 72%);
+    opacity: 0;
+    transition: opacity 0.16s ease;
+  }
+
+  .option-b .edge-zone:hover::before { opacity: 1; }
+
+  .option-b .bottom .ghost {
+    left: 50%;
+    bottom: 14px;
+    transform: translateX(-50%);
+    font-size: 40px;
+    color: rgba(0, 0, 0, 0.20);
+  }
+
+  .option-b .left .ghost {
+    left: 8px;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 34px;
+    color: rgba(0, 0, 0, 0.20);
+  }
+
+  .option-b .edge-zone:hover .ghost { opacity: 1; }
+
+  /* Option C: near-invisible sensor, only black label when directly hovered. */
+  .option-c .edge-zone.bottom {
+    left: 34%;
+    right: 34%;
+    height: 34px;
+  }
+
+  .option-c .edge-zone.left {
+    width: 30px;
+    top: 34%;
+    bottom: 34%;
+  }
+
+  .option-c .bottom::before,
+  .option-c .left::before {
+    content: "";
+    position: absolute;
+    opacity: 0;
+    transition: opacity 0.14s ease;
+  }
+
+  .option-c .bottom::before {
+    left: 18%;
+    right: 18%;
+    bottom: 7px;
+    height: 2px;
+    background: rgba(0, 0, 0, 0.18);
+  }
+
+  .option-c .left::before {
+    top: 18%;
+    bottom: 18%;
+    left: 7px;
+    width: 2px;
+    background: rgba(0, 0, 0, 0.18);
+  }
+
+  .option-c .edge-zone:hover::before { opacity: 1; }
+
+  @media (max-width: 980px) {
+    .grid { grid-template-columns: 1fr; }
+    .card { min-height: 520px; }
+  }
+</style>
+</head>
+<body>
+  <header>
+    <h1>Hidden Panel Handle Options</h1>
+    <p class="hint">Hover near the left edge or lower middle of each plot. The normal state is intentionally quiet; the affordance appears only when your mouse approaches the hidden panel.</p>
+  </header>
+
+  <main class="grid">
+    <section class="card option-a">
+      <div class="card-head">
+        <h2 class="card-title"><span class="pill">A</span> Ghost Arrow</h2>
+        <p class="card-copy">No permanent arrow. A big faint arrow appears only when you approach the hidden edge, then the black label appears on hover.</p>
+      </div>
+      <div class="mock">
+        <div class="plot">
+          <div class="axis-y">Signal (mAU)</div>
+          <div class="axis-x">Retention Time (min)</div>
+          <div class="legend"><span>2 - 120</span><span>2 - 120</span></div>
+          <svg viewBox="0 0 500 300" preserveAspectRatio="none">
+            <path class="line-a" d="M0,285 C50,285 110,284 132,282 C146,278 151,210 157,285 C180,286 235,285 300,284 C330,282 345,245 352,283 C362,287 366,250 372,284 C390,288 412,285 500,285" />
+            <path class="line-b" d="M0,285 C80,285 135,284 150,282 C158,275 162,160 168,282 C210,286 305,285 342,284 C350,250 357,235 364,284 C370,286 374,200 380,275 C390,286 430,284 500,285" />
+          </svg>
+        </div>
+        <div class="edge-zone left">
+          <div class="ghost"></div>
+          <div class="label">Sidebar</div>
+        </div>
+        <div class="edge-zone bottom">
+          <div class="ghost"></div>
+          <div class="label">Analysis</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="card option-b">
+      <div class="card-head">
+        <h2 class="card-title"><span class="pill">B</span> Soft Dock</h2>
+        <p class="card-copy">The whole approach area gently lights up. This is the most discoverable, but still disappears completely when you are not near it.</p>
+      </div>
+      <div class="mock">
+        <div class="plot">
+          <div class="axis-y">Signal (mAU)</div>
+          <div class="axis-x">Retention Time (min)</div>
+          <div class="legend"><span>2 - 120</span><span>2 - 120</span></div>
+          <svg viewBox="0 0 500 300" preserveAspectRatio="none">
+            <path class="line-a" d="M0,285 C55,285 112,284 134,282 C145,278 151,212 158,285 C184,287 248,285 304,284 C330,281 344,246 352,283 C363,288 368,251 374,284 C396,288 428,285 500,285" />
+            <path class="line-b" d="M0,285 C82,285 136,284 151,282 C159,275 163,160 169,282 C216,286 306,285 342,284 C351,250 358,236 365,284 C372,287 376,200 382,275 C396,287 438,284 500,285" />
+          </svg>
+        </div>
+        <div class="edge-zone left">
+          <div class="ghost">‹</div>
+          <div class="label">Sidebar</div>
+        </div>
+        <div class="edge-zone bottom">
+          <div class="ghost">⌄</div>
+          <div class="label">Analysis</div>
+        </div>
+      </div>
+    </section>
+
+    <section class="card option-c">
+      <div class="card-head">
+        <h2 class="card-title"><span class="pill">C</span> Minimal Sensor</h2>
+        <p class="card-copy">Nearly no visual hint. Only a small faint line plus black label appears when the cursor hits the restore sensor.</p>
+      </div>
+      <div class="mock">
+        <div class="plot">
+          <div class="axis-y">Signal (mAU)</div>
+          <div class="axis-x">Retention Time (min)</div>
+          <div class="legend"><span>2 - 120</span><span>2 - 120</span></div>
+          <svg viewBox="0 0 500 300" preserveAspectRatio="none">
+            <path class="line-a" d="M0,285 C50,285 112,284 132,282 C146,278 152,210 158,285 C180,286 235,285 300,284 C330,282 345,245 352,283 C362,287 366,250 372,284 C390,288 412,285 500,285" />
+            <path class="line-b" d="M0,285 C82,285 135,284 150,282 C158,275 162,160 168,282 C210,286 305,285 342,284 C350,250 357,235 364,284 C370,286 374,200 380,275 C390,286 430,284 500,285" />
+          </svg>
+        </div>
+        <div class="edge-zone left">
+          <div class="label">Sidebar</div>
+        </div>
+        <div class="edge-zone bottom">
+          <div class="label">Analysis</div>
+        </div>
+      </div>
+    </section>
+  </main>
+</body>
+</html>

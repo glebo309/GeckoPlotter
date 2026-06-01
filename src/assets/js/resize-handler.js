@@ -1,4 +1,5 @@
-// GeckoPlotter V2 — VSCode-style panel resize with snap-to-edge collapse
+// GeckoPlotter V2 — VSCode-style panel resize with snap-to-edge collapse.
+// Restore labels appear only for hidden panels and reopen that exact panel.
 // Self-initializing with retry. Also exposes Dash clientside fallback.
 
 (function () {
@@ -38,8 +39,266 @@
         var activeResize = null;
         var startX = 0, startY = 0;
         var start = { left: 0, top: 0, containerWidth: 0, containerHeight: 0 };
+        var activePlotTab = null;
+        var tabLayouts = {};
+        var applyingLayout = false;
 
-        function startDrag(e, type) {
+        // Deterministic restore positions. Collapsed panels should reopen to the
+        // familiar working layout, not to the last near-edge drag position.
+        var defaults = {
+            leftCol: 30, rightCol: 70,
+            topLeft: 50, bottomLeft: 50,
+            topRight: 60, bottomRight: 40
+        };
+
+        // Collapse state: null | 'first' | 'second' (which panel of the pair is hidden)
+        var collapsed = {
+            main: null,           // 'first' = left col hidden, 'second' = right col hidden
+            leftVertical: null,   // 'first' = top-left hidden, 'second' = bottom-left hidden
+            rightVertical: null   // 'first' = top-right hidden, 'second' = bottom-right hidden
+        };
+
+        var publicationDefaultLayout = {
+            main: defaults.leftCol,
+            leftVertical: 0,
+            rightVertical: 100
+        };
+
+        // ── Label management ──
+
+        function getLabel(divider) {
+            return divider.querySelector('.divider-label');
+        }
+
+        function ensureHoverZone(divider) {
+            var zone = divider.querySelector('.divider-hover-zone');
+            if (!zone) {
+                zone = document.createElement('span');
+                zone.className = 'divider-hover-zone';
+                zone.setAttribute('aria-hidden', 'true');
+                divider.appendChild(zone);
+            }
+            return zone;
+        }
+
+        function updateLabel(divider, collapseKey) {
+            var label = getLabel(divider);
+            if (!label) return;
+            ensureHoverZone(divider);
+
+            var state = collapsed[collapseKey];
+            var labelAbove = divider.dataset.labelAbove || '';
+            var labelBelow = divider.dataset.labelBelow || '';
+            var labelLeft  = divider.dataset.labelLeft  || '';
+            var labelRight = divider.dataset.labelRight || '';
+            var isHorizontal = divider.classList.contains('divider-horizontal');
+
+            // Reset direction classes
+            label.classList.remove('collapse-above', 'collapse-below', 'collapse-left', 'collapse-right', 'collapsed-state');
+            divider.classList.remove('has-label', 'hidden-first', 'hidden-second');
+
+            if (!state) {
+                label.textContent = '';
+                label.classList.remove('visible');
+            } else if (state === 'first') {
+                // First panel hidden (top or left)
+                if (isHorizontal) {
+                    label.textContent = labelLeft;
+                    label.classList.add('collapse-right', 'collapsed-state');
+                } else {
+                    label.textContent = labelAbove;
+                    label.classList.add('collapse-above', 'collapsed-state');
+                }
+                label.classList.add('visible');
+                divider.classList.add('has-label', 'hidden-first');
+            } else if (state === 'second') {
+                // Second panel hidden (bottom or right)
+                if (isHorizontal) {
+                    label.textContent = labelRight;
+                    label.classList.add('collapse-left', 'collapsed-state');
+                } else {
+                    label.textContent = labelBelow;
+                    label.classList.add('collapse-below', 'collapsed-state');
+                }
+                label.classList.add('visible');
+                divider.classList.add('has-label', 'hidden-second');
+            }
+        }
+
+        function ratioPercent(first, second, axis, fallback) {
+            var firstRect = first.getBoundingClientRect();
+            var secondRect = second.getBoundingClientRect();
+            var firstSize = axis === 'height' ? firstRect.height : firstRect.width;
+            var secondSize = axis === 'height' ? secondRect.height : secondRect.width;
+            var total = firstSize + secondSize;
+            return total > 0 ? (firstSize / total) * 100 : fallback;
+        }
+
+        function currentLayout() {
+            return {
+                main: collapsed.main === 'first' ? 0
+                    : collapsed.main === 'second' ? 100
+                    : ratioPercent(leftColumn, rightColumn, 'width', defaults.leftCol),
+                leftVertical: collapsed.leftVertical === 'first' ? 0
+                    : collapsed.leftVertical === 'second' ? 100
+                    : ratioPercent(topLeft, bottomLeft, 'height', defaults.topLeft),
+                rightVertical: collapsed.rightVertical === 'first' ? 0
+                    : collapsed.rightVertical === 'second' ? 100
+                    : ratioPercent(topRight, bottomRight, 'height', defaults.topRight)
+            };
+        }
+
+        function rememberActiveLayout() {
+            if (!activePlotTab || applyingLayout) return;
+            tabLayouts[activePlotTab] = currentLayout();
+        }
+
+        function applyLayout(layout) {
+            if (!layout) return;
+            applyingLayout = true;
+            applyCollapse('main', typeof layout.main === 'number' ? layout.main : defaults.leftCol);
+            applyCollapse('left-vertical', typeof layout.leftVertical === 'number' ? layout.leftVertical : defaults.topLeft);
+            applyCollapse('right-vertical', typeof layout.rightVertical === 'number' ? layout.rightVertical : defaults.topRight);
+            applyingLayout = false;
+            rememberActiveLayout();
+        }
+
+        function isPublicationTab(activeTab, tabs) {
+            if (!activeTab) return false;
+            if (String(activeTab).indexOf('publication') === 0) return true;
+            if (!Array.isArray(tabs)) return false;
+            return tabs.some(function (tab) {
+                return tab && tab.id === activeTab && tab.type === 'publication';
+            });
+        }
+
+        // Apply collapse / expand for a given panel pair
+        function applyCollapse(type, percent) {
+            if (type === 'main') {
+                if (percent < 5) {
+                    leftColumn.style.display = 'none';
+                    rightColumn.style.display = 'flex';
+                    leftColumn.style.width = '0%';
+                    rightColumn.style.width = '100%';
+                    collapsed.main = 'first';
+                } else if (percent > 95) {
+                    rightColumn.style.display = 'none';
+                    leftColumn.style.display = 'flex';
+                    leftColumn.style.width = '100%';
+                    rightColumn.style.width = '0%';
+                    collapsed.main = 'second';
+                } else {
+                    leftColumn.style.display = 'flex';
+                    rightColumn.style.display = 'flex';
+                    leftColumn.style.width = percent + '%';
+                    rightColumn.style.width = (100 - percent) + '%';
+                    collapsed.main = null;
+                }
+                updateLabel(mainVDivider, 'main');
+                rememberActiveLayout();
+
+            } else if (type === 'left-vertical') {
+                if (percent < 5) {
+                    topLeft.style.display = 'none';
+                    bottomLeft.style.display = 'flex';
+                    topLeft.style.height = '0%';
+                    bottomLeft.style.height = '100%';
+                    collapsed.leftVertical = 'first';
+                } else if (percent > 95) {
+                    bottomLeft.style.display = 'none';
+                    topLeft.style.display = 'flex';
+                    topLeft.style.height = '100%';
+                    bottomLeft.style.height = '0%';
+                    collapsed.leftVertical = 'second';
+                } else {
+                    topLeft.style.display = 'flex';
+                    bottomLeft.style.display = 'flex';
+                    topLeft.style.height = percent + '%';
+                    bottomLeft.style.height = (100 - percent) + '%';
+                    collapsed.leftVertical = null;
+                }
+                updateLabel(leftVDivider, 'leftVertical');
+                rememberActiveLayout();
+
+            } else if (type === 'right-vertical') {
+                if (percent < 5) {
+                    topRight.style.display = 'none';
+                    bottomRight.style.display = 'flex';
+                    topRight.style.height = '0%';
+                    bottomRight.style.height = '100%';
+                    collapsed.rightVertical = 'first';
+                } else if (percent > 95) {
+                    bottomRight.style.display = 'none';
+                    topRight.style.display = 'flex';
+                    topRight.style.height = '100%';
+                    bottomRight.style.height = '0%';
+                    collapsed.rightVertical = 'second';
+                } else {
+                    topRight.style.display = 'flex';
+                    bottomRight.style.display = 'flex';
+                    topRight.style.height = percent + '%';
+                    bottomRight.style.height = (100 - percent) + '%';
+                    collapsed.rightVertical = null;
+                }
+                updateLabel(rightVDivider, 'rightVertical');
+                rememberActiveLayout();
+            }
+        }
+
+        // Click a hidden-panel label to restore that exact panel.
+        function handleLabelClick(type) {
+            var collapseKey = type === 'main' ? 'main'
+                : type === 'left-vertical' ? 'leftVertical' : 'rightVertical';
+
+            if (!collapsed[collapseKey]) return;
+
+            if (type === 'main') {
+                applyCollapse('main', defaults.leftCol);
+            } else if (type === 'left-vertical') {
+                applyCollapse('left-vertical', defaults.topLeft);
+            } else if (type === 'right-vertical') {
+                applyCollapse('right-vertical', defaults.topRight);
+            }
+        }
+
+        // Wire up label clicks (stop propagation so drag doesn't fire)
+        [[leftVDivider, 'left-vertical'],
+         [rightVDivider, 'right-vertical'],
+         [mainVDivider, 'main']
+        ].forEach(function (pair) {
+            var divider = pair[0], type = pair[1];
+            var label = getLabel(divider);
+            if (label) {
+                label.addEventListener('mousedown', function (e) { e.stopPropagation(); });
+                label.addEventListener('click', function (e) {
+                    e.stopPropagation();
+                    handleLabelClick(type);
+                });
+            }
+        });
+
+        // Initialize labels (hidden until a panel is collapsed)
+        updateLabel(leftVDivider, 'leftVertical');
+        updateLabel(rightVDivider, 'rightVertical');
+        updateLabel(mainVDivider, 'main');
+
+        // ── Drag logic ──
+
+        function isNearDividerCore(e, divider) {
+            if (!divider || !divider.classList.contains('has-label')) return true;
+
+            var rect = divider.getBoundingClientRect();
+            var tolerance = 12;
+            if (divider.classList.contains('divider-horizontal')) {
+                return e.clientX >= rect.left - tolerance && e.clientX <= rect.right + tolerance;
+            }
+            return e.clientY >= rect.top - tolerance && e.clientY <= rect.bottom + tolerance;
+        }
+
+        function startDrag(e, type, divider) {
+            if (e.target.classList.contains('divider-label')) return;
+            if (e.target.classList.contains('divider-hover-zone')) return;
+            if (!isNearDividerCore(e, divider)) return;
             e.preventDefault();
             e.stopPropagation();
             activeResize = type;
@@ -73,58 +332,21 @@
                 var cw = start.containerWidth || container.getBoundingClientRect().width || window.innerWidth;
                 var newLeft = start.left + deltaX;
                 var percent = (newLeft / cw) * 100;
-
-                // VSCode-style collapse: snap to hidden when dragged past threshold
-                if (percent < 5) {
-                    percent = 0;
-                    leftColumn.style.display = 'none';
-                } else if (percent > 95) {
-                    percent = 100;
-                    rightColumn.style.display = 'none';
-                } else {
-                    leftColumn.style.display  = 'flex';
-                    rightColumn.style.display = 'flex';
-                }
-                leftColumn.style.width  = percent + '%';
-                rightColumn.style.width = (100 - percent) + '%';
+                applyCollapse('main', percent);
 
             } else if (activeResize === 'left-vertical' && topLeft && bottomLeft) {
                 var deltaY = e.clientY - startY;
                 var ch = start.containerHeight || leftColumn.getBoundingClientRect().height || window.innerHeight;
                 var newTop = start.top + deltaY;
                 var percent = (newTop / ch) * 100;
-
-                if (percent < 5) {
-                    percent = 0;
-                    topLeft.style.display = 'none';
-                } else if (percent > 95) {
-                    percent = 100;
-                    bottomLeft.style.display = 'none';
-                } else {
-                    topLeft.style.display    = 'flex';
-                    bottomLeft.style.display = 'flex';
-                }
-                topLeft.style.height    = percent + '%';
-                bottomLeft.style.height = (100 - percent) + '%';
+                applyCollapse('left-vertical', percent);
 
             } else if (activeResize === 'right-vertical' && topRight && bottomRight) {
                 var deltaY = e.clientY - startY;
                 var ch = start.containerHeight || rightColumn.getBoundingClientRect().height || window.innerHeight;
                 var newTop = start.top + deltaY;
                 var percent = (newTop / ch) * 100;
-
-                if (percent < 5) {
-                    percent = 0;
-                    topRight.style.display = 'none';
-                } else if (percent > 95) {
-                    percent = 100;
-                    bottomRight.style.display = 'none';
-                } else {
-                    topRight.style.display    = 'flex';
-                    bottomRight.style.display = 'flex';
-                }
-                topRight.style.height    = percent + '%';
-                bottomRight.style.height = (100 - percent) + '%';
+                applyCollapse('right-vertical', percent);
             }
         });
 
@@ -135,11 +357,26 @@
             document.body.style.cursor = '';
         });
 
-        if (leftVDivider)  leftVDivider.addEventListener('mousedown',  function (e) { startDrag(e, 'left-vertical'); });
-        if (rightVDivider) rightVDivider.addEventListener('mousedown', function (e) { startDrag(e, 'right-vertical'); });
-        if (mainVDivider)  mainVDivider.addEventListener('mousedown',  function (e) { startDrag(e, 'main'); });
+        if (leftVDivider)  leftVDivider.addEventListener('mousedown',  function (e) { startDrag(e, 'left-vertical', leftVDivider); });
+        if (rightVDivider) rightVDivider.addEventListener('mousedown', function (e) { startDrag(e, 'right-vertical', rightVDivider); });
+        if (mainVDivider)  mainVDivider.addEventListener('mousedown',  function (e) { startDrag(e, 'main', mainVDivider); });
 
-        console.log('[GeckoPlotter] Resize handlers initialized (snap-to-edge enabled)');
+        window.__geckoSyncPlotTabLayout = function (activeTab, plotTabs) {
+            if (!activeTab) return;
+
+            if (activePlotTab && activePlotTab !== activeTab) {
+                rememberActiveLayout();
+            }
+
+            activePlotTab = activeTab;
+            if (tabLayouts[activeTab]) {
+                applyLayout(tabLayouts[activeTab]);
+            } else if (isPublicationTab(activeTab, plotTabs)) {
+                applyLayout(publicationDefaultLayout);
+            }
+        };
+
+        console.log('[GeckoPlotter] Resize handlers initialized (snap-to-edge hidden-panel labels)');
     }
 
     // Self-init with retry
@@ -155,6 +392,13 @@
         resize: {
             initializeResizeHandlers: function () {
                 initResizeSystem();
+                return window.dash_clientside.no_update;
+            },
+            syncPlotTabLayout: function (activeTab, plotTabs) {
+                initResizeSystem();
+                if (window.__geckoSyncPlotTabLayout) {
+                    window.__geckoSyncPlotTabLayout(activeTab, plotTabs);
+                }
                 return window.dash_clientside.no_update;
             }
         }
