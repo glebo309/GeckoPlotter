@@ -430,6 +430,42 @@ body {
     transform: scale(0.95);
 }
 
+/* Plot context editor — opened by right-clicking plot affordances. */
+.axis-context-panel {
+    min-width: 244px;
+    max-width: 280px;
+    padding: 12px;
+    background: #fff;
+    border: 1px solid rgba(0, 0, 0, 0.14);
+    border-radius: 8px;
+    box-shadow: 0 12px 34px rgba(0, 0, 0, 0.18);
+    color: #1d1d1f;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+
+.axis-context-panel__title {
+    margin-bottom: 10px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid rgba(0, 0, 0, 0.10);
+    font-size: 13px;
+    font-weight: 700;
+}
+
+.axis-context-panel__section {
+    margin-bottom: 8px;
+    color: #1d1d1f;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.axis-context-panel__range-row {
+    display: flex;
+    gap: 8px;
+    margin-top: 4px;
+}
+
 .collapse-button-vertical,
 .collapse-button-horizontal {
     position: absolute;

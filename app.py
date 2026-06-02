@@ -37,6 +37,7 @@ from callbacks.publication_callbacks import register_publication_callbacks
 from callbacks.integration_callbacks import register_integration_callbacks
 from callbacks.baseline_callbacks import register_baseline_callbacks
 from callbacks.context_menu_callbacks import register_context_menu_callbacks
+from callbacks.plot_context_menu_callbacks import register_plot_context_menu_callbacks
 from callbacks.deconvolution_callbacks import register_deconvolution_callbacks
 from callbacks.export_callbacks import register_export_callbacks
 from callbacks.calibration_callbacks import register_calibration_callbacks
@@ -141,6 +142,8 @@ _layout_body = html.Div(
         dcc.Store(id='baseline-mode', data='navigate'),  # 'draw' | 'edit' | 'navigate' | 'deconvolve'
         dcc.Store(id='context-menu-store', data=None),  # {peak_id, x, y, ts} from right-click
         dcc.Store(id='context-menu-close-store', data=0),  # bumped on outside click to close menu
+        dcc.Store(id='axis-context-menu-store', data=None),  # {axis, x, y, subplot, ts} from axis right-click
+        dcc.Store(id='axis-context-menu-close-store', data=0),  # bumped on outside click to close axis editor
         dcc.Store(id='deconv-markers', data=[]),  # [{x, y}, ...] peak-center markers
         dcc.Store(id='deconv-result', data=None),  # serialized DeconvResult (preview/accept)
         dcc.Store(id='deconv-marker-click-store', data=None),  # browser-side marker click {x, ts}
@@ -1390,6 +1393,36 @@ _layout_body = html.Div(
                 ], justify='flex-end', mt='sm'),
             ],
         ),
+
+        # -- Right-click plot customization panel (proof of concept: X-axis) --
+        html.Div(
+            id='axis-context-panel',
+            className='axis-context-panel',
+            style={'display': 'none'},
+            children=[
+                html.Div(id='axis-ctx-title', className='axis-context-panel__title',
+                         children='X-axis'),
+                html.Div('Axes', className='axis-context-panel__section'),
+                dmc.Switch(id='axis-ctx-auto-range', label='Auto range',
+                           checked=True, size='sm', mb=8),
+                html.Div(
+                    id='axis-ctx-range-row',
+                    className='axis-context-panel__range-row',
+                    children=[
+                        html.Div([
+                            html.Label('X min', className='form-label'),
+                            dmc.NumberInput(id='axis-ctx-x-min', size='xs',
+                                            disabled=True, style={'width': '100%'}),
+                        ], style={'flex': '1'}),
+                        html.Div([
+                            html.Label('X max', className='form-label'),
+                            dmc.NumberInput(id='axis-ctx-x-max', size='xs',
+                                            disabled=True, style={'width': '100%'}),
+                        ], style={'flex': '1'}),
+                    ],
+                ),
+            ],
+        ),
     ]
 )
 
@@ -1417,6 +1450,7 @@ register_publication_callbacks(app, data_manager)
 register_integration_callbacks(app, data_manager)
 register_baseline_callbacks(app, data_manager)
 register_context_menu_callbacks(app, data_manager)
+register_plot_context_menu_callbacks(app, data_manager)
 register_deconvolution_callbacks(app, data_manager)
 register_export_callbacks(app, data_manager)
 register_publication_preview_callbacks(app, data_manager)
