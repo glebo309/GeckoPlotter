@@ -1,6 +1,6 @@
 """LC-MS viewer callbacks.
 
-Wires the MS Viewer bottom-panel tab:
+Wires the MS Analysis bottom-panel tab:
   - Click on main-plot chromatogram → mass spectrum display
   - EIC extraction from m/z input → overlay on main plot
 """
@@ -449,55 +449,45 @@ def _build_spectrum_at_scan(lcms_svc, file_data, scan_idx):
     rel_intensity = display_intensity / max_int * 100 if max_int > 0 else display_intensity
 
     fig = go.Figure()
-    if mz.size > 1200:
-        fig.add_trace(go.Scattergl(
-            x=mz,
-            y=rel_intensity,
-            mode='lines',
-            line=dict(color='#2B6CB0', width=1),
-            customdata=intensity,
-            hovertemplate=(
-                'm/z: %{x:.4g}<br>'
-                'Intensity: %{customdata:.4g}<br>'
-                'Relative: %{y:.1f}%<extra></extra>'
-            ),
-            showlegend=False,
-        ))
-    else:
-        xs = []
-        ys = []
-        for x_val, y_val in zip(mz, rel_intensity):
-            xs.extend([x_val, x_val, None])
-            ys.extend([0, y_val, None])
+    TraceType = go.Scattergl if mz.size > 1200 else go.Scatter
 
-        fig.add_trace(go.Scatter(
-            x=xs,
-            y=ys,
-            mode='lines',
-            line=dict(color='#2B6CB0', width=1),
-            hoverinfo='skip',
-            showlegend=False,
-        ))
-        fig.add_trace(go.Scatter(
-            x=mz,
-            y=rel_intensity,
-            mode='markers',
-            marker=dict(color='#2B6CB0', size=3, opacity=0.45),
-            customdata=intensity,
-            hovertemplate=(
-                'm/z: %{x:.4g}<br>'
-                'Intensity: %{customdata:.4g}<br>'
-                'Relative: %{y:.1f}%<extra></extra>'
-            ),
-            showlegend=False,
-        ))
+    xs = []
+    ys = []
+    cd = []
+    for x_val, y_val, i_val in zip(mz, rel_intensity, intensity):
+        xs.extend([x_val, x_val, None])
+        ys.extend([0, y_val, None])
+        cd.extend([i_val, i_val, None])
+
+    fig.add_trace(TraceType(
+        x=xs,
+        y=ys,
+        mode='lines',
+        line=dict(color='#2B6CB0', width=1),
+        hoverinfo='skip',
+        showlegend=False,
+    ))
+    fig.add_trace(TraceType(
+        x=mz,
+        y=rel_intensity,
+        mode='markers',
+        marker=dict(color='#2B6CB0', size=3, opacity=0.45),
+        customdata=intensity,
+        hovertemplate=(
+            'm/z: %{x:.4g}<br>'
+            'Intensity: %{customdata:.4g}<br>'
+            'Relative: %{y:.1f}%<extra></extra>'
+        ),
+        showlegend=False,
+    ))
     fig.update_layout(
         template='plotly_white',
         margin=dict(l=48, r=16, t=20, b=38),
         xaxis_title='m/z',
         yaxis_title='Relative Intensity (%)',
         hovermode='closest',
-        yaxis=dict(range=[0, 105]),
+        yaxis=dict(range=[0, 105], showgrid=False, showline=True, mirror=True, linecolor='#ccc', linewidth=1),
+        xaxis=dict(showgrid=False, showline=True, mirror=True, linecolor='#ccc', linewidth=1),
         uirevision='ms-spectrum',
     )
 
@@ -586,6 +576,8 @@ def _build_eic_figure(eic_list):
         xaxis_title='Retention Time (min)',
         yaxis_title='EIC Intensity',
         hovermode='closest',
+        xaxis=dict(showgrid=False, showline=True, mirror=True, linecolor='#ccc', linewidth=1),
+        yaxis=dict(showgrid=False, showline=True, mirror=True, linecolor='#ccc', linewidth=1),
         legend=dict(
             orientation='h',
             yanchor='bottom',

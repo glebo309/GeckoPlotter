@@ -745,6 +745,14 @@ def register_baseline_callbacks(app: dash.Dash, data_manager) -> None:
     # ── Keyboard Delete/Backspace → remove selected peak ─────────────
 
     @app.callback(
+        Output('selected-peak-keyboard-state', 'children'),
+        Input('selected-peak-idx', 'data'),
+    )
+    def mirror_selected_peak_for_keyboard(selected_peak_id):
+        """Expose selected peak presence to browser-side keyboard shortcuts."""
+        return selected_peak_id or ''
+
+    @app.callback(
         [Output('main-plot', 'figure', allow_duplicate=True),
          Output('selected-peak-idx', 'data', allow_duplicate=True),
          Output('peak-change-trigger', 'data', allow_duplicate=True),

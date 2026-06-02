@@ -1319,7 +1319,7 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
             fig_obj.update_layout(uirevision=active_tab_id)
             if effective_zoom:
                 _apply_zoom_state(fig_obj, effective_zoom)
-            else:
+            elif s.get('auto_range', True):
                 fig_obj.update_layout(
                     xaxis=dict(autorange=True),
                     yaxis=dict(autorange=True),

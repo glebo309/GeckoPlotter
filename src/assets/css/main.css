@@ -443,12 +443,36 @@ body {
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
-.axis-context-panel__title {
+.axis-context-panel__header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
     margin-bottom: 10px;
     padding-bottom: 8px;
     border-bottom: 1px solid rgba(0, 0, 0, 0.10);
+}
+
+.axis-context-panel__title {
     font-size: 13px;
     font-weight: 700;
+}
+
+.axis-context-panel__close {
+    width: 22px;
+    height: 22px;
+    padding: 0;
+    border: 0;
+    border-radius: 4px;
+    background: transparent;
+    color: rgba(0, 0, 0, 0.52);
+    cursor: pointer;
+    font-size: 18px;
+    line-height: 20px;
+}
+
+.axis-context-panel__close:hover {
+    background: rgba(0, 0, 0, 0.07);
+    color: #1d1d1f;
 }
 
 .axis-context-panel__section {
@@ -1010,6 +1034,11 @@ button[id*="collapse-btn"]:active {
 
 ::-webkit-scrollbar-track {
     background: transparent;
+}
+
+/* Hide Plotly legend interaction hints */
+.notifier-note {
+    display: none !important;
 }
 
 /* DMC overrides — black accent everywhere */

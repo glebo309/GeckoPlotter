@@ -48,19 +48,22 @@ def register_plot_settings_callbacks(app, data_manager):
         Output('active-plot-context', 'data'),
         [Input('active-file', 'data'),
          Input('view-mode', 'data'),
-         Input('active-tab', 'data')],
+         Input('active-tab', 'data'),
+         Input('active-plot-tab', 'data')],
     )
-    def resolve_plot_context(active_file, view_mode, active_tab):
+    def resolve_plot_context(active_file, view_mode, active_tab, plot_tab):
         """Compute the context key for the currently visible plot.
 
         Shared tabs get their own context so settings persist across file switches.
+        Plot tab is included so each plot tab keeps independent settings.
         """
+        suffix = f':{plot_tab}' if plot_tab else ''
         if active_tab in ('peak-analysis', 'across-samples'):
-            return f'shared:{active_tab}'
+            return f'shared:{active_tab}{suffix}'
         if (view_mode or 'raw') == 'raw':
-            return 'shared:raw'
+            return f'shared:raw{suffix}'
         if active_file:
-            return f'file:{active_file}'
+            return f'file:{active_file}{suffix}'
         return None
 
     # ------------------------------------------------------------------
@@ -350,6 +353,8 @@ def register_plot_settings_callbacks(app, data_manager):
             # Subplot labels
             'shared_axis_labels': bool(pt_shared_axis_labels),
             'subplot_spacing': pt_subplot_spacing if pt_subplot_spacing is not None else 0.08,
+            # Preserve per-trace overrides (managed by trace context menu)
+            'trace_overrides': current_settings.get('trace_overrides', {}),
         }
 
         # Break hydration loop: if nothing changed, don't propagate

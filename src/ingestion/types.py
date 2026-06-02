@@ -19,6 +19,7 @@ class PlotHint(str, Enum):
     BAR = "bar"
     HEATMAP = "heatmap"
     MULTI_Y = "multi_y"
+    LOLLIPOP = "lollipop"
 
 
 class SourceCategory(str, Enum):

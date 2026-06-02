@@ -37,6 +37,7 @@ from callbacks.publication_callbacks import register_publication_callbacks
 from callbacks.integration_callbacks import register_integration_callbacks
 from callbacks.baseline_callbacks import register_baseline_callbacks
 from callbacks.context_menu_callbacks import register_context_menu_callbacks
+from callbacks.ms_context_menu_callbacks import register_ms_context_menu_callbacks
 from callbacks.plot_context_menu_callbacks import register_plot_context_menu_callbacks
 from callbacks.deconvolution_callbacks import register_deconvolution_callbacks
 from callbacks.export_callbacks import register_export_callbacks
@@ -144,10 +145,21 @@ _layout_body = html.Div(
         dcc.Store(id='context-menu-close-store', data=0),  # bumped on outside click to close menu
         dcc.Store(id='axis-context-menu-store', data=None),  # {axis, x, y, subplot, ts} from axis right-click
         dcc.Store(id='axis-context-menu-close-store', data=0),  # bumped on outside click to close axis editor
+        dcc.Store(id='legend-context-menu-store', data=None),  # {x, y, ts} from legend right-click
+        dcc.Store(id='legend-context-menu-close-store', data=0),  # bumped on outside click to close legend editor
+        dcc.Store(id='trace-context-menu-store', data=None),  # {curve_number, trace_name, x, y, ts} from trace right-click
+        dcc.Store(id='trace-context-menu-close-store', data=0),  # bumped on outside click to close trace editor
+        dcc.Store(id='title-context-menu-store', data=None),  # {target, x, y, ts} from title right-click
+        dcc.Store(id='title-context-menu-close-store', data=0),  # bumped on outside click to close title editor
+        dcc.Store(id='label-context-menu-store', data=None),  # {axis, x, y, ts} from axis label right-click
+        dcc.Store(id='label-context-menu-close-store', data=0),  # bumped on outside click to close label editor
+        dcc.Store(id='ms-plot-context-menu-store', data=None),  # {source, x, y, ts} from MS graph right-click
+        dcc.Store(id='ms-plot-context-menu-close-store', data=0),
         dcc.Store(id='deconv-markers', data=[]),  # [{x, y}, ...] peak-center markers
         dcc.Store(id='deconv-result', data=None),  # serialized DeconvResult (preview/accept)
         dcc.Store(id='deconv-marker-click-store', data=None),  # browser-side marker click {x, ts}
         dcc.Store(id='selected-peak-idx', data=None),  # Index of peak being edited
+        html.Div(id='selected-peak-keyboard-state', children='', style={'display': 'none'}),
         dcc.Store(id='clear-shapes-trigger', data=0),  # Counter to trigger shape clearing
         dcc.Store(id='peak-change-trigger', data=0),  # Counter to refresh tables/overlays after peak edits
         dcc.Store(id='peak-name-persist-trigger', data=None),
@@ -930,7 +942,7 @@ _layout_body = html.Div(
                                                         dmc.TabsTab("Across Samples", value="across-samples"),
                                                         dmc.TabsTab("Metadata", value="metadata"),
                                                         dmc.TabsTab("Calibration", value="calibration"),
-                                                        dmc.TabsTab("MS Viewer", value="ms-viewer"),
+                                                        dmc.TabsTab("MS Analysis", value="ms-viewer"),
                                                     ]),
                                                     # Data Overview Tab
                                                     dmc.TabsPanel(value="data-overview", style={'flex': '1', 'overflow': 'auto'}, children=[
@@ -1203,7 +1215,7 @@ _layout_body = html.Div(
                                                         ])
                                                     ]),
                                                     ]),
-                                                    # MS Viewer Tab
+                                                    # MS Analysis Tab
                                                     dmc.TabsPanel(value="ms-viewer", style={'flex': '1', 'overflow': 'auto'}, children=[
                                                     html.Div(id="ms-viewer-content", className="tab-content", style={
                                                         'display': 'block',
@@ -1213,9 +1225,51 @@ _layout_body = html.Div(
                                                     }, children=[
                                                         html.Div([
                                                             html.Div([
-                                                                html.Div('Target Ion', style={
-                                                                    'fontWeight': 'bold', 'fontSize': '13px',
-                                                                    'marginBottom': '8px'}),
+                                                                html.Div('Apex / Scan Spectrum', style={
+                                                                    'fontWeight': 'bold', 'fontSize': '12px',
+                                                                    'margin': '0 0 4px 2px'}),
+                                                                dcc.Graph(id='ms-spectrum-graph',
+                                                                          figure=go.Figure(layout=go.Layout(
+                                                                              template='plotly_white',
+                                                                              margin=dict(l=50, r=20, t=10, b=38),
+                                                                              xaxis=dict(visible=False),
+                                                                              yaxis=dict(visible=False),
+                                                                              annotations=[dict(
+                                                                                  text='Click TIC/EIC or extract a target ion',
+                                                                                  xref='paper', yref='paper',
+                                                                                  x=0.5, y=0.5, showarrow=False,
+                                                                                  font=dict(size=13, color='#999'),
+                                                                              )])),
+                                                                          responsive=True,
+                                                                          style={'width': '100%', 'height': '280px'},
+                                                                          config={
+                                                                              'responsive': True,
+                                                                              'displayModeBar': False,
+                                                                              'displaylogo': False,
+                                                                              'doubleClick': 'reset+autosize',
+                                                                              'scrollZoom': True,
+                                                                          }),
+                                                                html.Div([
+                                                                    html.Div(id='ms-scan-label',
+                                                                             children='No scan selected',
+                                                                             style={'fontSize': '11px', 'color': '#555',
+                                                                                    'marginBottom': '2px'}),
+                                                                    dcc.Slider(id='ms-scan-slider',
+                                                                               min=0, max=1, step=1, value=0,
+                                                                               updatemode='drag',
+                                                                               marks=None,
+                                                                               tooltip={'placement': 'bottom', 'always_visible': False}),
+                                                                ], style={'padding': '0 4px 2px 4px'}),
+                                                                html.Div(id='ms-spectrum-info',
+                                                                         style={'fontSize': '12px', 'padding': '6px 8px',
+                                                                                'backgroundColor': 'rgba(0,0,0,0.02)',
+                                                                                'borderRadius': '6px', 'marginTop': '4px',
+                                                                                'minHeight': '20px'}),
+                                                            ]),
+                                                            html.Div([
+                                                                html.Div('Extracted Ion Chromatogram', style={
+                                                                    'fontWeight': 'bold', 'fontSize': '12px',
+                                                                    'margin': '0 0 4px 2px'}),
                                                                 html.Div([
                                                                     html.Div([
                                                                         html.Label('Target m/z', className='form-label'),
@@ -1247,66 +1301,30 @@ _layout_body = html.Div(
                                                                 html.Div(id='eic-active-list', style={
                                                                     'marginTop': '8px', 'display': 'flex',
                                                                     'flexWrap': 'wrap', 'gap': '4px'}),
-                                                            ], style={'order': 2, 'padding': '10px', 'backgroundColor': 'rgba(0,0,0,0.02)',
-                                                                      'borderRadius': '8px', 'marginTop': '10px'}),
-                                                            html.Div([
-                                                                html.Div([
-                                                                    html.Div('Extracted Ion Chromatogram', style={
-                                                                        'fontWeight': 'bold', 'fontSize': '12px',
-                                                                        'margin': '0 0 4px 2px'}),
-                                                                    dcc.Graph(id='eic-graph',
-                                                                              figure=go.Figure(layout=go.Layout(
-                                                                                  template='plotly_white',
-                                                                                  margin=dict(l=50, r=20, t=28, b=36),
-                                                                                  xaxis=dict(visible=False),
-                                                                                  yaxis=dict(visible=False),
-                                                                                  annotations=[dict(
-                                                                                      text='Extract an EIC to view it here',
-                                                                                      xref='paper', yref='paper',
-                                                                                      x=0.5, y=0.5, showarrow=False,
-                                                                                      font=dict(size=13, color='#999'),
-                                                                                  )])),
-                                                                              responsive=True,
-                                                                              style={'width': '100%', 'height': '300px'}),
-                                                                ], style={'flex': '1 1 420px', 'minWidth': '320px'}),
-                                                                html.Div([
-                                                                    html.Div('Apex / Scan Spectrum', style={
-                                                                        'fontWeight': 'bold', 'fontSize': '12px',
-                                                                        'margin': '0 0 4px 2px'}),
-                                                                    dcc.Graph(id='ms-spectrum-graph',
-                                                                              figure=go.Figure(layout=go.Layout(
-                                                                                  template='plotly_white',
-                                                                                  margin=dict(l=50, r=20, t=30, b=40),
-                                                                                  xaxis=dict(visible=False),
-                                                                                  yaxis=dict(visible=False),
-                                                                                  annotations=[dict(
-                                                                                      text='Click TIC/EIC or extract a target ion',
-                                                                                      xref='paper', yref='paper',
-                                                                                      x=0.5, y=0.5, showarrow=False,
-                                                                                      font=dict(size=13, color='#999'),
-                                                                                  )])),
-                                                                              responsive=True,
-                                                                              style={'width': '100%', 'height': '245px'}),
-                                                                    html.Div([
-                                                                        html.Div(id='ms-scan-label',
-                                                                                 children='No scan selected',
-                                                                                 style={'fontSize': '11px', 'color': '#555',
-                                                                                        'marginBottom': '2px'}),
-                                                                        dcc.Slider(id='ms-scan-slider',
-                                                                                   min=0, max=1, step=1, value=0,
-                                                                                   updatemode='drag',
-                                                                                   marks=None,
-                                                                                   tooltip={'placement': 'bottom', 'always_visible': False}),
-                                                                    ], style={'padding': '0 4px 2px 4px'}),
-                                                                    html.Div(id='ms-spectrum-info',
-                                                                             style={'fontSize': '12px', 'padding': '6px 8px',
-                                                                                    'backgroundColor': 'rgba(0,0,0,0.02)',
-                                                                                    'borderRadius': '6px', 'marginTop': '4px',
-                                                                                    'minHeight': '20px'}),
-                                                                ], style={'flex': '1 1 420px', 'minWidth': '320px'}),
-                                                            ], style={'order': 1, 'display': 'flex', 'gap': '12px',
-                                                                      'alignItems': 'stretch', 'flexWrap': 'wrap'}),
-                                                        ], style={'display': 'flex', 'flexDirection': 'column', 'gap': '0'})
+                                                                dcc.Graph(id='eic-graph',
+                                                                          figure=go.Figure(layout=go.Layout(
+                                                                              template='plotly_white',
+                                                                              margin=dict(l=50, r=20, t=10, b=36),
+                                                                              xaxis=dict(visible=False),
+                                                                              yaxis=dict(visible=False),
+                                                                              annotations=[dict(
+                                                                                  text='Extract an EIC to view it here',
+                                                                                  xref='paper', yref='paper',
+                                                                                  x=0.5, y=0.5, showarrow=False,
+                                                                                  font=dict(size=13, color='#999'),
+                                                                              )])),
+                                                                          responsive=True,
+                                                                          style={'width': '100%', 'height': '260px'},
+                                                                          config={
+                                                                              'responsive': True,
+                                                                              'displayModeBar': False,
+                                                                              'displaylogo': False,
+                                                                              'doubleClick': 'reset+autosize',
+                                                                              'scrollZoom': True,
+                                                                          }),
+                                                            ], style={'padding': '10px', 'backgroundColor': 'rgba(0,0,0,0.02)',
+                                                                      'borderRadius': '8px'}),
+                                                        ], style={'display': 'flex', 'flexDirection': 'column', 'gap': '12px'})
                                                     ]),
                                                     ]),
                                                     ],
@@ -1394,14 +1412,43 @@ _layout_body = html.Div(
             ],
         ),
 
-        # -- Right-click plot customization panel (proof of concept: X-axis) --
+        # -- MS plot right-click context menu (Open as new plot) --
+        html.Div(
+            id='ms-plot-context-menu-anchor',
+            style={'position': 'fixed', 'left': '0px', 'top': '0px',
+                   'width': '1px', 'height': '1px', 'zIndex': 4000,
+                   'pointerEvents': 'none'},
+            children=dmc.Menu(
+                id='ms-plot-context-menu',
+                opened=False,
+                position='bottom-start',
+                offset=2,
+                withinPortal=True,
+                shadow='md',
+                children=[
+                    dmc.MenuTarget(html.Div(style={'width': '1px', 'height': '1px'})),
+                    dmc.MenuDropdown([
+                        dmc.MenuItem('Open as new plot', id='ms-ctx-open-new-plot'),
+                    ]),
+                ],
+            ),
+        ),
+        # -- Right-click plot customization panel (axis editor) --
         html.Div(
             id='axis-context-panel',
             className='axis-context-panel',
             style={'display': 'none'},
             children=[
-                html.Div(id='axis-ctx-title', className='axis-context-panel__title',
-                         children='X-axis'),
+                html.Div(
+                    className='axis-context-panel__header',
+                    children=[
+                        html.Div(id='axis-ctx-title', className='axis-context-panel__title',
+                                 children='X-axis'),
+                        html.Button('×', id='axis-ctx-close',
+                                    className='axis-context-panel__close',
+                                    title='Close'),
+                    ],
+                ),
                 html.Div('Axes', className='axis-context-panel__section'),
                 dmc.Switch(id='axis-ctx-auto-range', label='Auto range',
                            checked=True, size='sm', mb=8),
@@ -1410,17 +1457,330 @@ _layout_body = html.Div(
                     className='axis-context-panel__range-row',
                     children=[
                         html.Div([
-                            html.Label('X min', className='form-label'),
+                            html.Label('X min', id='axis-ctx-min-label',
+                                       className='form-label'),
                             dmc.NumberInput(id='axis-ctx-x-min', size='xs',
                                             disabled=True, style={'width': '100%'}),
                         ], style={'flex': '1'}),
                         html.Div([
-                            html.Label('X max', className='form-label'),
+                            html.Label('X max', id='axis-ctx-max-label',
+                                       className='form-label'),
                             dmc.NumberInput(id='axis-ctx-x-max', size='xs',
                                             disabled=True, style={'width': '100%'}),
                         ], style={'flex': '1'}),
                     ],
                 ),
+                html.Div(id='axis-ctx-label', style={'display': 'none'}),
+                html.Div(id='axis-ctx-label-size', style={'display': 'none'}),
+                html.Div([
+                    html.Div([
+                        html.Label('Scale', className='form-label'),
+                        dmc.Select(
+                            id='axis-ctx-scale',
+                            value='linear',
+                            size='xs',
+                            data=[
+                                {'label': 'Linear', 'value': 'linear'},
+                                {'label': 'Log', 'value': 'log'},
+                            ],
+                            clearable=False,
+                            allowDeselect=False,
+                            comboboxProps={'withinPortal': True, 'zIndex': 5000},
+                        ),
+                    ], style={'flex': '1'}),
+                    html.Div([
+                        html.Label('Tick length', className='form-label'),
+                        dmc.NumberInput(id='axis-ctx-tick-length', value=5,
+                                        min=1, max=15, step=1, size='xs',
+                                        style={'width': '100%'}),
+                    ], style={'flex': '1'}),
+                ], className='axis-context-panel__range-row'),
+                html.Div([
+                    html.Label('Tick direction', className='form-label'),
+                    dmc.Select(
+                        id='axis-ctx-tick-dir',
+                        value='outside',
+                        size='xs',
+                        data=[
+                            {'label': 'Outside', 'value': 'outside'},
+                            {'label': 'Inside', 'value': 'inside'},
+                            {'label': 'None', 'value': 'none'},
+                        ],
+                        clearable=False,
+                        allowDeselect=False,
+                        comboboxProps={'withinPortal': True, 'zIndex': 5000},
+                    ),
+                ], style={'marginTop': '8px'}),
+                dmc.Switch(id='axis-ctx-grid', label='Grid lines',
+                           checked=False, size='sm', mt=10, mb=6),
+                dmc.Switch(id='axis-ctx-minor-ticks', label='Minor ticks',
+                           checked=False, size='sm'),
+            ],
+        ),
+
+        html.Div(
+            id='legend-context-panel',
+            className='axis-context-panel',
+            style={'display': 'none'},
+            children=[
+                html.Div(
+                    className='axis-context-panel__header',
+                    children=[
+                        html.Div('Legend', className='axis-context-panel__title'),
+                        html.Button('×', id='legend-ctx-close',
+                                    className='axis-context-panel__close',
+                                    title='Close'),
+                    ],
+                ),
+                html.Div('Legend', className='axis-context-panel__section'),
+                dmc.Switch(id='legend-ctx-show', label='Show legend',
+                           checked=True, size='sm', mb=8),
+                html.Div([
+                    html.Label('Position', className='form-label'),
+                    dmc.Select(
+                        id='legend-ctx-pos',
+                        value='top-right',
+                        size='xs',
+                        data=[
+                            {'label': 'Top Right', 'value': 'top-right'},
+                            {'label': 'Top Left', 'value': 'top-left'},
+                            {'label': 'Bottom Right', 'value': 'bottom-right'},
+                            {'label': 'Bottom Left', 'value': 'bottom-left'},
+                        ],
+                        clearable=False,
+                        allowDeselect=False,
+                        comboboxProps={'withinPortal': True, 'zIndex': 5000},
+                    ),
+                ]),
+            ],
+        ),
+
+        # -- Right-click trace editor --
+        html.Div(
+            id='trace-context-panel',
+            className='axis-context-panel',
+            style={'display': 'none'},
+            children=[
+                html.Div(
+                    className='axis-context-panel__header',
+                    children=[
+                        html.Div(id='trace-ctx-title',
+                                 className='axis-context-panel__title',
+                                 children='Trace'),
+                        html.Button('×', id='trace-ctx-close',
+                                    className='axis-context-panel__close',
+                                    title='Close'),
+                    ],
+                ),
+                html.Div('Style', className='axis-context-panel__section'),
+                html.Div([
+                    html.Div([
+                        html.Label('Color', className='form-label'),
+                        dmc.ColorInput(
+                            id='trace-ctx-color',
+                            size='xs',
+                            format='hex',
+                            swatches=[
+                                '#E69F00', '#56B4E9', '#009E73', '#F0E442',
+                                '#0072B2', '#D55E00', '#CC79A7', '#1d1d1f',
+                            ],
+                        ),
+                    ], style={'flex': '2'}),
+                    html.Div([
+                        html.Label('Opacity', className='form-label'),
+                        dmc.NumberInput(id='trace-ctx-opacity', value=1.0,
+                                        min=0.1, max=1.0, step=0.1, size='xs',
+                                        decimalScale=1,
+                                        style={'width': '100%'}),
+                    ], style={'flex': '1'}),
+                ], className='axis-context-panel__range-row'),
+                html.Div([
+                    html.Label('Mode', className='form-label'),
+                    dmc.Select(
+                        id='trace-ctx-mode',
+                        value='lines',
+                        size='xs',
+                        data=[
+                            {'label': 'Line', 'value': 'lines'},
+                            {'label': 'Markers', 'value': 'markers'},
+                            {'label': 'Line + Markers', 'value': 'lines+markers'},
+                        ],
+                        clearable=False,
+                        allowDeselect=False,
+                        comboboxProps={'withinPortal': True, 'zIndex': 5000},
+                    ),
+                ], style={'marginTop': '8px'}),
+                html.Div(
+                    id='trace-ctx-line-section',
+                    children=[
+                        html.Div([
+                            html.Div([
+                                html.Label('Line width', className='form-label'),
+                                dmc.NumberInput(id='trace-ctx-line-width', value=1.5,
+                                                min=0.5, max=8, step=0.5, size='xs',
+                                                style={'width': '100%'}),
+                            ], style={'flex': '1'}),
+                            html.Div([
+                                html.Label('Line style', className='form-label'),
+                                dmc.Select(
+                                    id='trace-ctx-line-style',
+                                    value='solid',
+                                    size='xs',
+                                    data=[
+                                        {'label': 'Solid', 'value': 'solid'},
+                                        {'label': 'Dash', 'value': 'dash'},
+                                        {'label': 'Dot', 'value': 'dot'},
+                                        {'label': 'Dash-dot', 'value': 'dashdot'},
+                                    ],
+                                    clearable=False,
+                                    allowDeselect=False,
+                                    comboboxProps={'withinPortal': True, 'zIndex': 5000},
+                                ),
+                            ], style={'flex': '1'}),
+                        ], className='axis-context-panel__range-row'),
+                    ],
+                    style={'marginTop': '8px'},
+                ),
+                html.Div(
+                    id='trace-ctx-marker-section',
+                    children=[
+                        html.Div([
+                            html.Div([
+                                html.Label('Marker size', className='form-label'),
+                                dmc.NumberInput(id='trace-ctx-marker-size', value=6,
+                                                min=1, max=20, step=1, size='xs',
+                                                style={'width': '100%'}),
+                            ], style={'flex': '1'}),
+                            html.Div([
+                                html.Label('Marker', className='form-label'),
+                                dmc.Select(
+                                    id='trace-ctx-marker-symbol',
+                                    value='circle',
+                                    size='xs',
+                                    data=[
+                                        {'label': 'Circle', 'value': 'circle'},
+                                        {'label': 'Square', 'value': 'square'},
+                                        {'label': 'Diamond', 'value': 'diamond'},
+                                        {'label': 'Cross', 'value': 'cross'},
+                                        {'label': 'X', 'value': 'x'},
+                                    ],
+                                    clearable=False,
+                                    allowDeselect=False,
+                                    comboboxProps={'withinPortal': True, 'zIndex': 5000},
+                                ),
+                            ], style={'flex': '1'}),
+                        ], className='axis-context-panel__range-row'),
+                    ],
+                    style={'marginTop': '8px', 'display': 'none'},
+                ),
+                dmc.Button('Reset to default', id='trace-ctx-reset',
+                           variant='subtle', size='xs', color='gray',
+                           mt=10, fullWidth=True),
+            ],
+        ),
+
+        # -- Right-click title / axis label editor --
+        html.Div(
+            id='title-context-panel',
+            className='axis-context-panel',
+            style={'display': 'none'},
+            children=[
+                html.Div(
+                    className='axis-context-panel__header',
+                    children=[
+                        html.Div(id='title-ctx-header',
+                                 className='axis-context-panel__title',
+                                 children='Title'),
+                        html.Button('×', id='title-ctx-close',
+                                    className='axis-context-panel__close',
+                                    title='Close'),
+                    ],
+                ),
+                html.Div('Title', className='axis-context-panel__section'),
+                dmc.TextInput(id='title-ctx-title', size='xs',
+                              placeholder='Plot title'),
+                html.Div([
+                    html.Div([
+                        html.Label('Font size', className='form-label'),
+                        dmc.NumberInput(id='title-ctx-title-size', value=12,
+                                        min=8, max=32, step=1, size='xs',
+                                        style={'width': '100%'}),
+                    ], style={'flex': '1'}),
+                    html.Div([
+                        html.Label('Font', className='form-label'),
+                        dmc.Select(
+                            id='title-ctx-font',
+                            value='Arial',
+                            size='xs',
+                            data=[
+                                {'label': 'Arial', 'value': 'Arial'},
+                                {'label': 'Helvetica', 'value': 'Helvetica'},
+                                {'label': 'Times New Roman', 'value': 'Times New Roman'},
+                                {'label': 'Courier New', 'value': 'Courier New'},
+                                {'label': 'Georgia', 'value': 'Georgia'},
+                                {'label': 'Calibri', 'value': 'Calibri'},
+                            ],
+                            clearable=False,
+                            allowDeselect=False,
+                            comboboxProps={'withinPortal': True, 'zIndex': 5000},
+                        ),
+                    ], style={'flex': '1'}),
+                ], className='axis-context-panel__range-row',
+                   style={'marginTop': '8px'}),
+                dmc.Switch(id='title-ctx-bold', label='Bold',
+                           checked=True, size='sm', mt=8),
+                html.Div(id='title-ctx-label-size', style={'display': 'none'}),
+            ],
+        ),
+
+        # -- Right-click axis label editor --
+        html.Div(
+            id='label-context-panel',
+            className='axis-context-panel',
+            style={'display': 'none'},
+            children=[
+                html.Div(
+                    className='axis-context-panel__header',
+                    children=[
+                        html.Div(id='label-ctx-header',
+                                 className='axis-context-panel__title',
+                                 children='X-Axis Label'),
+                        html.Button('×', id='label-ctx-close',
+                                    className='axis-context-panel__close',
+                                    title='Close'),
+                    ],
+                ),
+                html.Div('Label', className='axis-context-panel__section'),
+                dmc.TextInput(id='label-ctx-text', size='xs',
+                              placeholder='Axis label'),
+                html.Div([
+                    html.Div([
+                        html.Label('Font size', className='form-label'),
+                        dmc.NumberInput(id='label-ctx-font-size', value=14,
+                                        min=6, max=24, step=1, size='xs',
+                                        style={'width': '100%'}),
+                    ], style={'flex': '1'}),
+                    html.Div([
+                        html.Label('Font', className='form-label'),
+                        dmc.Select(
+                            id='label-ctx-font',
+                            value='Arial',
+                            size='xs',
+                            data=[
+                                {'label': 'Arial', 'value': 'Arial'},
+                                {'label': 'Helvetica', 'value': 'Helvetica'},
+                                {'label': 'Times New Roman', 'value': 'Times New Roman'},
+                                {'label': 'Courier New', 'value': 'Courier New'},
+                                {'label': 'Georgia', 'value': 'Georgia'},
+                                {'label': 'Calibri', 'value': 'Calibri'},
+                            ],
+                            clearable=False,
+                            allowDeselect=False,
+                            comboboxProps={'withinPortal': True, 'zIndex': 5000},
+                        ),
+                    ], style={'flex': '1'}),
+                ], className='axis-context-panel__range-row',
+                   style={'marginTop': '8px'}),
             ],
         ),
     ]
@@ -1457,6 +1817,7 @@ register_publication_preview_callbacks(app, data_manager)
 register_calibration_callbacks(app, data_manager)
 register_plot_settings_callbacks(app, data_manager)
 register_lcms_callbacks(app, data_manager)
+register_ms_context_menu_callbacks(app, data_manager)
 
 # Toolbox tabs (DMC) <-> toolbox-tab store, kept in sync both ways.
 # dmc.Tabs owns the visible panel; the store stays the source of truth for

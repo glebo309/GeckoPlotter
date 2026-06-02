@@ -172,6 +172,8 @@ DEFAULT_PLOT_SETTINGS: Dict[str, object] = {
     # Layout
     "layout_mode": "overlay",
     "subplot_spacing": 0.08,
+    # Per-trace overrides
+    "trace_overrides": {},
 }
 
 
@@ -252,6 +254,9 @@ class PlotSettings:
     subplot_spacing: float = 0.08        # vertical gap between subplots (0-0.3)
     plot_height: int = 500
     plot_width: int = 800
+
+    # -- 12. Per-trace overrides --
+    trace_overrides: Dict[str, dict] = field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
@@ -508,6 +513,39 @@ class PlotSettingsService:
                 trace.marker.size = settings.marker_size
                 trace.marker.color = color
                 trace.marker.symbol = settings.marker_symbol
+
+            # Per-trace overrides (keyed by trace name)
+            overrides = (settings.trace_overrides or {}).get(trace_name)
+            if overrides:
+                if 'color' in overrides:
+                    color = overrides['color']
+                    if hasattr(trace, 'line') and trace.line is not None:
+                        trace.line.color = color
+                    if hasattr(trace, 'marker') and trace.marker is not None:
+                        trace.marker.color = color
+                if 'mode' in overrides and not is_bar:
+                    trace.mode = overrides['mode']
+                if not is_bar and hasattr(trace, 'line') and trace.line is not None:
+                    if 'line_width' in overrides:
+                        trace.line.width = overrides['line_width']
+                    if 'line_style' in overrides:
+                        trace.line.dash = _DASH_MAP.get(overrides['line_style'], 'solid')
+                if not is_bar and 'markers' in (overrides.get('mode') or ''):
+                    if not hasattr(trace, 'marker') or trace.marker is None:
+                        trace.marker = {}
+                    if 'marker_size' in overrides:
+                        trace.marker.size = overrides['marker_size']
+                    if 'marker_symbol' in overrides:
+                        trace.marker.symbol = overrides['marker_symbol']
+                    if 'color' in overrides:
+                        trace.marker.color = overrides['color']
+                elif hasattr(trace, 'marker') and trace.marker is not None and not is_bar:
+                    if 'marker_size' in overrides:
+                        trace.marker.size = overrides['marker_size']
+                    if 'marker_symbol' in overrides:
+                        trace.marker.symbol = overrides['marker_symbol']
+                if 'opacity' in overrides:
+                    trace.update(opacity=overrides['opacity'])
 
             data_trace_idx += 1
 

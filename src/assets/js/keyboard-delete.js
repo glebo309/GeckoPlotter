@@ -33,6 +33,35 @@
         }
     }
 
+    function readDashStore(id) {
+        var el = document.getElementById(id);
+        if (!el) return undefined;
+        if (Object.prototype.hasOwnProperty.call(el, '_dashprivate_value')) {
+            return el._dashprivate_value;
+        }
+        return undefined;
+    }
+
+    function hasSelectedPeak() {
+        var mirror = document.getElementById('selected-peak-keyboard-state');
+        if (mirror) return (mirror.textContent || '').trim() !== '';
+        var value = readDashStore('selected-peak-idx');
+        if (value === undefined) return true; // Fall back to Python guard if Dash internals change.
+        return value !== null && value !== undefined && value !== '' && value !== 'null';
+    }
+
+    function isContextPanelOpen(id) {
+        var panel = document.getElementById(id);
+        if (!panel) return false;
+        var style = window.getComputedStyle ? window.getComputedStyle(panel) : panel.style;
+        return style.display !== 'none' && style.visibility !== 'hidden';
+    }
+
+    function isPlotContextPanelOpen() {
+        return isContextPanelOpen('axis-context-panel') ||
+            isContextPanelOpen('legend-context-panel');
+    }
+
     document.addEventListener('keydown', function (e) {
         if (isTypingTarget(e.target)) return;
 
@@ -57,6 +86,7 @@
 
         // Delete peak
         if (DELETE_KEYS[e.key]) {
+            if (isPlotContextPanelOpen() || !hasSelectedPeak()) return;
             setProps('keyboard-delete-trigger', Date.now());
             if (e.key === 'Backspace') e.preventDefault();
             return;

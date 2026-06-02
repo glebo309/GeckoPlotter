@@ -336,14 +336,33 @@ class PlotManager:
 
         for i, col in enumerate(y_cols[:8]):
             color = self.default_colors[i % len(self.default_colors)]
-            fig.add_trace(go.Scatter(
-                x=x_vals,
-                y=pd.to_numeric(df[col], errors="coerce"),
-                mode=mode,
-                name=col,
-                line=dict(color=color, width=2),
-                hovertemplate=f"{col}<br>{x_title}: %{{x}}<br>%{{y:.4f}}<extra></extra>",
-            ))
+
+            if result.plot_hint == PlotHint.LOLLIPOP:
+                y_vals = pd.to_numeric(df[col], errors="coerce")
+                xs, ys = [], []
+                for xv, yv in zip(x_vals, y_vals):
+                    xs.extend([xv, xv, None])
+                    ys.extend([0, yv, None])
+                fig.add_trace(go.Scatter(
+                    x=xs, y=ys, mode='lines',
+                    line=dict(color=color, width=1),
+                    hoverinfo='skip', showlegend=False,
+                ))
+                fig.add_trace(go.Scatter(
+                    x=x_vals, y=y_vals, mode='markers',
+                    marker=dict(color=color, size=4, opacity=0.6),
+                    name=col,
+                    hovertemplate=f"{col}<br>{x_title}: %{{x:.4g}}<br>%{{y:.4g}}<extra></extra>",
+                ))
+            else:
+                fig.add_trace(go.Scatter(
+                    x=x_vals,
+                    y=pd.to_numeric(df[col], errors="coerce"),
+                    mode=mode,
+                    name=col,
+                    line=dict(color=color, width=2),
+                    hovertemplate=f"{col}<br>{x_title}: %{{x}}<br>%{{y:.4f}}<extra></extra>",
+                ))
 
         import os
         raw_title = result.sample_name or result.identity.original_name
