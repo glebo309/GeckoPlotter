@@ -559,11 +559,25 @@ def register_lcms_callbacks(app, data_manager):
         if use_negative:
             other_id, other_data = _opposite_polarity_component(
                 data_manager, active_file, resolved_id)
-            if other_data and lcms_svc.has_spectral_data(other_data):
-                file_data = other_data
-                polarity_label = "−"
-            else:
+            if not other_data or not lcms_svc.has_spectral_data(other_data):
                 return _empty_peak_mass("No negative-mode data available"), ""
+
+            other_peaks = ps.get_peaks(other_id) or []
+            tol = 0.3
+            match = next(
+                (p for p in other_peaks
+                 if abs(p.rt - peak.rt) <= tol),
+                None,
+            )
+            if not match:
+                return (
+                    _empty_peak_mass(f"No peak integrated in negative mode near RT {peak.rt:.2f} min"),
+                    f"Integrate a peak on the negative TIC at RT ~{peak.rt:.2f} min first",
+                )
+
+            file_data = other_data
+            peak = match
+            polarity_label = "−"
 
         mz, intensity = lcms_svc.get_averaged_spectrum(file_data, peak.rt_start, peak.rt_end)
         if mz.size == 0:
