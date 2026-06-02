@@ -89,19 +89,20 @@
             var rect;
             var dockWidth = 0;
             var dockHeight = 0;
+            var dockThickness = 88;
 
             if (collapseKey === 'main') {
                 rect = container.getBoundingClientRect();
-                dockWidth = rect.width * (state === 'first' ? defaults.leftCol : defaults.rightCol) / 100;
+                dockWidth = dockThickness;
                 dockHeight = rect.height;
             } else if (collapseKey === 'leftVertical') {
                 rect = leftColumn.getBoundingClientRect();
                 dockWidth = rect.width;
-                dockHeight = rect.height * (state === 'first' ? defaults.topLeft : defaults.bottomLeft) / 100;
+                dockHeight = dockThickness;
             } else if (collapseKey === 'rightVertical') {
                 rect = rightColumn.getBoundingClientRect();
                 dockWidth = rect.width;
-                dockHeight = rect.height * (state === 'first' ? defaults.topRight : defaults.bottomRight) / 100;
+                dockHeight = dockThickness;
             }
 
             divider.style.setProperty('--dock-width', Math.max(1, Math.round(dockWidth)) + 'px');
