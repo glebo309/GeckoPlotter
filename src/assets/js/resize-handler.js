@@ -89,7 +89,7 @@
             var rect;
             var dockWidth = 0;
             var dockHeight = 0;
-            var dockThickness = 88;
+            var dockThickness = 46;
 
             if (collapseKey === 'main') {
                 rect = container.getBoundingClientRect();
@@ -123,7 +123,7 @@
 
             // Reset direction classes
             label.classList.remove('collapse-above', 'collapse-below', 'collapse-left', 'collapse-right', 'collapsed-state');
-            divider.classList.remove('has-label', 'hidden-first', 'hidden-second');
+            divider.classList.remove('has-label', 'hidden-first', 'hidden-second', 'dock-hover');
 
             if (!state) {
                 label.textContent = '';
@@ -392,6 +392,30 @@
         if (leftVDivider)  leftVDivider.addEventListener('mousedown',  function (e) { startDrag(e, 'left-vertical', leftVDivider); });
         if (rightVDivider) rightVDivider.addEventListener('mousedown', function (e) { startDrag(e, 'right-vertical', rightVDivider); });
         if (mainVDivider)  mainVDivider.addEventListener('mousedown',  function (e) { startDrag(e, 'main', mainVDivider); });
+
+        function pointInRect(x, y, rect) {
+            return rect && x >= rect.left && x <= rect.right && y >= rect.top && y <= rect.bottom;
+        }
+
+        function updateDockHover(e) {
+            [leftVDivider, rightVDivider, mainVDivider].forEach(function (divider) {
+                if (!divider || !divider.classList.contains('has-label')) return;
+                var zone = divider.querySelector('.divider-hover-zone');
+                var label = getLabel(divider);
+                var inZone = zone && pointInRect(e.clientX, e.clientY, zone.getBoundingClientRect());
+                var inLabel = label && pointInRect(e.clientX, e.clientY, label.getBoundingClientRect());
+                divider.classList.toggle('dock-hover', Boolean(inZone || inLabel));
+            });
+        }
+
+        function clearDockHover() {
+            [leftVDivider, rightVDivider, mainVDivider].forEach(function (divider) {
+                if (divider) divider.classList.remove('dock-hover');
+            });
+        }
+
+        document.addEventListener('mousemove', updateDockHover);
+        document.addEventListener('mouseleave', clearDockHover);
 
         window.addEventListener('resize', function () {
             updateLabel(leftVDivider, 'leftVertical');
