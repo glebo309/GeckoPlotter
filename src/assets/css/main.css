@@ -364,8 +364,8 @@ body {
 
 .divider-vertical.has-label .divider-hover-zone {
     left: 50%;
-    width: min(760px, 82vw);
-    height: 72px;
+    width: var(--dock-width, 100%);
+    height: var(--dock-height, 72px);
     transform: translateX(-50%);
 }
 
@@ -385,8 +385,8 @@ body {
 
 .divider-horizontal.has-label .divider-hover-zone {
     top: 50%;
-    width: 72px;
-    height: min(620px, 72vh);
+    width: var(--dock-width, 72px);
+    height: var(--dock-height, 100%);
     transform: translateY(-50%);
 }
 

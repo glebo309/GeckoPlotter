@@ -81,6 +81,33 @@
             return zone;
         }
 
+        function setDockGeometry(divider, collapseKey, state) {
+            if (!divider || !state) {
+                return;
+            }
+
+            var rect;
+            var dockWidth = 0;
+            var dockHeight = 0;
+
+            if (collapseKey === 'main') {
+                rect = container.getBoundingClientRect();
+                dockWidth = rect.width * (state === 'first' ? defaults.leftCol : defaults.rightCol) / 100;
+                dockHeight = rect.height;
+            } else if (collapseKey === 'leftVertical') {
+                rect = leftColumn.getBoundingClientRect();
+                dockWidth = rect.width;
+                dockHeight = rect.height * (state === 'first' ? defaults.topLeft : defaults.bottomLeft) / 100;
+            } else if (collapseKey === 'rightVertical') {
+                rect = rightColumn.getBoundingClientRect();
+                dockWidth = rect.width;
+                dockHeight = rect.height * (state === 'first' ? defaults.topRight : defaults.bottomRight) / 100;
+            }
+
+            divider.style.setProperty('--dock-width', Math.max(1, Math.round(dockWidth)) + 'px');
+            divider.style.setProperty('--dock-height', Math.max(1, Math.round(dockHeight)) + 'px');
+        }
+
         function updateLabel(divider, collapseKey) {
             var label = getLabel(divider);
             if (!label) return;
@@ -100,6 +127,8 @@
             if (!state) {
                 label.textContent = '';
                 label.classList.remove('visible');
+                divider.style.removeProperty('--dock-width');
+                divider.style.removeProperty('--dock-height');
             } else if (state === 'first') {
                 // First panel hidden (top or left)
                 if (isHorizontal) {
@@ -111,6 +140,7 @@
                 }
                 label.classList.add('visible');
                 divider.classList.add('has-label', 'hidden-first');
+                setDockGeometry(divider, collapseKey, state);
             } else if (state === 'second') {
                 // Second panel hidden (bottom or right)
                 if (isHorizontal) {
@@ -122,6 +152,7 @@
                 }
                 label.classList.add('visible');
                 divider.classList.add('has-label', 'hidden-second');
+                setDockGeometry(divider, collapseKey, state);
             }
         }
 
@@ -360,6 +391,12 @@
         if (leftVDivider)  leftVDivider.addEventListener('mousedown',  function (e) { startDrag(e, 'left-vertical', leftVDivider); });
         if (rightVDivider) rightVDivider.addEventListener('mousedown', function (e) { startDrag(e, 'right-vertical', rightVDivider); });
         if (mainVDivider)  mainVDivider.addEventListener('mousedown',  function (e) { startDrag(e, 'main', mainVDivider); });
+
+        window.addEventListener('resize', function () {
+            updateLabel(leftVDivider, 'leftVertical');
+            updateLabel(rightVDivider, 'rightVertical');
+            updateLabel(mainVDivider, 'main');
+        });
 
         window.__geckoSyncPlotTabLayout = function (activeTab, plotTabs) {
             if (!activeTab) return;
