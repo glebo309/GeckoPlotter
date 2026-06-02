@@ -191,6 +191,8 @@ class PlotManager:
 
     def _add_traces(self, fig, name, file_data, color_offset=0):
         """Add traces from file_data to fig. Returns next color index."""
+        from ingestion.types import PlotHint
+
         sr = file_data.get('standardized')
         if sr is None:
             return color_offset
@@ -208,6 +210,7 @@ class PlotManager:
 
         x_vals = df[x_col]
         idx = color_offset
+        is_lollipop = getattr(sr, 'plot_hint', None) == PlotHint.LOLLIPOP
 
         for j, y_col in enumerate(y_cols):
             if y_col not in df.columns:
@@ -215,13 +218,26 @@ class PlotManager:
             color = self.default_colors[idx % len(self.default_colors)]
             label = f"{name} — {y_col}" if len(y_cols) > 1 else name
             trace_cls = go.Scattergl if len(x_vals) > 5000 else go.Scatter
-            fig.add_trace(trace_cls(
-                x=x_vals,
-                y=pd.to_numeric(df[y_col], errors="coerce"),
-                mode="lines",
-                name=label,
-                line=dict(color=color, width=2),
-            ))
+
+            if is_lollipop:
+                y_vals = pd.to_numeric(df[y_col], errors="coerce")
+                xs, ys = [], []
+                for xv, yv in zip(x_vals, y_vals):
+                    xs.extend([xv, xv, None])
+                    ys.extend([0, yv, None])
+                fig.add_trace(trace_cls(
+                    x=xs, y=ys, mode='lines',
+                    name=label,
+                    line=dict(color=color, width=1),
+                ))
+            else:
+                fig.add_trace(trace_cls(
+                    x=x_vals,
+                    y=pd.to_numeric(df[y_col], errors="coerce"),
+                    mode="lines",
+                    name=label,
+                    line=dict(color=color, width=2),
+                ))
             idx += 1
 
         eic_overlays = file_data.get('eic_overlays') or []
@@ -345,13 +361,8 @@ class PlotManager:
                     ys.extend([0, yv, None])
                 fig.add_trace(go.Scatter(
                     x=xs, y=ys, mode='lines',
-                    line=dict(color=color, width=1),
-                    hoverinfo='skip', showlegend=False,
-                ))
-                fig.add_trace(go.Scatter(
-                    x=x_vals, y=y_vals, mode='markers',
-                    marker=dict(color=color, size=4, opacity=0.6),
                     name=col,
+                    line=dict(color=color, width=1),
                     hovertemplate=f"{col}<br>{x_title}: %{{x:.4g}}<br>%{{y:.4g}}<extra></extra>",
                 ))
             else:

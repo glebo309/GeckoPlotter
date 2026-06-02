@@ -77,41 +77,44 @@ def _extract_xy_from_figure(fig_dict, source):
         return np.array(clean, dtype=float)
 
     if source == 'ms-spectrum-graph':
+        # The spectrum has two traces: stick-lines (hoverinfo='skip') and
+        # markers (with hovertemplate containing the real m/z data).
+        # Prefer the markers trace for clean data.
         for t in traces:
             mode = t.get('mode', '')
-            if 'markers' in mode and t.get('x') and t.get('y'):
-                x = _safe_float_array(t['x'])
-                y = _safe_float_array(t['y'])
+            has_hover = t.get('hovertemplate') or t.get('hoverinfo', '') != 'skip'
+            if 'markers' in mode and has_hover:
+                x = _safe_float_array(list(t.get('x', [])))
+                y = _safe_float_array(list(t.get('y', [])))
                 mask = np.isfinite(x) & np.isfinite(y)
                 if mask.any():
                     return x[mask], y[mask], x_label, y_label
+        # Fallback: take stick-lines trace and de-interleave
         for t in traces:
-            xs = t.get('x')
-            ys = t.get('y')
-            if xs and ys:
-                x = _safe_float_array(xs)
-                y = _safe_float_array(ys)
-                mask = np.isfinite(x) & np.isfinite(y)
-                if mask.any():
-                    return x[mask], y[mask], x_label, y_label
+            x_raw = _safe_float_array(list(t.get('x', [])))
+            y_raw = _safe_float_array(list(t.get('y', [])))
+            mask = np.isfinite(x_raw) & np.isfinite(y_raw) & (y_raw > 0)
+            if mask.any():
+                return x_raw[mask], y_raw[mask], x_label, y_label
     else:
+        # EIC: pick line traces, skip apex markers (single-point)
         for t in traces:
             mode = t.get('mode', '')
-            xs = t.get('x')
-            ys = t.get('y')
-            if xs and ys and 'markers' not in mode:
-                x = _safe_float_array(xs)
-                y = _safe_float_array(ys)
+            x_raw = list(t.get('x', []))
+            y_raw = list(t.get('y', []))
+            if len(x_raw) > 1 and 'markers' not in mode:
+                x = _safe_float_array(x_raw)
+                y = _safe_float_array(y_raw)
                 mask = np.isfinite(x) & np.isfinite(y)
                 if mask.any():
                     name = t.get('name', '')
                     return x[mask], y[mask], x_label, y_label, name
         for t in traces:
-            xs = t.get('x')
-            ys = t.get('y')
-            if xs and ys:
-                x = _safe_float_array(xs)
-                y = _safe_float_array(ys)
+            x_raw = list(t.get('x', []))
+            y_raw = list(t.get('y', []))
+            if len(x_raw) > 1:
+                x = _safe_float_array(x_raw)
+                y = _safe_float_array(y_raw)
                 mask = np.isfinite(x) & np.isfinite(y)
                 if mask.any():
                     name = t.get('name', '')
@@ -200,7 +203,7 @@ def register_ms_context_menu_callbacks(app: dash.Dash, data_manager) -> None:
                 data=df,
                 column_roles={x_col: ColumnRole.X, y_col: ColumnRole.Y},
                 identity=FileIdentity(f"{name}.csv", "csv", "ms_extract", 0),
-                plot_hint=PlotHint.LINE,
+                plot_hint=plot_hint,
                 source_category=src_cat,
                 sample_name=name,
                 metadata={'auto_x': x_col, 'auto_y': [y_col]},
