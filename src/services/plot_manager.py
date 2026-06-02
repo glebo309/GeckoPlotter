@@ -260,31 +260,6 @@ class PlotManager:
                 ))
             idx += 1
 
-        eic_overlays = file_data.get('eic_overlays') or []
-        for overlay in eic_overlays:
-            time = overlay.get('time')
-            intensity = overlay.get('intensity')
-            if time is None or intensity is None:
-                continue
-            color = self.default_colors[idx % len(self.default_colors)]
-            mz = overlay.get('mz')
-            tolerance = overlay.get('tolerance')
-            label = f"EIC {mz:.4g} +/- {tolerance:.3g}" if mz is not None and tolerance is not None else "EIC"
-            trace_cls = go.Scattergl if len(time) > 5000 else go.Scatter
-            fig.add_trace(trace_cls(
-                x=time,
-                y=intensity,
-                mode="lines",
-                name=label,
-                line=dict(color=color, width=1.5, dash="dot"),
-                meta="lcms_eic_overlay",
-                hovertemplate=(
-                    f"{label}<br>Time: %{{x:.3f}} min"
-                    "<br>Intensity: %{y:.4g}<extra></extra>"
-                ),
-            ))
-            idx += 1
-
         return idx
 
     # -- hidden / empty state -----------------------------------------------

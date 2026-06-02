@@ -126,9 +126,10 @@ def register_plot_settings_callbacks(app, data_manager):
             Output('pt-subplot-spacing', 'value', allow_duplicate=True),
         ],
         Input('active-plot-context', 'data'),
+        State('active-file', 'data'),
         prevent_initial_call=True,
     )
-    def hydrate_plot_settings(context_key):
+    def hydrate_plot_settings(context_key, active_file):
         """Load saved settings for the active context and push to controls."""
         import logging
         _log = logging.getLogger('geckoplotter.settings')
@@ -137,6 +138,14 @@ def register_plot_settings_callbacks(app, data_manager):
         # Load from persistence (or defaults)
         saved = _load_settings(data_manager, context_key)
         s = {**DEFAULT_PLOT_SETTINGS, **(saved or {})}
+
+        if s.get('layout_mode') != 'stacked' and active_file:
+            from services.data_store import BundleType
+            bundle = data_manager.get_bundle_for_component(active_file) if hasattr(data_manager, 'get_bundle_for_component') else None
+            if not bundle:
+                bundle = data_manager.get_bundle(active_file) if hasattr(data_manager, 'get_bundle') else None
+            if bundle and bundle.bundle_type == BundleType.LCMS and len(bundle.component_list) > 1:
+                s['layout_mode'] = 'stacked'
         _log.debug(f"HYDRATE [{context_key}] y1_stats={s.get('y1_stats')} categorical_x={s.get('categorical_x')}")
 
         series_count = max(1, s.get('y1_series_count', 1))

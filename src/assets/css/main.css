@@ -611,7 +611,7 @@ body {
 }
 
 .tree-action-group {
-    opacity: 0;
+    opacity: 0.5;
     transition: opacity 0.15s;
 }
 

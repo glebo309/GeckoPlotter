@@ -1226,9 +1226,24 @@ _layout_body = html.Div(
                                                     }, children=[
                                                         html.Div([
                                                             html.Div([
-                                                                html.Div('Apex / Scan Spectrum', style={
-                                                                    'fontWeight': 'bold', 'fontSize': '12px',
-                                                                    'margin': '0 0 4px 2px'}),
+                                                                html.Div([
+                                                                    html.Div('Apex / Scan Spectrum', style={
+                                                                        'fontWeight': 'bold', 'fontSize': '12px'}),
+                                                                    html.Div([
+                                                                        html.Span('+', id='ms-polarity-pos-label', style={
+                                                                            'fontSize': '12px', 'fontWeight': '600',
+                                                                            'color': '#333', 'cursor': 'default'}),
+                                                                        dmc.Switch(id='ms-polarity-toggle',
+                                                                                   checked=False, size='sm',
+                                                                                   style={'margin': '0 4px'}),
+                                                                        html.Span('−', id='ms-polarity-neg-label', style={
+                                                                            'fontSize': '12px', 'fontWeight': '400',
+                                                                            'color': '#999', 'cursor': 'default'}),
+                                                                    ], id='ms-polarity-toggle-wrapper', style={
+                                                                        'display': 'none', 'alignItems': 'center', 'gap': '2px'}),
+                                                                ], style={
+                                                                    'display': 'flex', 'justifyContent': 'space-between',
+                                                                    'alignItems': 'center', 'margin': '0 0 4px 2px'}),
                                                                 dcc.Graph(id='ms-spectrum-graph',
                                                                           figure=go.Figure(layout=go.Layout(
                                                                               template='plotly_white',
@@ -1268,9 +1283,24 @@ _layout_body = html.Div(
                                                                                 'minHeight': '20px'}),
                                                             ]),
                                                             html.Div([
-                                                                html.Div('Extracted Ion Chromatogram', style={
-                                                                    'fontWeight': 'bold', 'fontSize': '12px',
-                                                                    'margin': '0 0 4px 2px'}),
+                                                                html.Div([
+                                                                    html.Div('Extracted Ion Chromatogram', style={
+                                                                        'fontWeight': 'bold', 'fontSize': '12px'}),
+                                                                    html.Div([
+                                                                        html.Span('+', id='eic-polarity-pos-label', style={
+                                                                            'fontSize': '12px', 'fontWeight': '600',
+                                                                            'color': '#333', 'cursor': 'default'}),
+                                                                        dmc.Switch(id='eic-polarity-toggle',
+                                                                                   checked=False, size='sm',
+                                                                                   style={'margin': '0 4px'}),
+                                                                        html.Span('−', id='eic-polarity-neg-label', style={
+                                                                            'fontSize': '12px', 'fontWeight': '400',
+                                                                            'color': '#999', 'cursor': 'default'}),
+                                                                    ], id='eic-polarity-toggle-wrapper', style={
+                                                                        'display': 'none', 'alignItems': 'center', 'gap': '2px'}),
+                                                                ], style={
+                                                                    'display': 'flex', 'justifyContent': 'space-between',
+                                                                    'alignItems': 'center', 'margin': '0 0 4px 2px'}),
                                                                 html.Div([
                                                                     html.Div([
                                                                         html.Label('Target m/z', className='form-label'),

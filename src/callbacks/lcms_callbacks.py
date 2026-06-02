@@ -22,46 +22,23 @@ def register_lcms_callbacks(app, data_manager):
 
     lcms_svc = data_manager.lcms_service
 
-    from services.data_store import BundleType
+    from services.data_store import BundleType, ComponentRole
 
     @app.callback(
-        [Output('current-plot-settings', 'data', allow_duplicate=True),
-         Output('pt-layout-mode', 'value', allow_duplicate=True)],
+        Output('pt-layout-mode', 'value', allow_duplicate=True),
         Input('active-file', 'data'),
-        State('current-plot-settings', 'data'),
+        State('pt-layout-mode', 'value'),
         prevent_initial_call=True,
     )
-    def auto_subplot_for_lcms(active_file, settings):
+    def auto_subplot_for_lcms(active_file, current_mode):
         if not active_file:
             raise dash.exceptions.PreventUpdate
-        bundle = None
-        try:
-            bundle = data_manager.get_bundle_for_component(active_file)
-        except Exception:
-            pass
-        if bundle is None:
-            try:
-                bundle = data_manager.get_bundle(active_file)
-            except Exception:
-                pass
-        if bundle is None:
-            for b in data_manager._bundles.values():
-                if b.bundle_id == active_file:
-                    bundle = b
-                    break
-                for c in b.component_list:
-                    if c.component_id == active_file:
-                        bundle = b
-                        break
-                if bundle:
-                    break
-        pass
+        bundle = data_manager.get_bundle_for_component(active_file) if hasattr(data_manager, 'get_bundle_for_component') else None
+        if not bundle:
+            bundle = data_manager.get_bundle(active_file) if hasattr(data_manager, 'get_bundle') else None
         if bundle and bundle.bundle_type == BundleType.LCMS and len(bundle.component_list) > 1:
-            s = dict(settings or {})
-            if s.get('layout_mode') != 'stacked':
-                s['layout_mode'] = 'stacked'
-                log.info("auto_subplot_for_lcms: switching to stacked")
-                return s, 'stacked'
+            if current_mode != 'stacked':
+                return 'stacked'
         raise dash.exceptions.PreventUpdate
 
     # ------------------------------------------------------------------
@@ -132,6 +109,97 @@ def register_lcms_callbacks(app, data_manager):
                 apex_idx = 0
         apex_idx = min(max(apex_idx, 0), n_scans - 1)
         return 0, n_scans - 1, apex_idx, _scan_label(lcms_svc, file_data, apex_idx), subplot_idx
+
+    # ------------------------------------------------------------------
+    # Polarity toggle: sync both toggles from active-file selection
+    # ------------------------------------------------------------------
+    @app.callback(
+        [Output('ms-polarity-toggle', 'checked'),
+         Output('ms-polarity-toggle-wrapper', 'style'),
+         Output('ms-polarity-pos-label', 'style'),
+         Output('ms-polarity-neg-label', 'style'),
+         Output('eic-polarity-toggle', 'checked'),
+         Output('eic-polarity-toggle-wrapper', 'style'),
+         Output('eic-polarity-pos-label', 'style'),
+         Output('eic-polarity-neg-label', 'style')],
+        Input('active-file', 'data'),
+        prevent_initial_call=True,
+    )
+    def sync_polarity_toggle(active_file):
+        """Update both toggle positions and visibility when active file changes."""
+        hidden = {'display': 'none', 'alignItems': 'center', 'gap': '2px'}
+        visible = {'display': 'flex', 'alignItems': 'center', 'gap': '2px'}
+        pos_active = {'fontSize': '12px', 'fontWeight': '600', 'color': '#333', 'cursor': 'default'}
+        pos_dim = {'fontSize': '12px', 'fontWeight': '400', 'color': '#999', 'cursor': 'default'}
+        neg_active = {'fontSize': '12px', 'fontWeight': '600', 'color': '#333', 'cursor': 'default'}
+        neg_dim = {'fontSize': '12px', 'fontWeight': '400', 'color': '#999', 'cursor': 'default'}
+
+        def _pack(checked, show, pos_s, neg_s):
+            wrapper = visible if show else hidden
+            return checked, wrapper, pos_s, neg_s, checked, wrapper, pos_s, neg_s
+
+        if not active_file:
+            return _pack(False, False, pos_active, neg_dim)
+
+        bundle = data_manager.get_bundle(active_file) if hasattr(data_manager, 'get_bundle') else None
+        if not bundle and hasattr(data_manager, 'get_bundle_for_component'):
+            bundle = data_manager.get_bundle_for_component(active_file)
+        if not bundle or bundle.bundle_type != BundleType.LCMS:
+            return _pack(False, False, pos_active, neg_dim)
+
+        has_pos = bundle.get_component(ComponentRole.MS_POSITIVE) is not None
+        has_neg = bundle.get_component(ComponentRole.MS_NEGATIVE) is not None
+        if not (has_pos and has_neg):
+            return _pack(False, False, pos_active, neg_dim)
+
+        current = next(
+            (c for c in bundle.component_list if c.component_id == active_file), None)
+        is_negative = current and current.role == ComponentRole.MS_NEGATIVE
+        if not current or current.role not in (ComponentRole.MS_POSITIVE, ComponentRole.MS_NEGATIVE):
+            entry = data_manager.get_data_by_id(active_file)
+            if entry and lcms_svc.has_spectral_data(entry):
+                is_negative = False
+            else:
+                resolved = _resolve_lcms_spectral_entry(data_manager, active_file, lcms_svc)
+                if resolved:
+                    resolved_id = resolved[0]
+                    resolved_comp = next(
+                        (c for c in bundle.component_list if c.component_id == resolved_id), None)
+                    is_negative = resolved_comp and resolved_comp.role == ComponentRole.MS_NEGATIVE
+
+        if is_negative:
+            return _pack(True, True, pos_dim, neg_active)
+        return _pack(False, True, pos_active, neg_dim)
+
+    # ------------------------------------------------------------------
+    # Polarity toggle: switch active file when either toggle is clicked
+    # ------------------------------------------------------------------
+    @app.callback(
+        Output('active-file', 'data', allow_duplicate=True),
+        [Input('ms-polarity-toggle', 'checked'),
+         Input('eic-polarity-toggle', 'checked')],
+        State('active-file', 'data'),
+        prevent_initial_call=True,
+    )
+    def polarity_toggle_switch(ms_checked, eic_checked, active_file):
+        """Switch active MS component when either polarity toggle is clicked."""
+        if active_file is None:
+            raise dash.exceptions.PreventUpdate
+
+        trigger = callback_context.triggered[0]['prop_id'] if callback_context.triggered else ''
+        is_negative = eic_checked if 'eic-polarity' in trigger else ms_checked
+
+        bundle = data_manager.get_bundle(active_file) if hasattr(data_manager, 'get_bundle') else None
+        if not bundle and hasattr(data_manager, 'get_bundle_for_component'):
+            bundle = data_manager.get_bundle_for_component(active_file)
+        if not bundle or bundle.bundle_type != BundleType.LCMS:
+            raise dash.exceptions.PreventUpdate
+
+        target_role = ComponentRole.MS_NEGATIVE if is_negative else ComponentRole.MS_POSITIVE
+        target = bundle.get_component(target_role)
+        if not target or target.component_id == active_file:
+            raise dash.exceptions.PreventUpdate
+        return target.component_id
 
     @app.callback(
         [Output('ms-spectrum-graph', 'figure', allow_duplicate=True),
@@ -307,6 +375,8 @@ def register_lcms_callbacks(app, data_manager):
         else:
             file_data.setdefault('eic_overlays', []).append(overlay)
 
+        _extract_eic_other_polarity(data_manager, lcms_svc, active_file, file_id, mz_value, tolerance)
+
         eic_list = _get_eic_list(data_manager, file_id, file_data)
         apex_idx = int(np.argmax(eic_intensity)) if eic_intensity.size else 0
         apex_rt = float(eic_time[apex_idx]) if eic_time.size else 0.0
@@ -327,8 +397,8 @@ def register_lcms_callbacks(app, data_manager):
 
     @app.callback(
         Output('eic-active-list', 'children'),
-        [Input('render-trigger', 'data')],
-        [State('active-file', 'data')],
+        [Input('render-trigger', 'data'),
+         Input('active-file', 'data')],
     )
     def update_eic_list(_, active_file):
         if not active_file:
@@ -341,8 +411,8 @@ def register_lcms_callbacks(app, data_manager):
 
     @app.callback(
         Output('eic-graph', 'figure'),
-        Input('render-trigger', 'data'),
-        State('active-file', 'data'),
+        [Input('render-trigger', 'data'),
+         Input('active-file', 'data')],
     )
     def update_eic_graph(_, active_file):
         if not active_file:
@@ -377,6 +447,7 @@ def register_lcms_callbacks(app, data_manager):
             data_manager.clear_lcms_eic_overlays(file_id)
         elif file_data:
             file_data.pop('eic_overlays', None)
+        _clear_eic_other_polarity(data_manager, active_file, file_id)
         return (
             (current_trigger or 0) + 1,
             _empty_eic("Extract an EIC to view it here"),
@@ -570,6 +641,62 @@ def _get_eic_list(data_manager, file_id, file_data):
     if hasattr(data_manager, 'get_lcms_eic_overlays'):
         return data_manager.get_lcms_eic_overlays(file_id)
     return file_data.get('eic_overlays', [])
+
+
+def _opposite_polarity_component(data_manager, active_file, current_file_id):
+    """Return (component_id, file_data) for the opposite polarity, or (None, None)."""
+    from services.data_store import BundleType, ComponentRole
+    bundle = None
+    if hasattr(data_manager, 'get_bundle'):
+        bundle = data_manager.get_bundle(active_file)
+    if not bundle and hasattr(data_manager, 'get_bundle_for_component'):
+        bundle = data_manager.get_bundle_for_component(active_file)
+    if not bundle or bundle.bundle_type != BundleType.LCMS:
+        return None, None
+
+    lookup_id = current_file_id or active_file
+    current = next((c for c in bundle.component_list if c.component_id == lookup_id), None)
+    if not current:
+        return None, None
+
+    if current.role == ComponentRole.MS_POSITIVE:
+        other = bundle.get_component(ComponentRole.MS_NEGATIVE)
+    elif current.role == ComponentRole.MS_NEGATIVE:
+        other = bundle.get_component(ComponentRole.MS_POSITIVE)
+    else:
+        return None, None
+
+    if not other:
+        return None, None
+    other_data = data_manager.get_data_by_id(other.component_id)
+    return other.component_id, other_data
+
+
+def _extract_eic_other_polarity(data_manager, lcms_svc, active_file, current_file_id, mz_value, tolerance):
+    """Silently extract the same EIC from the opposite polarity component."""
+    other_id, other_data = _opposite_polarity_component(data_manager, active_file, current_file_id)
+    if not other_data or not lcms_svc.has_spectral_data(other_data):
+        return
+    try:
+        eic_time, eic_intensity = lcms_svc.extract_eic(other_data, float(mz_value), float(tolerance))
+    except (ValueError, KeyError):
+        return
+    overlay = {'mz': float(mz_value), 'tolerance': float(tolerance), 'time': eic_time, 'intensity': eic_intensity}
+    if hasattr(data_manager, 'add_lcms_eic_overlay'):
+        data_manager.add_lcms_eic_overlay(other_id, overlay)
+    else:
+        other_data.setdefault('eic_overlays', []).append(overlay)
+
+
+def _clear_eic_other_polarity(data_manager, active_file, current_file_id):
+    """Clear EIC overlays from the opposite polarity component."""
+    other_id, other_data = _opposite_polarity_component(data_manager, active_file, current_file_id)
+    if not other_id:
+        return
+    if hasattr(data_manager, 'clear_lcms_eic_overlays'):
+        data_manager.clear_lcms_eic_overlays(other_id)
+    elif other_data:
+        other_data.pop('eic_overlays', None)
 
 
 def _render_eic_list(eic_list):

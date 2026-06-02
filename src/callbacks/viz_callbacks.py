@@ -1225,18 +1225,6 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
         s = {**DEFAULT_PLOT_SETTINGS, **(plot_settings or {})}
         layout_mode = s.get('layout_mode', 'overlay')
 
-        lcms_auto_stacked = False
-        if layout_mode == 'overlay' and active_file:
-            bundle = data_manager.get_bundle_for_component(active_file) if hasattr(data_manager, 'get_bundle_for_component') else None
-            if bundle is None and hasattr(data_manager, 'get_bundle'):
-                bundle = data_manager.get_bundle(active_file)
-            if bundle and bundle.bundle_type == BundleType.LCMS and len(bundle.component_list) > 1:
-                layout_mode = 'stacked'
-                lcms_auto_stacked = True
-
-        if trigger_id == 'active-file' and layout_mode == 'stacked' and not lcms_auto_stacked:
-            return dash.no_update, no_zoom
-
         is_tab_switch = trigger_id == 'active-plot-tab'
         restored_zoom = (zoom_memory or {}).get(active_tab_id) if is_tab_switch else None
         set_zoom = restored_zoom if is_tab_switch else no_zoom

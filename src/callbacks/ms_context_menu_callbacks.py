@@ -63,8 +63,18 @@ def _extract_xy_from_figure(fig_dict, source):
     x_label = _axis_label(layout, 'xaxis', 'x')
     y_label = _axis_label(layout, 'yaxis', 'y')
 
+    def _decode_typed_array(vals):
+        """Decode Plotly typed-array dicts back to plain lists."""
+        if isinstance(vals, dict) and 'bdata' in vals:
+            import base64
+            dtype = vals.get('dtype', 'float64')
+            raw = base64.b64decode(vals['bdata'])
+            return np.frombuffer(raw, dtype=dtype).tolist()
+        return vals
+
     def _safe_float_array(vals):
         """Convert a list of values to float array, filtering out non-numeric entries."""
+        vals = _decode_typed_array(vals)
         clean = []
         for v in vals:
             if v is None or isinstance(v, dict):
@@ -84,15 +94,15 @@ def _extract_xy_from_figure(fig_dict, source):
             mode = t.get('mode', '')
             has_hover = t.get('hovertemplate') or t.get('hoverinfo', '') != 'skip'
             if 'markers' in mode and has_hover:
-                x = _safe_float_array(list(t.get('x', [])))
-                y = _safe_float_array(list(t.get('y', [])))
+                x = _safe_float_array(t.get('x', []))
+                y = _safe_float_array(t.get('y', []))
                 mask = np.isfinite(x) & np.isfinite(y)
                 if mask.any():
                     return x[mask], y[mask], x_label, y_label
         # Fallback: take stick-lines trace and de-interleave
         for t in traces:
-            x_raw = _safe_float_array(list(t.get('x', [])))
-            y_raw = _safe_float_array(list(t.get('y', [])))
+            x_raw = _safe_float_array(t.get('x', []))
+            y_raw = _safe_float_array(t.get('y', []))
             mask = np.isfinite(x_raw) & np.isfinite(y_raw) & (y_raw > 0)
             if mask.any():
                 return x_raw[mask], y_raw[mask], x_label, y_label
@@ -100,8 +110,10 @@ def _extract_xy_from_figure(fig_dict, source):
         # EIC: pick line traces, skip apex markers (single-point)
         for t in traces:
             mode = t.get('mode', '')
-            x_raw = list(t.get('x', []))
-            y_raw = list(t.get('y', []))
+            x_dec = _decode_typed_array(t.get('x', []))
+            y_dec = _decode_typed_array(t.get('y', []))
+            x_raw = list(x_dec) if not isinstance(x_dec, list) else x_dec
+            y_raw = list(y_dec) if not isinstance(y_dec, list) else y_dec
             if len(x_raw) > 1 and 'markers' not in mode:
                 x = _safe_float_array(x_raw)
                 y = _safe_float_array(y_raw)
@@ -110,8 +122,10 @@ def _extract_xy_from_figure(fig_dict, source):
                     name = t.get('name', '')
                     return x[mask], y[mask], x_label, y_label, name
         for t in traces:
-            x_raw = list(t.get('x', []))
-            y_raw = list(t.get('y', []))
+            x_dec = _decode_typed_array(t.get('x', []))
+            y_dec = _decode_typed_array(t.get('y', []))
+            x_raw = list(x_dec) if not isinstance(x_dec, list) else x_dec
+            y_raw = list(y_dec) if not isinstance(y_dec, list) else y_dec
             if len(x_raw) > 1:
                 x = _safe_float_array(x_raw)
                 y = _safe_float_array(y_raw)

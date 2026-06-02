@@ -262,8 +262,9 @@ def register_baseline_callbacks(app: dash.Dash, data_manager) -> None:
     def _file_id_for_subplot_row(row, active_file, plot_settings, loaded_files, plot_tabs, active_tab_id):
         """Map a subplot row number to the file_id whose data occupies that row.
 
-        Returns the same kind of ID that the file selector uses (bundle ID
-        for bundled files), so peaks are stored under a consistent key.
+        Returns the component_id for multi-component bundles (LCMS) so peaks
+        are stored per-component, or the bundle_id for single-chromatogram
+        bundles (Chromeleon HPLC) to match the file selector convention.
         """
         from callbacks.viz_callbacks import _collect_visible_files
         from services.plot_settings_service import DEFAULT_PLOT_SETTINGS
@@ -289,19 +290,24 @@ def register_baseline_callbacks(app: dash.Dash, data_manager) -> None:
             return active_file
         _, fdata = flat[row - 1]
 
-        # Return the bundle ID if this file is bundled, matching what
-        # the file selector sets as active_file.
-        for bundle in data_manager.bundle_manager.bundles.values():
-            if bundle.main_file and bundle.main_file.get('id') == fdata.get('record', {}).get('id'):
-                return bundle.bundle_id
-            if data_manager.loaded_data.get(bundle.bundle_id) is fdata:
-                return bundle.bundle_id
+        rec_id = fdata.get('record', {}).get('id', '')
 
-        # Fallback: use the loaded_data key
+        bundle = data_manager.get_bundle_for_component(rec_id) if hasattr(data_manager, 'get_bundle_for_component') else None
+        if bundle:
+            from services.data_store import BundleType
+            if bundle.bundle_type == BundleType.LCMS:
+                return rec_id
+
+        for b in data_manager.bundle_manager.bundles.values():
+            if b.main_file and b.main_file.get('id') == rec_id:
+                return b.bundle_id
+            if data_manager.loaded_data.get(b.bundle_id) is fdata:
+                return b.bundle_id
+
         for fid, fd in data_manager.loaded_data.items():
             if fd is fdata:
                 return fid
-        return fdata.get('record', {}).get('id') or active_file
+        return rec_id or active_file
 
     @app.callback(
         [Output('main-plot', 'figure', allow_duplicate=True),

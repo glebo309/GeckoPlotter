@@ -7,7 +7,7 @@ import dash
 from dash import dcc, html, Input, Output, State, dash_table
 import pandas as pd
 
-def _icon(name, width=14, height=14, color='#666', **kw):
+def _icon(name, width=14, height=14, color='#333', **kw):
     glyphs = {
         'tabler:eye': '○',
         'tabler:trash': '×',
@@ -54,7 +54,8 @@ def register_upload_callbacks(app: dash.Dash, data_manager) -> None:
          Output('metadata-container', 'children', allow_duplicate=True),
          Output('table-editor-container', 'children', allow_duplicate=True),
          Output('pub-data-store', 'data', allow_duplicate=True),
-         Output('render-trigger', 'data', allow_duplicate=True)],
+         Output('render-trigger', 'data', allow_duplicate=True),
+         Output('pt-layout-mode', 'value', allow_duplicate=True)],
         Input('upload-button', 'contents'),
         [State('upload-button', 'filename'),
          State('upload-button', 'last_modified'),
@@ -73,13 +74,14 @@ def register_upload_callbacks(app: dash.Dash, data_manager) -> None:
         4. Auto-import peaks from Integration.txt components
         """
         if not contents_list or not filenames:
-            return (dash.no_update,) * 7
+            return (dash.no_update,) * 8
 
         try:
             import base64
             import tempfile
             from ingestion import ingest_file
             from services.bundling_service import assign_bundles
+            from services.data_store import BundleType
 
             parsed_files = []
             failed_names = set()
@@ -106,11 +108,12 @@ def register_upload_callbacks(app: dash.Dash, data_manager) -> None:
                     failed_names.add(fname)
 
             if not parsed_files:
-                return (dash.no_update,) * 7
+                return (dash.no_update,) * 8
 
             new_bundles = assign_bundles(parsed_files)
 
             last_bundle_id = None
+            auto_layout_mode = dash.no_update
             for bundle in new_bundles:
                 data_manager.add_bundle(bundle)
                 last_bundle_id = bundle.bundle_id
@@ -119,6 +122,9 @@ def register_upload_callbacks(app: dash.Dash, data_manager) -> None:
 
                 if bundle.has_integration_data():
                     _auto_import_peaks(data_manager, bundle)
+
+                if bundle.bundle_type == BundleType.LCMS and len(bundle.component_list) > 1:
+                    auto_layout_mode = 'stacked'
 
             loaded_files = data_manager.get_loaded_files_list()
 
@@ -158,11 +164,11 @@ def register_upload_callbacks(app: dash.Dash, data_manager) -> None:
 
             log.debug(f"Upload complete: {len(new_bundles)} bundles from {len(parsed_files)} files")
             return (loaded_files, tree_items, auto_active_file, auto_table,
-                    table_editor, pub_data, (render_counter or 0) + 1)
+                    table_editor, pub_data, (render_counter or 0) + 1, auto_layout_mode)
 
         except Exception as e:
             log.exception(f"Upload failed: {str(e)}")
-            return (dash.no_update,) * 7
+            return (dash.no_update,) * 8
 
     @app.callback(
         [Output('loaded-files', 'data', allow_duplicate=True),
@@ -171,7 +177,8 @@ def register_upload_callbacks(app: dash.Dash, data_manager) -> None:
          Output('metadata-container', 'children', allow_duplicate=True),
          Output('table-editor-container', 'children', allow_duplicate=True),
          Output('pub-data-store', 'data', allow_duplicate=True),
-         Output('render-trigger', 'data', allow_duplicate=True)],
+         Output('render-trigger', 'data', allow_duplicate=True),
+         Output('pt-layout-mode', 'value', allow_duplicate=True)],
         Input('drop-zone', 'contents'),
         [State('drop-zone', 'filename'),
          State('drop-zone', 'last_modified'),
@@ -181,7 +188,7 @@ def register_upload_callbacks(app: dash.Dash, data_manager) -> None:
     )
     def handle_drop_upload(contents_list, filenames, last_modified_list, existing_files, render_counter):
         if not contents_list or not filenames:
-            return (dash.no_update,) * 7
+            return (dash.no_update,) * 8
         return handle_file_upload(contents_list, filenames, last_modified_list, existing_files, render_counter)
 
 
@@ -447,7 +454,7 @@ def render_bundle_item_selected(bundle_item: dict, is_selected: bool = False, da
                     }
                 ),
                 html.Button(
-                    _icon('tabler:trash', width=12, height=12, color='#999'),
+                    _icon('tabler:trash', width=12, height=12, color='#333'),
                     id={'type': 'delete-btn', 'index': bundle_id},
                     title='Delete bundle',
                     className='tree-action-btn',
@@ -584,7 +591,7 @@ def render_individual_file_item_selected(item: dict, is_selected: bool = False, 
                             }
                         ),
                         html.Button(
-                            _icon('tabler:trash', width=12, height=12, color='#999'),
+                            _icon('tabler:trash', width=12, height=12, color='#333'),
                             id={'type': 'delete-btn', 'index': child_id},
                             title='Delete component',
                             style={
@@ -702,7 +709,7 @@ def render_individual_file_item_selected(item: dict, is_selected: bool = False, 
                     }
                 ),
                 html.Button(
-                    _icon('tabler:trash', width=12, height=12, color='#999'),
+                    _icon('tabler:trash', width=12, height=12, color='#333'),
                     id={'type': 'delete-btn', 'index': file_id},
                     title='Delete file',
                     className='tree-action-btn',
