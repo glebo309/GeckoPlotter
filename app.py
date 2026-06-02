@@ -943,7 +943,9 @@ _layout_body = html.Div(
                                                         dmc.TabsTab("Across Samples", value="across-samples"),
                                                         dmc.TabsTab("Metadata", value="metadata"),
                                                         dmc.TabsTab("Calibration", value="calibration"),
-                                                        dmc.TabsTab("MS Analysis", value="ms-viewer"),
+                                                        dmc.TabsTab("MS Scan", value="ms-scan"),
+                                                        dmc.TabsTab("EIC", value="ms-eic"),
+                                                        dmc.TabsTab("Peak Mass", value="ms-peak-mass"),
                                                     ]),
                                                     # Data Overview Tab
                                                     dmc.TabsPanel(value="data-overview", style={'flex': '1', 'overflow': 'auto'}, children=[
@@ -1216,146 +1218,207 @@ _layout_body = html.Div(
                                                         ])
                                                     ]),
                                                     ]),
-                                                    # MS Analysis Tab
-                                                    dmc.TabsPanel(value="ms-viewer", style={'flex': '1', 'overflow': 'auto'}, children=[
-                                                    html.Div(id="ms-viewer-content", className="tab-content", style={
-                                                        'display': 'block',
-                                                        'padding': '10px 14px',
-                                                        'height': '100%',
-                                                        'overflowY': 'auto'
+                                                    # ── MS Scan tab ──
+                                                    dmc.TabsPanel(value="ms-scan", style={'flex': '1', 'overflow': 'auto'}, children=[
+                                                    html.Div(className="tab-content", style={
+                                                        'display': 'block', 'padding': '10px 14px',
+                                                        'height': '100%', 'overflowY': 'auto'
+                                                    }, children=[
+                                                        html.Div([
+                                                            html.Div('Apex / Scan Spectrum', style={
+                                                                'fontWeight': 'bold', 'fontSize': '12px'}),
+                                                            html.Div([
+                                                                html.Span('+', id='ms-polarity-pos-label', style={
+                                                                    'fontSize': '12px', 'fontWeight': '600',
+                                                                    'color': '#333', 'cursor': 'default'}),
+                                                                dmc.Switch(id='ms-polarity-toggle',
+                                                                           checked=False, size='sm',
+                                                                           style={'margin': '0 4px'}),
+                                                                html.Span('−', id='ms-polarity-neg-label', style={
+                                                                    'fontSize': '12px', 'fontWeight': '400',
+                                                                    'color': '#999', 'cursor': 'default'}),
+                                                            ], id='ms-polarity-toggle-wrapper', style={
+                                                                'display': 'none', 'alignItems': 'center', 'gap': '2px'}),
+                                                        ], style={
+                                                            'display': 'flex', 'justifyContent': 'space-between',
+                                                            'alignItems': 'center', 'margin': '0 0 4px 2px'}),
+                                                        html.Div(id='ms-scan-label',
+                                                                 children='No scan selected',
+                                                                 style={'fontSize': '11px', 'color': '#555',
+                                                                        'marginBottom': '2px', 'marginLeft': '2px'}),
+                                                        html.Div([
+                                                            dcc.Slider(id='ms-scan-slider',
+                                                                       min=0, max=1, step=1, value=0,
+                                                                       updatemode='drag',
+                                                                       marks=None,
+                                                                       tooltip={'placement': 'bottom', 'always_visible': False}),
+                                                        ], style={'padding': '0 4px 4px 4px'}),
+                                                        dcc.Graph(id='ms-spectrum-graph',
+                                                                  figure=go.Figure(layout=go.Layout(
+                                                                      template='plotly_white',
+                                                                      margin=dict(l=50, r=20, t=10, b=38),
+                                                                      xaxis=dict(visible=False),
+                                                                      yaxis=dict(visible=False),
+                                                                      annotations=[dict(
+                                                                          text='Click TIC/EIC or extract a target ion',
+                                                                          xref='paper', yref='paper',
+                                                                          x=0.5, y=0.5, showarrow=False,
+                                                                          font=dict(size=13, color='#999'),
+                                                                      )])),
+                                                                  responsive=True,
+                                                                  style={'width': '100%', 'height': '280px'},
+                                                                  config={
+                                                                      'responsive': True,
+                                                                      'displayModeBar': False,
+                                                                      'displaylogo': False,
+                                                                      'doubleClick': 'reset+autosize',
+                                                                      'scrollZoom': True,
+                                                                  }),
+                                                        html.Div(id='ms-spectrum-info',
+                                                                 style={'fontSize': '12px', 'padding': '6px 8px',
+                                                                        'backgroundColor': 'rgba(0,0,0,0.02)',
+                                                                        'borderRadius': '6px', 'marginTop': '4px',
+                                                                        'minHeight': '20px'}),
+                                                    ]),
+                                                    ]),
+                                                    # ── EIC tab ──
+                                                    dmc.TabsPanel(value="ms-eic", style={'flex': '1', 'overflow': 'auto'}, children=[
+                                                    html.Div(className="tab-content", style={
+                                                        'display': 'block', 'padding': '10px 14px',
+                                                        'height': '100%', 'overflowY': 'auto'
+                                                    }, children=[
+                                                        html.Div([
+                                                            html.Div('Extracted Ion Chromatogram', style={
+                                                                'fontWeight': 'bold', 'fontSize': '12px'}),
+                                                            html.Div([
+                                                                html.Span('+', id='eic-polarity-pos-label', style={
+                                                                    'fontSize': '12px', 'fontWeight': '600',
+                                                                    'color': '#333', 'cursor': 'default'}),
+                                                                dmc.Switch(id='eic-polarity-toggle',
+                                                                           checked=False, size='sm',
+                                                                           style={'margin': '0 4px'}),
+                                                                html.Span('−', id='eic-polarity-neg-label', style={
+                                                                    'fontSize': '12px', 'fontWeight': '400',
+                                                                    'color': '#999', 'cursor': 'default'}),
+                                                            ], id='eic-polarity-toggle-wrapper', style={
+                                                                'display': 'none', 'alignItems': 'center', 'gap': '2px'}),
+                                                        ], style={
+                                                            'display': 'flex', 'justifyContent': 'space-between',
+                                                            'alignItems': 'center', 'margin': '0 0 4px 2px'}),
+                                                        html.Div([
+                                                            html.Div([
+                                                                html.Label('Target m/z', className='form-label'),
+                                                                dcc.Input(id='eic-mz-input', type='number',
+                                                                          placeholder='e.g. 294.1',
+                                                                          className='form-input',
+                                                                          style={'width': '100%'}),
+                                                            ], style={'flex': '2', 'minWidth': '120px'}),
+                                                            html.Div([
+                                                                html.Label('Tolerance', className='form-label'),
+                                                                dcc.Input(id='eic-tolerance-input', type='number',
+                                                                          value=0.5, step=0.1,
+                                                                          className='form-input',
+                                                                          style={'width': '100%'}),
+                                                            ], style={'flex': '1', 'minWidth': '90px'}),
+                                                            html.Div([
+                                                                html.Button('Extract', id='eic-extract-btn',
+                                                                            className='btn btn-primary',
+                                                                            style={'width': '100%'}),
+                                                            ], style={'flex': '1', 'minWidth': '90px', 'paddingTop': '18px'}),
+                                                            html.Div([
+                                                                html.Button('Clear', id='eic-clear-btn',
+                                                                            className='btn',
+                                                                            style={'width': '100%'}),
+                                                            ], style={'flex': '0.7', 'minWidth': '72px', 'paddingTop': '18px'}),
+                                                        ], style={'display': 'flex', 'gap': '8px',
+                                                                  'alignItems': 'flex-start',
+                                                                  'flexWrap': 'wrap'}),
+                                                        html.Div(id='eic-active-list', style={
+                                                            'marginTop': '8px', 'display': 'flex',
+                                                            'flexWrap': 'wrap', 'gap': '4px'}),
+                                                        dcc.Graph(id='eic-graph',
+                                                                  figure=go.Figure(layout=go.Layout(
+                                                                      template='plotly_white',
+                                                                      margin=dict(l=50, r=20, t=10, b=36),
+                                                                      xaxis=dict(visible=False),
+                                                                      yaxis=dict(visible=False),
+                                                                      annotations=[dict(
+                                                                          text='Extract an EIC to view it here',
+                                                                          xref='paper', yref='paper',
+                                                                          x=0.5, y=0.5, showarrow=False,
+                                                                          font=dict(size=13, color='#999'),
+                                                                      )])),
+                                                                  responsive=True,
+                                                                  style={'width': '100%', 'height': '260px'},
+                                                                  config={
+                                                                      'responsive': True,
+                                                                      'displayModeBar': False,
+                                                                      'displaylogo': False,
+                                                                      'doubleClick': 'reset+autosize',
+                                                                      'scrollZoom': True,
+                                                                  }),
+                                                    ]),
+                                                    ]),
+                                                    # ── Peak Mass tab ──
+                                                    dmc.TabsPanel(value="ms-peak-mass", style={'flex': '1', 'overflow': 'auto'}, children=[
+                                                    html.Div(className="tab-content", style={
+                                                        'display': 'block', 'padding': '10px 14px',
+                                                        'height': '100%', 'overflowY': 'auto'
                                                     }, children=[
                                                         html.Div([
                                                             html.Div([
+                                                                html.Div('Peak Mass Spectrum', style={
+                                                                    'fontWeight': 'bold', 'fontSize': '12px'}),
                                                                 html.Div([
-                                                                    html.Div('Apex / Scan Spectrum', style={
-                                                                        'fontWeight': 'bold', 'fontSize': '12px'}),
-                                                                    html.Div([
-                                                                        html.Span('+', id='ms-polarity-pos-label', style={
-                                                                            'fontSize': '12px', 'fontWeight': '600',
-                                                                            'color': '#333', 'cursor': 'default'}),
-                                                                        dmc.Switch(id='ms-polarity-toggle',
-                                                                                   checked=False, size='sm',
-                                                                                   style={'margin': '0 4px'}),
-                                                                        html.Span('−', id='ms-polarity-neg-label', style={
-                                                                            'fontSize': '12px', 'fontWeight': '400',
-                                                                            'color': '#999', 'cursor': 'default'}),
-                                                                    ], id='ms-polarity-toggle-wrapper', style={
-                                                                        'display': 'none', 'alignItems': 'center', 'gap': '2px'}),
-                                                                ], style={
-                                                                    'display': 'flex', 'justifyContent': 'space-between',
-                                                                    'alignItems': 'center', 'margin': '0 0 4px 2px'}),
-                                                                dcc.Graph(id='ms-spectrum-graph',
-                                                                          figure=go.Figure(layout=go.Layout(
-                                                                              template='plotly_white',
-                                                                              margin=dict(l=50, r=20, t=10, b=38),
-                                                                              xaxis=dict(visible=False),
-                                                                              yaxis=dict(visible=False),
-                                                                              annotations=[dict(
-                                                                                  text='Click TIC/EIC or extract a target ion',
-                                                                                  xref='paper', yref='paper',
-                                                                                  x=0.5, y=0.5, showarrow=False,
-                                                                                  font=dict(size=13, color='#999'),
-                                                                              )])),
-                                                                          responsive=True,
-                                                                          style={'width': '100%', 'height': '280px'},
-                                                                          config={
-                                                                              'responsive': True,
-                                                                              'displayModeBar': False,
-                                                                              'displaylogo': False,
-                                                                              'doubleClick': 'reset+autosize',
-                                                                              'scrollZoom': True,
-                                                                          }),
-                                                                html.Div([
-                                                                    html.Div(id='ms-scan-label',
-                                                                             children='No scan selected',
-                                                                             style={'fontSize': '11px', 'color': '#555',
-                                                                                    'marginBottom': '2px'}),
-                                                                    dcc.Slider(id='ms-scan-slider',
-                                                                               min=0, max=1, step=1, value=0,
-                                                                               updatemode='drag',
-                                                                               marks=None,
-                                                                               tooltip={'placement': 'bottom', 'always_visible': False}),
-                                                                ], style={'padding': '0 4px 2px 4px'}),
-                                                                html.Div(id='ms-spectrum-info',
-                                                                         style={'fontSize': '12px', 'padding': '6px 8px',
-                                                                                'backgroundColor': 'rgba(0,0,0,0.02)',
-                                                                                'borderRadius': '6px', 'marginTop': '4px',
-                                                                                'minHeight': '20px'}),
-                                                            ]),
-                                                            html.Div([
-                                                                html.Div([
-                                                                    html.Div('Extracted Ion Chromatogram', style={
-                                                                        'fontWeight': 'bold', 'fontSize': '12px'}),
-                                                                    html.Div([
-                                                                        html.Span('+', id='eic-polarity-pos-label', style={
-                                                                            'fontSize': '12px', 'fontWeight': '600',
-                                                                            'color': '#333', 'cursor': 'default'}),
-                                                                        dmc.Switch(id='eic-polarity-toggle',
-                                                                                   checked=False, size='sm',
-                                                                                   style={'margin': '0 4px'}),
-                                                                        html.Span('−', id='eic-polarity-neg-label', style={
-                                                                            'fontSize': '12px', 'fontWeight': '400',
-                                                                            'color': '#999', 'cursor': 'default'}),
-                                                                    ], id='eic-polarity-toggle-wrapper', style={
-                                                                        'display': 'none', 'alignItems': 'center', 'gap': '2px'}),
-                                                                ], style={
-                                                                    'display': 'flex', 'justifyContent': 'space-between',
-                                                                    'alignItems': 'center', 'margin': '0 0 4px 2px'}),
-                                                                html.Div([
-                                                                    html.Div([
-                                                                        html.Label('Target m/z', className='form-label'),
-                                                                        dcc.Input(id='eic-mz-input', type='number',
-                                                                                  placeholder='e.g. 294.1',
-                                                                                  className='form-input',
-                                                                                  style={'width': '100%'}),
-                                                                    ], style={'flex': '2', 'minWidth': '120px'}),
-                                                                    html.Div([
-                                                                        html.Label('Tolerance', className='form-label'),
-                                                                        dcc.Input(id='eic-tolerance-input', type='number',
-                                                                                  value=0.5, step=0.1,
-                                                                                  className='form-input',
-                                                                                  style={'width': '100%'}),
-                                                                    ], style={'flex': '1', 'minWidth': '90px'}),
-                                                                    html.Div([
-                                                                        html.Button('Extract', id='eic-extract-btn',
-                                                                                    className='btn btn-primary',
-                                                                                    style={'width': '100%'}),
-                                                                    ], style={'flex': '1', 'minWidth': '90px', 'paddingTop': '18px'}),
-                                                                    html.Div([
-                                                                        html.Button('Clear', id='eic-clear-btn',
-                                                                                    className='btn',
-                                                                                    style={'width': '100%'}),
-                                                                    ], style={'flex': '0.7', 'minWidth': '72px', 'paddingTop': '18px'}),
-                                                                ], style={'display': 'flex', 'gap': '8px',
-                                                                          'alignItems': 'flex-start',
-                                                                          'flexWrap': 'wrap'}),
-                                                                html.Div(id='eic-active-list', style={
-                                                                    'marginTop': '8px', 'display': 'flex',
-                                                                    'flexWrap': 'wrap', 'gap': '4px'}),
-                                                                dcc.Graph(id='eic-graph',
-                                                                          figure=go.Figure(layout=go.Layout(
-                                                                              template='plotly_white',
-                                                                              margin=dict(l=50, r=20, t=10, b=36),
-                                                                              xaxis=dict(visible=False),
-                                                                              yaxis=dict(visible=False),
-                                                                              annotations=[dict(
-                                                                                  text='Extract an EIC to view it here',
-                                                                                  xref='paper', yref='paper',
-                                                                                  x=0.5, y=0.5, showarrow=False,
-                                                                                  font=dict(size=13, color='#999'),
-                                                                              )])),
-                                                                          responsive=True,
-                                                                          style={'width': '100%', 'height': '260px'},
-                                                                          config={
-                                                                              'responsive': True,
-                                                                              'displayModeBar': False,
-                                                                              'displaylogo': False,
-                                                                              'doubleClick': 'reset+autosize',
-                                                                              'scrollZoom': True,
-                                                                          }),
-                                                            ], style={'padding': '10px', 'backgroundColor': 'rgba(0,0,0,0.02)',
-                                                                      'borderRadius': '8px'}),
-                                                        ], style={'display': 'flex', 'flexDirection': 'column', 'gap': '12px'})
+                                                                    html.Span('+', id='peak-mass-polarity-pos-label', style={
+                                                                        'fontSize': '12px', 'fontWeight': '600',
+                                                                        'color': '#333', 'cursor': 'default'}),
+                                                                    dmc.Switch(id='peak-mass-polarity-toggle',
+                                                                               checked=False, size='sm',
+                                                                               style={'margin': '0 4px'}),
+                                                                    html.Span('−', id='peak-mass-polarity-neg-label', style={
+                                                                        'fontSize': '12px', 'fontWeight': '400',
+                                                                        'color': '#999', 'cursor': 'default'}),
+                                                                ], id='peak-mass-polarity-wrapper', style={
+                                                                    'display': 'none', 'alignItems': 'center', 'gap': '2px'}),
+                                                            ], style={
+                                                                'display': 'flex', 'justifyContent': 'space-between',
+                                                                'alignItems': 'center', 'marginBottom': '6px'}),
+                                                            dcc.Graph(id='peak-mass-graph',
+                                                                      figure=go.Figure(layout=go.Layout(
+                                                                          template='plotly_white',
+                                                                          margin=dict(l=50, r=20, t=10, b=38),
+                                                                          xaxis=dict(visible=False),
+                                                                          yaxis=dict(visible=False),
+                                                                          annotations=[dict(
+                                                                              text='Select a peak to view its mass spectrum',
+                                                                              xref='paper', yref='paper',
+                                                                              x=0.5, y=0.5, showarrow=False,
+                                                                              font=dict(size=13, color='#999'),
+                                                                          )])),
+                                                                      responsive=True,
+                                                                      style={'width': '100%', 'height': '280px'},
+                                                                      config={
+                                                                          'responsive': True,
+                                                                          'displayModeBar': False,
+                                                                          'displaylogo': False,
+                                                                          'doubleClick': 'reset+autosize',
+                                                                          'scrollZoom': True,
+                                                                      }),
+                                                            html.Div(id='peak-mass-info',
+                                                                     style={'fontSize': '12px', 'padding': '6px 8px',
+                                                                            'backgroundColor': 'rgba(0,0,0,0.02)',
+                                                                            'borderRadius': '6px', 'marginTop': '4px',
+                                                                            'minHeight': '20px'}),
+                                                            dmc.Select(
+                                                                id='peak-mass-selector',
+                                                                placeholder='Select a peak...',
+                                                                data=[],
+                                                                size='xs',
+                                                                clearable=True,
+                                                                style={'marginTop': '8px'},
+                                                            ),
+                                                        ]),
                                                     ]),
                                                     ]),
                                                     ],
@@ -1425,6 +1488,7 @@ _layout_body = html.Div(
                         dmc.MenuItem('Delete Peak', id='ctx-delete-item'),
                         dmc.MenuItem('Rename Peak', id='ctx-rename-item'),
                         dmc.MenuItem('Deconvolute', id='ctx-deconvolve-item'),
+                        dmc.MenuItem('Show Mass', id='ctx-show-mass-item'),
                         dmc.MenuItem('Integrate in All Files', id='ctx-integrate-item'),
                     ]),
                 ],

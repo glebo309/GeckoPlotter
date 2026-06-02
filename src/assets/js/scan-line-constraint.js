@@ -50,9 +50,9 @@
     }
 
     function msViewerActive() {
-        var panel = document.getElementById('ms-viewer-content');
-        if (!panel || !panel.getClientRects || !panel.getClientRects().length) return false;
-        return window.getComputedStyle(panel).display !== 'none';
+        var root = sliderRoot();
+        if (!root || !root.getClientRects || !root.getClientRects().length) return false;
+        return window.getComputedStyle(root).display !== 'none';
     }
 
     function sliderIndex() {

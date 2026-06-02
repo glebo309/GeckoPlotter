@@ -212,9 +212,45 @@
         }
     }
 
+    function _isPeakOverlay(traceObj) {
+        var name = traceObj.name || '';
+        var meta = traceObj.meta;
+        return traceObj.fill || meta === 'peak_overlay' || meta === 'deconv_overlay' ||
+            name.indexOf('peak:') === 0 || name === '__deselect__' ||
+            name.toLowerCase().indexOf('baseline') !== -1;
+    }
+
+    function _clickInsidePeakPolygon(gd, event) {
+        if (!gd || !gd.data || !gd._fullLayout) return false;
+        var rect = gd.getBoundingClientRect();
+        var cx = event.clientX - rect.left;
+        var cy = event.clientY - rect.top;
+        var plots = gd._fullLayout._plots || {};
+        for (var k in plots) {
+            var pa = plots[k].xaxis;
+            var ya = plots[k].yaxis;
+            if (!pa || !ya) continue;
+            var dataX = pa.p2d(cx - pa._offset);
+            for (var i = 0; i < gd.data.length; i++) {
+                var t = gd.data[i];
+                if (t.meta !== 'peak_overlay' || t.fill !== 'toself') continue;
+                var xs = t.x;
+                if (!xs || xs.length < 3) continue;
+                var xMin = Infinity, xMax = -Infinity;
+                for (var j = 0; j < xs.length; j++) {
+                    if (xs[j] != null) { xMin = Math.min(xMin, xs[j]); xMax = Math.max(xMax, xs[j]); }
+                }
+                if (dataX >= xMin && dataX <= xMax) return true;
+            }
+            break;
+        }
+        return false;
+    }
+
     function traceAtEvent(gd, event) {
         if (!gd || !gd.data) return null;
-        // Use Plotly's hover data — set whenever the cursor is near a trace.
+        if (_clickInsidePeakPolygon(gd, event)) return null;
+        // Use Plotly's hover data -- set whenever the cursor is near a trace.
         // Plotly's closest-mode hover has generous proximity, so this fires
         // even when the cursor isn't pixel-perfect on the thin line.
         var hoverData = gd._hoverdata;
@@ -225,17 +261,13 @@
         var name = gd.data[curveNumber].name || '';
         var traceObj = gd.data[curveNumber];
         // Skip peak overlay traces
-        if (traceObj.fill || name.indexOf('peak:') === 0 ||
-            name === '__deselect__' || name.toLowerCase().indexOf('baseline') !== -1) {
+        if (_isPeakOverlay(traceObj)) {
             return null;
         }
         // Count data-trace index (skipping peak traces) for palette color lookup
         var dataIdx = 0;
         for (var i = 0; i < curveNumber; i++) {
-            var t = gd.data[i];
-            var tn = t.name || '';
-            if (t.fill || tn.indexOf('peak:') === 0 ||
-                tn === '__deselect__' || tn.toLowerCase().indexOf('baseline') !== -1) continue;
+            if (_isPeakOverlay(gd.data[i])) continue;
             dataIdx++;
         }
         return {curve_number: dataIdx, trace_name: name};

@@ -212,3 +212,17 @@ def register_context_menu_callbacks(app: dash.Dash, data_manager) -> None:
             status = f'Integrated in {matched}/{n_targets} files (peak not found in {n_targets - matched}).'
         log.debug(f"context-menu integrate-all: {status}")
         return False, (peak_counter or 0) + 1, (render_counter or 0) + 1, status
+
+    # ── Show Mass: switch to Peak Mass tab and select this peak ──────
+    @app.callback(
+        [Output('context-menu', 'opened', allow_duplicate=True),
+         Output('analysis-tabs', 'value', allow_duplicate=True),
+         Output('peak-mass-selector', 'value', allow_duplicate=True)],
+        Input('ctx-show-mass-item', 'n_clicks'),
+        State('context-menu-store', 'data'),
+        prevent_initial_call=True,
+    )
+    def show_mass(n_clicks, store):
+        if not n_clicks or not store or not store.get('peak_id'):
+            raise PreventUpdate
+        return False, 'ms-peak-mass', store['peak_id']

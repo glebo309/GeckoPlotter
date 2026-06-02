@@ -274,7 +274,7 @@ def register_lcms_callbacks(app, data_manager):
             var host = overlay ? overlay.parentElement : null;
             var handle = sliderRoot ? sliderRoot.querySelector('[role="slider"]') : null;
 
-            if (activeTab !== 'ms-viewer' || !active || scanIdx === null || scanIdx === undefined || !host || !handle) {
+            if ((activeTab !== 'ms-scan' && activeTab !== 'ms-eic' && activeTab !== 'ms-peak-mass') || !active || scanIdx === null || scanIdx === undefined || !host || !handle) {
                 return hidden;
             }
 
@@ -457,6 +457,200 @@ def register_lcms_callbacks(app, data_manager):
             dash.no_update,
             "Cleared EICs",
         )
+
+    # ------------------------------------------------------------------
+    # 3. Peak Mass - populate selector and show averaged spectrum
+    # ------------------------------------------------------------------
+    @app.callback(
+        Output('peak-mass-selector', 'data'),
+        [Input('peak-change-trigger', 'data'),
+         Input('active-file', 'data')],
+    )
+    def update_peak_mass_selector(_, active_file):
+        if not active_file:
+            return []
+        ps = data_manager.peak_service
+        peaks = ps.get_peaks(active_file) or []
+        if not peaks:
+            bundle = data_manager.get_bundle(active_file) if hasattr(data_manager, 'get_bundle') else None
+            if not bundle and hasattr(data_manager, 'get_bundle_for_component'):
+                bundle = data_manager.get_bundle_for_component(active_file)
+            if bundle:
+                for comp in bundle.component_list:
+                    peaks = ps.get_peaks(comp.component_id) or []
+                    if peaks:
+                        break
+        options = []
+        for p in peaks:
+            label = p.label or p.name or p.peak_id
+            detail = f"{label}  (RT {p.rt_start:.2f}–{p.rt_end:.2f} min)"
+            options.append({'label': detail, 'value': p.peak_id})
+        return options
+
+    @app.callback(
+        [Output('peak-mass-polarity-toggle', 'checked'),
+         Output('peak-mass-polarity-wrapper', 'style'),
+         Output('peak-mass-polarity-pos-label', 'style'),
+         Output('peak-mass-polarity-neg-label', 'style')],
+        Input('active-file', 'data'),
+        prevent_initial_call=True,
+    )
+    def peak_mass_polarity_visibility(active_file):
+        hidden = {'display': 'none', 'alignItems': 'center', 'gap': '2px'}
+        visible = {'display': 'flex', 'alignItems': 'center', 'gap': '2px'}
+        pos_active = {'fontSize': '12px', 'fontWeight': '600', 'color': '#333', 'cursor': 'default'}
+        pos_dim = {'fontSize': '12px', 'fontWeight': '400', 'color': '#999', 'cursor': 'default'}
+
+        if not active_file:
+            return False, hidden, pos_active, pos_dim
+
+        bundle = data_manager.get_bundle(active_file) if hasattr(data_manager, 'get_bundle') else None
+        if not bundle and hasattr(data_manager, 'get_bundle_for_component'):
+            bundle = data_manager.get_bundle_for_component(active_file)
+        if not bundle or bundle.bundle_type != BundleType.LCMS:
+            return False, hidden, pos_active, pos_dim
+
+        has_pos = bundle.get_component(ComponentRole.MS_POSITIVE) is not None
+        has_neg = bundle.get_component(ComponentRole.MS_NEGATIVE) is not None
+        if has_pos and has_neg:
+            return False, visible, pos_active, pos_dim
+        return False, hidden, pos_active, pos_dim
+
+    @app.callback(
+        [Output('peak-mass-graph', 'figure'),
+         Output('peak-mass-info', 'children')],
+        [Input('peak-mass-selector', 'value'),
+         Input('peak-mass-polarity-toggle', 'checked')],
+        State('active-file', 'data'),
+        prevent_initial_call=True,
+    )
+    def show_peak_mass(peak_id, use_negative, active_file):
+        if not peak_id or not active_file:
+            return _empty_peak_mass("Select a peak to view its mass spectrum"), ""
+
+        ps = data_manager.peak_service
+
+        def _find(fid):
+            for p in (ps.get_peaks(fid) or []):
+                if p.peak_id == peak_id:
+                    return fid, p
+            return None, None
+
+        file_id, peak = _find(active_file)
+        if not peak:
+            bundle = data_manager.get_bundle(active_file) if hasattr(data_manager, 'get_bundle') else None
+            if not bundle and hasattr(data_manager, 'get_bundle_for_component'):
+                bundle = data_manager.get_bundle_for_component(active_file)
+            if bundle:
+                for comp in bundle.component_list:
+                    file_id, peak = _find(comp.component_id)
+                    if peak:
+                        break
+
+        if not peak:
+            return _empty_peak_mass("Peak not found"), ""
+
+        resolved = _resolve_lcms_spectral_entry(data_manager, active_file, lcms_svc)
+        resolved_id, file_data = resolved if resolved else (None, None)
+        if not file_data or not lcms_svc.has_spectral_data(file_data):
+            return _empty_peak_mass("No mass spectral data for this file"), ""
+
+        polarity_label = "+"
+        if use_negative:
+            other_id, other_data = _opposite_polarity_component(
+                data_manager, active_file, resolved_id)
+            if other_data and lcms_svc.has_spectral_data(other_data):
+                file_data = other_data
+                polarity_label = "−"
+            else:
+                return _empty_peak_mass("No negative-mode data available"), ""
+
+        mz, intensity = lcms_svc.get_averaged_spectrum(file_data, peak.rt_start, peak.rt_end)
+        if mz.size == 0:
+            return _empty_peak_mass("No scans in peak RT window"), ""
+
+        return _build_peak_mass_figure(mz, intensity, peak, polarity_label)
+
+    @app.callback(
+        Output('peak-mass-selector', 'value', allow_duplicate=True),
+        Input('selected-peak-idx', 'data'),
+        State('active-file', 'data'),
+        prevent_initial_call=True,
+    )
+    def sync_peak_mass_to_click(selected_peak_id, active_file):
+        if not selected_peak_id or not active_file:
+            raise dash.exceptions.PreventUpdate
+        return selected_peak_id
+
+
+def _empty_peak_mass(message: str) -> go.Figure:
+    fig = go.Figure()
+    fig.update_layout(
+        template='plotly_white',
+        margin=dict(l=50, r=20, t=10, b=38),
+        xaxis=dict(visible=False),
+        yaxis=dict(visible=False),
+        annotations=[dict(
+            text=message, xref='paper', yref='paper',
+            x=0.5, y=0.5, showarrow=False,
+            font=dict(size=13, color='#999'),
+        )],
+    )
+    return fig
+
+
+def _build_peak_mass_figure(mz, intensity, peak, polarity_label="+"):
+    display = np.asarray(intensity, dtype=float)
+    if display.size:
+        display = display - np.nanmin(display)
+    max_int = np.nanmax(display) if display.size else 1.0
+    rel = display / max_int * 100 if max_int > 0 else display
+
+    fig = go.Figure()
+    TraceType = go.Scattergl if mz.size > 1200 else go.Scatter
+
+    xs, ys, cd = [], [], []
+    for x_val, y_val, i_val in zip(mz, rel, intensity):
+        xs.extend([x_val, x_val, None])
+        ys.extend([0, y_val, None])
+        cd.extend([i_val, i_val, None])
+
+    fig.add_trace(TraceType(
+        x=xs, y=ys, mode='lines',
+        line=dict(color='#6B46C1', width=1),
+        hoverinfo='skip', showlegend=False,
+    ))
+    fig.add_trace(TraceType(
+        x=mz, y=rel, mode='markers',
+        marker=dict(color='#6B46C1', size=3, opacity=0.45),
+        customdata=intensity,
+        hovertemplate=(
+            'm/z: %{x:.4g}<br>'
+            'Intensity: %{customdata:.4g}<br>'
+            'Relative: %{y:.1f}%<extra></extra>'
+        ),
+        showlegend=False,
+    ))
+    fig.update_layout(
+        template='plotly_white',
+        margin=dict(l=48, r=16, t=20, b=38),
+        xaxis_title='m/z',
+        yaxis_title='Relative Intensity (%)',
+        hovermode='closest',
+        yaxis=dict(range=[0, 105], showgrid=False, showline=True,
+                   mirror=True, linecolor='#ccc', linewidth=1),
+        xaxis=dict(showgrid=False, showline=True, mirror=True,
+                   linecolor='#ccc', linewidth=1),
+        uirevision='peak-mass',
+    )
+
+    label = peak.label or peak.name or peak.peak_id
+    top_n = min(5, mz.size)
+    top_idx = np.argsort(intensity)[-top_n:][::-1]
+    top_peaks = ", ".join(f"{mz[i]:.1f}" for i in top_idx)
+    info = f"{label} | RT {peak.rt_start:.2f}–{peak.rt_end:.2f} min | Mode: {polarity_label} | Top m/z: {top_peaks}"
+
+    return fig, info
 
 
 def _empty_spectrum(message: str) -> go.Figure:
