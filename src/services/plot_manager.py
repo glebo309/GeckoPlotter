@@ -147,6 +147,15 @@ class PlotManager:
 
     # -- stacked (separate subplots) ----------------------------------------
 
+    _YLABEL_MAP = {
+        'ms_positive': 'Ion Count',
+        'ms_negative': 'Ion Count',
+        'lcms_ms': 'Ion Count',
+        'lcms_uv': 'Absorbance (mAU)',
+        'vwd_a': 'Absorbance (mAU)',
+        'vwd_b': 'Absorbance (mAU)',
+    }
+
     def _create_stacked_plot(self, files: list, subplot_spacing: float = 0.08) -> go.Figure:
         from plotly.subplots import make_subplots
 
@@ -168,7 +177,14 @@ class PlotManager:
                     trace.legend = f'legend{row}'
                 fig.add_trace(trace, row=row, col=1)
 
-        # Per-subplot legends
+            role = file_data.get('record', {}).get('type', '')
+            sr = file_data.get('standardized')
+            cat = sr.source_category.value if sr else ''
+            y_label = self._YLABEL_MAP.get(role) or self._YLABEL_MAP.get(cat, '')
+            if y_label:
+                axis_key = 'yaxis' if row == 1 else f'yaxis{row}'
+                fig.update_layout(**{axis_key: dict(title_text=y_label)})
+
         legend_kwargs = {}
         for row in range(1, n + 1):
             y_top = 1.0 - (row - 1) / n
@@ -196,6 +212,8 @@ class PlotManager:
         sr = file_data.get('standardized')
         if sr is None:
             return color_offset
+
+        file_id = file_data.get('record', {}).get('id', '')
 
         df = sr.data
         x_cols = sr.x_columns
@@ -229,6 +247,7 @@ class PlotManager:
                     x=xs, y=ys, mode='lines',
                     name=label,
                     line=dict(color=color, width=1),
+                    meta={'file_id': file_id},
                 ))
             else:
                 fig.add_trace(trace_cls(
@@ -237,6 +256,7 @@ class PlotManager:
                     mode="lines",
                     name=label,
                     line=dict(color=color, width=2),
+                    meta={'file_id': file_id},
                 ))
             idx += 1
 

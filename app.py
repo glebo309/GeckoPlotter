@@ -153,6 +153,7 @@ _layout_body = html.Div(
         dcc.Store(id='title-context-menu-close-store', data=0),  # bumped on outside click to close title editor
         dcc.Store(id='label-context-menu-store', data=None),  # {axis, x, y, ts} from axis label right-click
         dcc.Store(id='label-context-menu-close-store', data=0),  # bumped on outside click to close label editor
+        dcc.Store(id='ms-active-subplot-idx', data=0),  # which subplot row the active LCMS file is in
         dcc.Store(id='ms-plot-context-menu-store', data=None),  # {source, x, y, ts} from MS graph right-click
         dcc.Store(id='ms-plot-context-menu-close-store', data=0),
         dcc.Store(id='deconv-markers', data=[]),  # [{x, y}, ...] peak-center markers

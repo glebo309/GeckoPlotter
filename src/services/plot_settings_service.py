@@ -432,8 +432,13 @@ class PlotSettingsService:
                 fig.update_layout(**{key: merged})
             elif _yaxis_re.match(key):
                 merged = dict(axis_common_y)
-                if shared:
+                existing_y = layout_json.get(key, {})
+                existing_title = existing_y.get('title', {})
+                has_custom_label = isinstance(existing_title, dict) and existing_title.get('text', '')
+                if shared and not has_custom_label:
                     merged['title'] = dict(text='', standoff=20)
+                elif has_custom_label:
+                    merged['title'] = existing_title
                 fig.update_layout(**{key: merged})
 
         if not x_axes:
@@ -441,8 +446,13 @@ class PlotSettingsService:
         if not y_axes:
             fig.update_layout(yaxis=axis_common_y)
 
-        # Shared Y label as a centered annotation
-        if shared and settings.y_label:
+        # Shared Y label as a centered annotation (skip if subplots have custom labels)
+        any_custom_y = any(
+            isinstance(layout_json.get(k, {}).get('title', {}), dict)
+            and layout_json.get(k, {}).get('title', {}).get('text', '')
+            for k in layout_keys if _yaxis_re.match(k)
+        )
+        if shared and settings.y_label and not any_custom_y:
             fig.add_annotation(
                 text=settings.y_label,
                 xref='paper', yref='paper',

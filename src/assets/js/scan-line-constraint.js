@@ -20,8 +20,13 @@
 
     function plotRect() {
         var root = graphRoot();
-        var rectNode = root && root.querySelector('.nsewdrag');
-        if (!rectNode) return null;
+        if (!root) return null;
+        var drags = root.querySelectorAll('.nsewdrag');
+        if (!drags.length) return null;
+        // Use the subplot index from the cursor overlay state if available
+        var state = window.__geckoLcmsScanState;
+        var idx = (state && typeof state.subplotIdx === 'number') ? state.subplotIdx : 0;
+        var rectNode = drags[Math.min(idx, drags.length - 1)];
         var r = rectNode.getBoundingClientRect();
         return r.width > 0 && r.height > 0 ? r : null;
     }

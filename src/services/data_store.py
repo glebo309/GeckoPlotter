@@ -132,6 +132,31 @@ class Bundle:
     def y_columns(self) -> List[str]:
         return [column for column, role in self.column_roles.items() if role == ColumnRole.Y]
 
+    @staticmethod
+    def component_display_name(component: Component) -> str:
+        """Short display name for a bundle component."""
+        role = component.role
+        meta = component.metadata or {}
+        if role == ComponentRole.MS_POSITIVE:
+            return "+TIC"
+        if role == ComponentRole.MS_NEGATIVE:
+            return "-TIC"
+        if role in (ComponentRole.VWD_A, ComponentRole.VWD_B):
+            wl = meta.get('wavelength')
+            ch = meta.get('detector_channel', role.value[-1].upper())
+            if wl:
+                return f"UV {wl} nm (Ch {ch})"
+            return f"UV Ch {ch}"
+        if role == ComponentRole.INTEGRATION:
+            return "Integration"
+        if role == ComponentRole.PEAK_ANALYSIS:
+            return "Peak Analysis"
+        if role == ComponentRole.SST:
+            return "SST"
+        if role == ComponentRole.SUMMARY:
+            return "Summary"
+        return os.path.splitext(component.original_filename)[0]
+
     def get_component(self, role: ComponentRole) -> Optional[Component]:
         return self.components.get(role)
 
@@ -358,7 +383,7 @@ class DataStore:
         return {
             'record': {
                 'id': record_id or component.component_id,
-                'name': record_name or component.original_filename,
+                'name': record_name or Bundle.component_display_name(component),
                 'type': component.role.value,
                 'parent_bundle_id': bundle.bundle_id,
             },
@@ -615,7 +640,7 @@ class DataStore:
             }
             if is_bundle:
                 item['children'] = [
-                    {'id': c.component_id, 'name': c.original_filename,
+                    {'id': c.component_id, 'name': Bundle.component_display_name(c),
                      'type': c.role.value, 'is_child': True}
                     for c in bundle.component_list
                 ]
@@ -667,7 +692,7 @@ class _BundleCompat:
             'name': p.original_filename if p else bundle.name,
         } if p else None
         self.auxiliary_files = [
-            {'id': c.component_id, 'name': c.original_filename}
+            {'id': c.component_id, 'name': Bundle.component_display_name(c)}
             for c in bundle.component_list
             if c.role != ComponentRole.PRIMARY
         ]

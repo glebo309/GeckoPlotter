@@ -16,7 +16,7 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 from services.plot_manager import PlotManager
-from services.data_store import DataStore as DataManager
+from services.data_store import DataStore as DataManager, BundleType
 from services.plot_smoothing import smooth_plotly_traces
 from components.data_table_editor import create_data_table_editor
 from components.publication_plot import create_publication_plot
@@ -124,11 +124,26 @@ def _get_overlay_group(metadata, fdata, file_id=None, dm=None):
     "Time" or "X" column from being placed on the same plot.
 
     If the file has a group override (from cross-group drag-drop), use that.
+    Components of the same LCMS bundle share the primary component's group
+    so +TIC and -TIC always overlay.
     """
     if file_id and dm and hasattr(dm, 'group_overrides'):
         override = dm.group_overrides.get(file_id)
         if override:
             return override
+
+    if file_id and dm and hasattr(dm, 'get_bundle_for_component'):
+        bundle = dm.get_bundle_for_component(file_id)
+        if bundle and len(bundle.component_list) > 1:
+            primary = bundle.primary
+            if primary and primary.component_id != file_id:
+                p_entry = dm.get_data_by_id(primary.component_id)
+                if p_entry:
+                    p_meta = p_entry.get('metadata', {})
+                    return (_get_source_category(p_meta, p_entry),
+                            _get_x_axis_name(p_meta, p_entry),
+                            _get_x_domain_signature(p_meta, p_entry))
+
     return (_get_source_category(metadata, fdata),
             _get_x_axis_name(metadata, fdata),
             _get_x_domain_signature(metadata, fdata))
@@ -1210,7 +1225,16 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
         s = {**DEFAULT_PLOT_SETTINGS, **(plot_settings or {})}
         layout_mode = s.get('layout_mode', 'overlay')
 
-        if trigger_id == 'active-file' and layout_mode == 'stacked':
+        lcms_auto_stacked = False
+        if layout_mode == 'overlay' and active_file:
+            bundle = data_manager.get_bundle_for_component(active_file) if hasattr(data_manager, 'get_bundle_for_component') else None
+            if bundle is None and hasattr(data_manager, 'get_bundle'):
+                bundle = data_manager.get_bundle(active_file)
+            if bundle and bundle.bundle_type == BundleType.LCMS and len(bundle.component_list) > 1:
+                layout_mode = 'stacked'
+                lcms_auto_stacked = True
+
+        if trigger_id == 'active-file' and layout_mode == 'stacked' and not lcms_auto_stacked:
             return dash.no_update, no_zoom
 
         is_tab_switch = trigger_id == 'active-plot-tab'
@@ -1333,6 +1357,33 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
     # Selection highlighting is handled centrally in app.py.
     # Keeping a second DOM-mutation callback here causes stale/high-conflicting
     # selection state where multiple file items can remain highlighted.
+
+    @app.callback(
+        Output('active-file', 'data', allow_duplicate=True),
+        Input('main-plot', 'clickData'),
+        [State('main-plot', 'figure'),
+         State('active-file', 'data')],
+        prevent_initial_call=True,
+    )
+    def subplot_click_selects_file(click_data, figure, current_active):
+        if not click_data or 'points' not in click_data:
+            raise dash.exceptions.PreventUpdate
+        points = click_data['points']
+        if not points:
+            raise dash.exceptions.PreventUpdate
+        curve = points[0].get('curveNumber')
+        if curve is None or not figure or 'data' not in figure:
+            raise dash.exceptions.PreventUpdate
+        traces = figure['data']
+        if curve >= len(traces):
+            raise dash.exceptions.PreventUpdate
+        meta = traces[curve].get('meta')
+        if isinstance(meta, dict) and meta.get('file_id'):
+            fid = meta['file_id']
+            if fid and fid != current_active:
+                return fid
+        raise dash.exceptions.PreventUpdate
+
 
 def create_bundle_data_table(bundle, file_data: Dict[str, Any], data_manager) -> html.Div:
     """Create a data table display for a bundle with rich metadata."""

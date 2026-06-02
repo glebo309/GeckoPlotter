@@ -18,8 +18,51 @@ log = logging.getLogger(__name__)
 
 def register_lcms_callbacks(app, data_manager):
     """Register LC-MS viewer callbacks against *app*."""
+    from callbacks.viz_callbacks import _collect_visible_files
 
     lcms_svc = data_manager.lcms_service
+
+    from services.data_store import BundleType
+
+    @app.callback(
+        [Output('current-plot-settings', 'data', allow_duplicate=True),
+         Output('pt-layout-mode', 'value', allow_duplicate=True)],
+        Input('active-file', 'data'),
+        State('current-plot-settings', 'data'),
+        prevent_initial_call=True,
+    )
+    def auto_subplot_for_lcms(active_file, settings):
+        if not active_file:
+            raise dash.exceptions.PreventUpdate
+        bundle = None
+        try:
+            bundle = data_manager.get_bundle_for_component(active_file)
+        except Exception:
+            pass
+        if bundle is None:
+            try:
+                bundle = data_manager.get_bundle(active_file)
+            except Exception:
+                pass
+        if bundle is None:
+            for b in data_manager._bundles.values():
+                if b.bundle_id == active_file:
+                    bundle = b
+                    break
+                for c in b.component_list:
+                    if c.component_id == active_file:
+                        bundle = b
+                        break
+                if bundle:
+                    break
+        pass
+        if bundle and bundle.bundle_type == BundleType.LCMS and len(bundle.component_list) > 1:
+            s = dict(settings or {})
+            if s.get('layout_mode') != 'stacked':
+                s['layout_mode'] = 'stacked'
+                log.info("auto_subplot_for_lcms: switching to stacked")
+                return s, 'stacked'
+        raise dash.exceptions.PreventUpdate
 
     # ------------------------------------------------------------------
     # 1. Click on main-plot → update mass spectrum figure
@@ -55,15 +98,28 @@ def register_lcms_callbacks(app, data_manager):
         [Output('ms-scan-slider', 'min'),
          Output('ms-scan-slider', 'max'),
          Output('ms-scan-slider', 'value'),
-         Output('ms-scan-label', 'children')],
-        Input('active-file', 'data'),
+         Output('ms-scan-label', 'children'),
+         Output('ms-active-subplot-idx', 'data')],
+        [Input('active-file', 'data')],
+        State('loaded-files', 'data'),
         prevent_initial_call=True,
     )
-    def configure_scan_slider(active_file):
+    def configure_scan_slider(active_file, loaded_files):
+        subplot_idx = 0
+        if active_file and loaded_files:
+            visible = _collect_visible_files(
+                data_manager, active_file, loaded_files)
+            for files in visible.values():
+                for i, (name, fdata) in enumerate(files):
+                    fid = fdata.get('record', {}).get('id', '')
+                    if fid == active_file:
+                        subplot_idx = i
+                        break
+
         resolved = _resolve_lcms_spectral_entry(data_manager, active_file, lcms_svc)
         file_id, file_data = resolved if resolved else (None, None)
         if not file_data or not lcms_svc.has_spectral_data(file_data):
-            return 0, 1, 0, 'No scan selected'
+            return 0, 1, 0, 'No scan selected', subplot_idx
 
         n_scans = max(lcms_svc.get_scan_count(file_data), 1)
         time_arr, _ = lcms_svc.extract_tic(file_data)
@@ -75,7 +131,7 @@ def register_lcms_callbacks(app, data_manager):
             except ValueError:
                 apex_idx = 0
         apex_idx = min(max(apex_idx, 0), n_scans - 1)
-        return 0, n_scans - 1, apex_idx, _scan_label(lcms_svc, file_data, apex_idx)
+        return 0, n_scans - 1, apex_idx, _scan_label(lcms_svc, file_data, apex_idx), subplot_idx
 
     @app.callback(
         [Output('ms-spectrum-graph', 'figure', allow_duplicate=True),
@@ -114,7 +170,7 @@ def register_lcms_callbacks(app, data_manager):
 
     app.clientside_callback(
         """
-        function(scanIdx, activeTab, figure) {
+        function(scanIdx, activeTab, activeFile, subplotIdx, figure) {
             var hidden = {
                 position: 'absolute',
                 display: 'none',
@@ -148,12 +204,17 @@ def register_lcms_callbacks(app, data_manager):
             var wrapper = document.getElementById('main-plot');
             var overlay = document.getElementById('lcms-scan-cursor-overlay');
             var host = overlay ? overlay.parentElement : null;
-            var plotDrag = wrapper ? wrapper.querySelector('.nsewdrag') : null;
             var handle = sliderRoot ? sliderRoot.querySelector('[role="slider"]') : null;
 
-            if (activeTab !== 'ms-viewer' || !active || scanIdx === null || scanIdx === undefined || !host || !plotDrag || !handle) {
+            if (activeTab !== 'ms-viewer' || !active || scanIdx === null || scanIdx === undefined || !host || !handle) {
                 return hidden;
             }
+
+            var plotDrags = wrapper ? wrapper.querySelectorAll('.nsewdrag') : [];
+            var spIdx = (typeof subplotIdx === 'number') ? subplotIdx : 0;
+            var plotDrag = plotDrags[Math.min(spIdx, plotDrags.length - 1)] || null;
+
+            if (!plotDrag) return hidden;
 
             var maxIdx = Number(handle.getAttribute('aria-valuemax'));
             if (!Number.isFinite(maxIdx) || maxIdx <= 0) {
@@ -167,13 +228,16 @@ def register_lcms_callbacks(app, data_manager):
             var top = rect.top - hostRect.top;
             var height = rect.height;
 
-            window.__geckoLcmsScanState = {idx: idx, left: left, active: active, maxIdx: maxIdx};
+            var spIdx = plotDrag ? Array.prototype.indexOf.call(plotDrags, plotDrag) : 0;
+            window.__geckoLcmsScanState = {idx: idx, left: left, active: active, maxIdx: maxIdx, subplotIdx: spIdx};
             return visibleStyle(left, top, height);
         }
         """,
         Output('lcms-scan-cursor-overlay', 'style'),
         [Input('ms-scan-slider', 'value'),
-         Input('active-tab', 'data')],
+         Input('active-tab', 'data'),
+         Input('active-file', 'data'),
+         Input('ms-active-subplot-idx', 'data')],
         State('main-plot', 'figure'),
         prevent_initial_call=True,
     )
