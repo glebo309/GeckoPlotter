@@ -17,6 +17,11 @@
         return false;
     }
 
+    function insideFileExplorer(event) {
+        var target = event.target;
+        return !!(target && target.closest && target.closest('#drop-zone'));
+    }
+
     function arm() {
         var el = zone();
         if (!el) return;
@@ -37,11 +42,19 @@
 
     window.addEventListener('dragenter', function (event) {
         if (!eventHasFiles(event)) return;
+        if (insideFileExplorer(event)) {
+            disarmSoon();
+            return;
+        }
         arm();
     }, true);
 
     window.addEventListener('dragover', function (event) {
         if (!eventHasFiles(event)) return;
+        if (insideFileExplorer(event)) {
+            disarmSoon();
+            return;
+        }
         event.preventDefault();
         arm();
     }, true);

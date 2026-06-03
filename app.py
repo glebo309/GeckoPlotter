@@ -261,14 +261,23 @@ _layout_body = html.Div(
                                                 ),
                                             ],
                                         ),
-                                        html.Div(
+                                        dcc.Upload(
                                             id='drop-zone',
+                                            multiple=True,
+                                            disable_click=True,
                                             style={
                                                 'flex': '1',
                                                 'minHeight': '0',
                                                 'overflow': 'hidden',
                                                 'display': 'flex',
                                                 'flexDirection': 'column',
+                                                'border': '2px dashed transparent',
+                                                'borderRadius': '4px',
+                                                'transition': 'border-color 0.2s',
+                                            },
+                                            style_active={
+                                                'border': '1.5px dashed rgba(0, 0, 0, 0.2)',
+                                                'backgroundColor': 'rgba(0, 0, 0, 0.02)',
                                             },
                                             children=html.Div(
                                                 className='panel-content',

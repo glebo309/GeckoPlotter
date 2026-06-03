@@ -179,6 +179,27 @@ def register_upload_callbacks(app: dash.Dash, data_manager) -> None:
          Output('pub-data-store', 'data', allow_duplicate=True),
          Output('render-trigger', 'data', allow_duplicate=True),
          Output('pt-layout-mode', 'value', allow_duplicate=True)],
+        Input('drop-zone', 'contents'),
+        [State('drop-zone', 'filename'),
+         State('drop-zone', 'last_modified'),
+         State('loaded-files', 'data'),
+         State('render-trigger', 'data')],
+        prevent_initial_call=True
+    )
+    def handle_drop_upload(contents_list, filenames, last_modified_list, existing_files, render_counter):
+        if not contents_list or not filenames:
+            return (dash.no_update,) * 8
+        return handle_file_upload(contents_list, filenames, last_modified_list, existing_files, render_counter)
+
+    @app.callback(
+        [Output('loaded-files', 'data', allow_duplicate=True),
+         Output('file-tree', 'children', allow_duplicate=True),
+         Output('active-file', 'data', allow_duplicate=True),
+         Output('metadata-container', 'children', allow_duplicate=True),
+         Output('table-editor-container', 'children', allow_duplicate=True),
+         Output('pub-data-store', 'data', allow_duplicate=True),
+         Output('render-trigger', 'data', allow_duplicate=True),
+         Output('pt-layout-mode', 'value', allow_duplicate=True)],
         Input('global-drop-zone', 'contents'),
         [State('global-drop-zone', 'filename'),
          State('global-drop-zone', 'last_modified'),
@@ -186,7 +207,7 @@ def register_upload_callbacks(app: dash.Dash, data_manager) -> None:
          State('render-trigger', 'data')],
         prevent_initial_call=True
     )
-    def handle_drop_upload(contents_list, filenames, last_modified_list, existing_files, render_counter):
+    def handle_global_drop_upload(contents_list, filenames, last_modified_list, existing_files, render_counter):
         if not contents_list or not filenames:
             return (dash.no_update,) * 8
         return handle_file_upload(contents_list, filenames, last_modified_list, existing_files, render_counter)
