@@ -1,5 +1,5 @@
 /**
- * Right-click on ms-spectrum-graph or eic-graph → publish to ms-plot-context-menu-store.
+ * Right-click on MS/EIC analysis graphs -> publish to ms-plot-context-menu-store.
  *
  * Uses document-level event delegation so it works even when the MS Analysis
  * tab is first opened (graphs aren't in DOM at page load).
@@ -7,7 +7,11 @@
 (function () {
     'use strict';
 
-    var GRAPH_IDS = {'ms-spectrum-graph': true, 'eic-graph': true};
+    var GRAPH_IDS = {
+        'ms-spectrum-graph': true,
+        'peak-mass-graph': true,
+        'eic-graph': true
+    };
 
     function publish(source, clientX, clientY) {
         var dc = window.dash_clientside ||
@@ -39,6 +43,9 @@
         if (!graphId) return;
         event.preventDefault();
         event.stopPropagation();
+        if (typeof event.stopImmediatePropagation === 'function') {
+            event.stopImmediatePropagation();
+        }
         publish(graphId, event.clientX, event.clientY);
     }, true);
 

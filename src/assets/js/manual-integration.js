@@ -780,6 +780,10 @@
             event.preventDefault();
             var peakId = peakIdAtEvent(gd, event);
             if (peakId) {
+                event.stopPropagation();
+                if (typeof event.stopImmediatePropagation === 'function') {
+                    event.stopImmediatePropagation();
+                }
                 publishContextMenu(peakId, event.clientX, event.clientY);
             }
         }, true);

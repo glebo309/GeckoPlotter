@@ -161,10 +161,10 @@ def _component_role(filename: str, standardized: StandardizedResult) -> Componen
             return role
 
     lcms_roles = [
-        (ComponentRole.VWD_A, r"(_VWD_A\.cdf$|_VWD1A\.cdf$)"),
-        (ComponentRole.VWD_B, r"(_VWD_B\.cdf$|_VWD1B\.cdf$)"),
-        (ComponentRole.MS_NEGATIVE, r"(_neg(?:ative)?\.cdf$|_MS1\s*-TIC.*\.cdf$|_-\.cdf$)"),
-        (ComponentRole.MS_POSITIVE, r"(_pos(?:itive)?\.cdf$|_MS1\s*\+TIC.*\.cdf$|_\+\.cdf$)"),
+        (ComponentRole.VWD_A, r"(_VWD_A\.(?:cdf|csv)$|_VWD1A\.(?:cdf|csv)$)"),
+        (ComponentRole.VWD_B, r"(_VWD_B\.(?:cdf|csv)$|_VWD1B\.(?:cdf|csv)$)"),
+        (ComponentRole.MS_NEGATIVE, r"(_neg(?:ative)?\.cdf$|_MS1\s*-TIC.*\.(?:cdf|csv)$|_-\.cdf$)"),
+        (ComponentRole.MS_POSITIVE, r"(_pos(?:itive)?\.cdf$|_MS1\s*\+TIC.*\.(?:cdf|csv)$|_\+\.cdf$)"),
     ]
     for role, pattern in lcms_roles:
         if re.search(pattern, clean_name, flags=re.IGNORECASE):

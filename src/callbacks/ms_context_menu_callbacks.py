@@ -86,7 +86,7 @@ def _extract_xy_from_figure(fig_dict, source):
                     clean.append(np.nan)
         return np.array(clean, dtype=float)
 
-    if source == 'ms-spectrum-graph':
+    if source in ('ms-spectrum-graph', 'peak-mass-graph'):
         # The spectrum has two traces: stick-lines (hoverinfo='skip') and
         # markers (with hovertemplate containing the real m/z data).
         # Prefer the markers trace for clean data.
@@ -171,18 +171,25 @@ def register_ms_context_menu_callbacks(app: dash.Dash, data_manager) -> None:
         Input('ms-ctx-open-new-plot', 'n_clicks'),
         [State('ms-plot-context-menu-store', 'data'),
          State('ms-spectrum-graph', 'figure'),
+         State('peak-mass-graph', 'figure'),
          State('eic-graph', 'figure'),
          State('ms-scan-label', 'children'),
+         State('peak-mass-info', 'children'),
          State('render-trigger', 'data')],
         prevent_initial_call=True,
     )
-    def open_as_new_plot(n_clicks, store, spectrum_fig, eic_fig, scan_label,
-                         render_counter):
+    def open_as_new_plot(n_clicks, store, spectrum_fig, peak_mass_fig, eic_fig,
+                         scan_label, peak_mass_info, render_counter):
         if not n_clicks or not store:
             raise PreventUpdate
 
         source = store.get('source', '')
-        fig = spectrum_fig if source == 'ms-spectrum-graph' else eic_fig
+        if source == 'ms-spectrum-graph':
+            fig = spectrum_fig
+        elif source == 'peak-mass-graph':
+            fig = peak_mass_fig
+        else:
+            fig = eic_fig
 
         try:
             result = _extract_xy_from_figure(fig, source)
@@ -190,15 +197,21 @@ def register_ms_context_menu_callbacks(app: dash.Dash, data_manager) -> None:
                 log.warning("No data to extract from %s", source)
                 raise PreventUpdate
 
-            if source == 'ms-spectrum-graph':
+            if source in ('ms-spectrum-graph', 'peak-mass-graph'):
                 x_arr, y_arr, x_label, y_label = result
                 trace_name = ''
             else:
                 x_arr, y_arr, x_label, y_label, trace_name = result
 
-            if source == 'ms-spectrum-graph':
+            if source in ('ms-spectrum-graph', 'peak-mass-graph'):
                 name = "MS Spectrum"
-                if scan_label and scan_label != 'No scan selected':
+                if source == 'peak-mass-graph':
+                    name = "Peak Mass Spectrum"
+                    if peak_mass_info:
+                        label = str(peak_mass_info).split('|', 1)[0].strip()
+                        if label:
+                            name = f"Peak Mass {label}"
+                elif scan_label and scan_label != 'No scan selected':
                     name = f"MS {scan_label}"
                 src_cat = SourceCategory.SPECTRUM
                 plot_hint = PlotHint.LOLLIPOP
