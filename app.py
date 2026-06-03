@@ -261,23 +261,14 @@ _layout_body = html.Div(
                                                 ),
                                             ],
                                         ),
-                                        dcc.Upload(
+                                        html.Div(
                                             id='drop-zone',
-                                            multiple=True,
-                                            disable_click=True,
                                             style={
                                                 'flex': '1',
                                                 'minHeight': '0',
                                                 'overflow': 'hidden',
                                                 'display': 'flex',
                                                 'flexDirection': 'column',
-                                                'border': '2px dashed transparent',
-                                                'borderRadius': '4px',
-                                                'transition': 'border-color 0.2s',
-                                            },
-                                            style_active={
-                                                'border': '1.5px dashed rgba(0, 0, 0, 0.2)',
-                                                'backgroundColor': 'rgba(0, 0, 0, 0.02)',
                                             },
                                             children=html.Div(
                                                 className='panel-content',
@@ -287,10 +278,15 @@ _layout_body = html.Div(
                                                     'minHeight': '0',
                                                 },
                                                 children=[
-                                                    html.Div(
-                                                        id='file-tree',
-                                                        className='file-tree',
-                                                        children=render_file_tree([]),
+                                                    dcc.Loading(
+                                                        id='file-tree-loading',
+                                                        type='circle',
+                                                        color='#1d1d1f',
+                                                        children=html.Div(
+                                                            id='file-tree',
+                                                            className='file-tree',
+                                                            children=render_file_tree([]),
+                                                        ),
                                                     )
                                                 ],
                                             ),
@@ -1462,6 +1458,22 @@ _layout_body = html.Div(
                     style={'display': 'none'},  # Hidden by default
                 ),
             ],
+        ),
+
+        dcc.Upload(
+            id='global-drop-zone',
+            multiple=True,
+            disable_click=True,
+            className='global-drop-zone',
+            className_active='global-drop-zone global-drop-zone--armed global-drop-zone--active',
+            className_reject='global-drop-zone global-drop-zone--armed global-drop-zone--reject',
+            children=html.Div(
+                className='global-drop-zone__hint',
+                children=[
+                    html.Div('Drop files to import', className='global-drop-zone__title'),
+                    html.Div('Agilent exports, CSV, Excel, text, images', className='global-drop-zone__subtitle'),
+                ],
+            ),
         ),
 
         html.Div(id='resize-init-trigger', style={'display': 'none'}),

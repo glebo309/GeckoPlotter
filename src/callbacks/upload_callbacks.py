@@ -179,9 +179,9 @@ def register_upload_callbacks(app: dash.Dash, data_manager) -> None:
          Output('pub-data-store', 'data', allow_duplicate=True),
          Output('render-trigger', 'data', allow_duplicate=True),
          Output('pt-layout-mode', 'value', allow_duplicate=True)],
-        Input('drop-zone', 'contents'),
-        [State('drop-zone', 'filename'),
-         State('drop-zone', 'last_modified'),
+        Input('global-drop-zone', 'contents'),
+        [State('global-drop-zone', 'filename'),
+         State('global-drop-zone', 'last_modified'),
          State('loaded-files', 'data'),
          State('render-trigger', 'data')],
         prevent_initial_call=True
