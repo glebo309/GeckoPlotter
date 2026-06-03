@@ -413,7 +413,7 @@ class DataManager:
 
             # LCMS bundling
             if sr.source_category in (SourceCategory.LCMS_MS, SourceCategory.LCMS_UV):
-                base_name = self.extract_lcms_base_name(file_record['name'])
+                base_name = self.extract_lcms_base_name(file_record['name'], metadata=metadata)
                 self._init_lcms_bundle(base_name)
                 bundle = self.lcms_bundles[base_name]
                 if file_id not in bundle['files']:
@@ -435,7 +435,14 @@ class DataManager:
                     key = 'vwd_a' if channel == 'A' else 'vwd_b' if channel == 'B' else None
 
                 if key:
-                    bundle[key] = entry
+                    existing = bundle.get(key)
+                    existing_is_tic_only = (
+                        existing is not None
+                        and existing.get('metadata', {}).get('is_tic_only')
+                    )
+                    incoming_is_tic_only = bool(metadata.get('is_tic_only'))
+                    if existing is None or (existing_is_tic_only and not incoming_is_tic_only):
+                        bundle[key] = entry
 
                 self.loaded_data[file_id] = entry
                 self._update_lcms_bundle_metadata(base_name)
@@ -481,8 +488,14 @@ class DataManager:
         return self.lcms_bundles.pop(base_name, None)
 
     @staticmethod
-    def extract_lcms_base_name(filename: str) -> str:
-        base = os.path.splitext(os.path.basename(filename))[0]
+    def extract_lcms_base_name(filename: str, metadata: Optional[Dict[str, Any]] = None) -> str:
+        metadata = metadata or {}
+        candidate = metadata.get('experiment_title') or metadata.get('source_file_reference') or filename
+        base = os.path.splitext(os.path.basename(str(candidate)))[0]
+        if '.dx_' in base.lower():
+            base = re.split(r'\.dx_', base, maxsplit=1, flags=re.IGNORECASE)[0]
+        elif base.lower().endswith('.dx'):
+            base = base[:-3]
         patterns = [
             r'_MS1\s*[+-]TIC.*$',
             r'_VWD1[AB]$',
@@ -751,13 +764,15 @@ class DataManager:
 
                 record_meta = entry.get('metadata', {})
                 record_info = entry.get('record', {})
+                standardized = entry.get('standardized')
+                source_category = getattr(standardized, 'source_category', None)
                 comp_type = record_info.get('type') or entry.get('type', 'unknown')
                 component_label = record_info.get('name', 'LC-MS Component')
                 icon = '🧪'
                 bundle_component_type = 'component'
                 rendered_type = comp_type
 
-                if comp_type == 'lcms_cdf':
+                if source_category == SourceCategory.LCMS_MS:
                     mode = record_meta.get('ionization_mode', 'unknown')
                     if mode == 'positive':
                         component_label = 'TIC (MS+)'
@@ -772,7 +787,9 @@ class DataManager:
                         rendered_type = 'lcms_cdf'
                         bundle_component_type = 'ms_unknown'
                     icon = '🧪'
-                elif comp_type == 'lcms_vwd_cdf':
+                    if record_meta.get('is_tic_only'):
+                        component_label += ' trace'
+                elif source_category == SourceCategory.LCMS_UV:
                     channel = record_meta.get('detector_channel', 'Unknown')
                     wavelength = record_meta.get('wavelength')
                     if channel and channel != 'Unknown':

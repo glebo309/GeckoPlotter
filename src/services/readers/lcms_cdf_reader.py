@@ -12,6 +12,7 @@ from __future__ import annotations
 import logging
 
 import os
+import re
 from datetime import datetime
 from typing import Any, Dict, Optional, Tuple
 
@@ -121,10 +122,20 @@ class LCMSCDFReader(BaseReader):
                 elif "negative" in raw_lower:
                     polarity = "negative"
 
+        detector_text = " ".join(
+            str(self.metadata.get(key, ""))
+            for key in (
+                "detector_name",
+                "raw_data_table_name",
+                "peak_processing_results_table_name",
+            )
+        ).lower()
         filename_lower = (self.file_name or "").lower()
-        if " +tic" in filename_lower or "_pos" in filename_lower or "+" in filename_lower:
+        combined = f"{detector_text} {filename_lower}"
+
+        if re.search(r"(?:^|[\s_])\+tic\b", combined) or re.search(r"[_\s-]pos(?:itive)?(?:[_\s.]|$)", combined):
             polarity = "positive"
-        elif " -tic" in filename_lower or "_neg" in filename_lower or "-" in filename_lower:
+        elif re.search(r"(?:^|[\s_])-tic\b", combined) or re.search(r"[_\s-]neg(?:ative)?(?:[_\s.]|$)", combined):
             polarity = "negative"
 
         self.ionization_mode = polarity or "unknown"

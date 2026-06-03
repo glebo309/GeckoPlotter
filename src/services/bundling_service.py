@@ -89,8 +89,14 @@ def extract_chromeleon_base_name(filename: str, metadata: Dict[str, Any] | None 
     return None
 
 
-def extract_lcms_base_name(filename: str) -> str:
-    base = os.path.splitext(os.path.basename(filename))[0]
+def extract_lcms_base_name(filename: str, metadata: Dict[str, Any] | None = None) -> str:
+    metadata = metadata or {}
+    candidate = metadata.get("experiment_title") or metadata.get("source_file_reference") or filename
+    base = os.path.splitext(os.path.basename(str(candidate)))[0]
+    if ".dx_" in base.lower():
+        base = re.split(r"\.dx_", base, maxsplit=1, flags=re.IGNORECASE)[0]
+    elif base.lower().endswith(".dx"):
+        base = base[:-3]
     patterns = [
         r"_MS1\s*[+-]TIC.*$",
         r"_VWD1[AB]$",
@@ -119,7 +125,7 @@ def _bundle_identity(filename: str, standardized: StandardizedResult) -> Tuple[B
         return BundleType.CHROMELEON, extract_chromeleon_base_name(filename, standardized.metadata)
 
     if _is_lcms(filename, standardized):
-        return BundleType.LCMS, extract_lcms_base_name(filename)
+        return BundleType.LCMS, extract_lcms_base_name(filename, standardized.metadata)
 
     return _single_file_bundle_type(standardized), None
 

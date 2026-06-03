@@ -4,9 +4,10 @@ import pandas as pd
 from src.ingestion.presets.cary_kinetics import CaryKineticsPreset
 from src.ingestion.presets.chromeleon_txt import ChromeleonTxtPreset
 from src.ingestion.presets.plate_reader_csv import PlateReaderCSVPreset
+from src.ingestion.presets.agilent_lcms_csv import AgilentLCMSCSVPreset
 from src.ingestion.presets.lcms_cdf import LCMSCDFPreset
 from src.ingestion.presets.lcms_vwd_cdf import LCMSVWDCDFPreset
-from src.ingestion.types import ColumnRole, PlotHint
+from src.ingestion.types import ColumnRole, PlotHint, SourceCategory
 
 FIXTURES = os.path.join(os.path.dirname(__file__), "fixtures")
 
@@ -119,6 +120,34 @@ class TestLCMSCDF:
         head_bytes = f.read_bytes()[:4096]
         lines = []
         assert LCMSCDFPreset.sniff(str(f), head_bytes, lines) is False
+
+
+class TestAgilentLCMSCSV:
+    def test_sniff_matches_vwd_sidecar_with_temp_prefix(self, tmp_path):
+        f = tmp_path / "tmp123_LCMS-2026-05-28 10-22-00+02-00-03.dx_VWD1A.CSV"
+        f.write_text("0.0,1.0\n0.1,2.0\n")
+        head_bytes = f.read_bytes()[:4096]
+        lines = head_bytes.decode("utf-8").splitlines()
+        assert AgilentLCMSCSVPreset.sniff(str(f), head_bytes, lines) is True
+
+    def test_parse_vwd_sidecar_as_lcms_uv(self, tmp_path):
+        f = tmp_path / "LCMS-2026-05-28 10-22-00+02-00-03.dx_VWD1B.CSV"
+        f.write_text("0.0,1.0\n0.1,2.0\n")
+        result = AgilentLCMSCSVPreset().parse(str(f))
+
+        assert result["source_category"] == SourceCategory.LCMS_UV
+        assert result["metadata"]["detector_channel"] == "B"
+        assert result["metadata"]["experiment_title"] == "LCMS-2026-05-28 10-22-00+02-00-03.dx"
+        assert list(result["data"].columns) == ["Time (min)", "Intensity (mAU)"]
+
+    def test_parse_negative_tic_sidecar_as_lcms_ms(self, tmp_path):
+        f = tmp_path / "LCMS-2026-05-28 10-22-00+02-00-03.dx_MS1 -TIC SCAN ESI Frag=135V Gain=1.0.CSV"
+        f.write_text("0.0,10\n0.1,20\n")
+        result = AgilentLCMSCSVPreset().parse(str(f))
+
+        assert result["source_category"] == SourceCategory.LCMS_MS
+        assert result["metadata"]["ionization_mode"] == "negative"
+        assert result["metadata"]["is_tic_only"] is True
 
 
 class TestLCMSVWDCDF:

@@ -9,6 +9,7 @@ netCDF variables to choose the right reader:
 """
 from __future__ import annotations
 import os
+import re
 from typing import Dict
 
 import netCDF4 as nc
@@ -18,6 +19,19 @@ from ..types import ColumnRole, PlotHint, SourceCategory
 
 
 _VWD_TAGS = ("vwd", "uvw", "uv-")
+
+
+def _infer_ionization_mode(text: str) -> str:
+    lower = text.lower()
+    if re.search(r"(?:^|[\s_])\+tic\b", lower):
+        return "positive"
+    if re.search(r"(?:^|[\s_])-tic\b", lower):
+        return "negative"
+    if re.search(r"[_\s-]pos(?:itive)?(?:[_\s.]|$)", lower):
+        return "positive"
+    if re.search(r"[_\s-]neg(?:ative)?(?:[_\s.]|$)", lower):
+        return "negative"
+    return "unknown"
 
 
 class LCMSCDFPreset(FormatPreset):
@@ -81,6 +95,24 @@ class LCMSCDFPreset(FormatPreset):
 
         data = reader.get_data()
         metadata = reader.get_metadata()
+        detector_name = str(metadata.get("detector_name", ""))
+        source_category = (
+            SourceCategory.LCMS_UV
+            if metadata.get("detector_channel") in {"A", "B"} or "vwd" in detector_name.lower()
+            else SourceCategory.LCMS_MS
+        )
+
+        if source_category == SourceCategory.LCMS_MS:
+            detector_text = " ".join(
+                str(metadata.get(key, ""))
+                for key in (
+                    "detector_name",
+                    "raw_data_table_name",
+                    "peak_processing_results_table_name",
+                )
+            )
+            metadata["ionization_mode"] = _infer_ionization_mode(detector_text)
+            metadata["is_tic_only"] = True
 
         column_roles: Dict[str, ColumnRole] = {}
         cols = list(data.columns)
@@ -93,7 +125,7 @@ class LCMSCDFPreset(FormatPreset):
             "data": data,
             "column_roles": column_roles,
             "plot_hint": PlotHint.LINE,
-            "source_category": SourceCategory.LCMS_MS,
-            "sample_name": metadata.get("experiment_title"),
+            "source_category": source_category,
+            "sample_name": metadata.get("sample_name") or metadata.get("experiment_title"),
             "metadata": metadata,
         }
