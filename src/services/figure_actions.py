@@ -15,6 +15,8 @@ def publication_plot_settings(figure, settings=None):
 
 
 def publication_snapshot(figure, tabs, figures, label='Plot', plot_settings=None):
+    from services.figure_sanitization import clean_figure_for_output
+    figure = clean_figure_for_output(figure)
     index = 1 + sum(tab.get('type') == 'publication' for tab in (tabs or []))
     tab_id = f'publication-{index}-{uuid4().hex[:8]}'
     tab = {'id': tab_id, 'label': f'Publication {index}', 'type': 'publication'}

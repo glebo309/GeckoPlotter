@@ -62,7 +62,7 @@ def test_publication_separate_maps_peak_to_its_source_when_original_axes_are_sha
     add_peak_traces(fig,[peak()],X,Y,selected_peak_id='p1')
     result=editable_publication_figure(fig.to_plotly_json(),{'layout_mode':'stacked','smooth_window':9},{'layout_mode':'overlay'})
     assert_fill_matches(result)
-    assert result.layout.shapes[0].yref=='y2'
+    assert not result.layout.shapes  # Publication keeps shading, not editable baseline handles.
 
 
 def test_existing_publication_snapshot_without_geometry_metadata_is_refreshed():

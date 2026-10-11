@@ -10,10 +10,11 @@ from services.plot_smoothing import smooth_plotly_traces
 from services.axis_linking import apply_axis_linking
 
 
-def editable_publication_figure(source, settings, source_settings=None):
+def editable_publication_figure(source, settings, source_settings=None, *, clean_output=True):
     s = {**DEFAULT_PLOT_SETTINGS, **(settings or {})}
     original = publication_plot_settings(source, source_settings)
-    fig = go.Figure(source)
+    from services.figure_sanitization import clean_figure_for_output
+    fig = go.Figure(clean_figure_for_output(source) if clean_output else source)
     from services.peak_display import refresh_peak_display
     refresh_peak_display(fig)
     if 'plot_type' in original and s['plot_type'] != original['plot_type']:

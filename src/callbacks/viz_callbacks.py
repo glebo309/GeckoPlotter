@@ -1375,7 +1375,7 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
         if s.get('layout_mode') == 'stacked' and s.get('subplot_rows', 1) * s.get('subplot_cols', 1) > 1:
             from services.publication_figure import editable_publication_figure
             source = figure.to_plotly_json() if hasattr(figure, 'to_plotly_json') else figure
-            figure = editable_publication_figure(source, s, {**s, 'subplot_rows':1, 'subplot_cols':1})
+            figure = editable_publication_figure(source, s, {**s, 'subplot_rows':1, 'subplot_cols':1}, clean_output=False)
 
         if is_tab_switch:
             effective_zoom = restored_zoom

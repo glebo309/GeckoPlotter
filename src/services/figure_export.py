@@ -16,7 +16,8 @@ def export_displayed_figure(figure, fmt, width_mm, height_mm, dpi=300,
     dpi = max(72, min(1200, int(dpi or 300)))
     width = max(100, int(render_width or 624))
     height = max(1, round(width * height_mm / width_mm))
-    fig = go.Figure(figure)
+    from services.figure_sanitization import clean_figure_for_output
+    fig = go.Figure(clean_figure_for_output(figure))
     fig.update_layout(autosize=False, width=width, height=height)
     name = re.sub(r'[^\w.-]+', '-', str(label or 'figure')).strip('-')[:100] or 'figure'
     if fmt == 'html':
