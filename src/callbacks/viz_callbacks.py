@@ -428,6 +428,20 @@ def _add_signal_processing_overlays(figure, data_manager, file_id, display_opts)
     return fig
 
 
+
+def _raw_render_settings(settings):
+    """Fingerprint only settings that affect a raw figure's rendered content."""
+    result = dict(settings)
+    for key in ('pub_dpi', 'export_format'):
+        result.pop(key, None)
+    modes = result.get('axis_label_modes') or {}
+    if modes.get('x') == 'auto':
+        result.pop('x_label', None)
+    if modes.get('y') == 'auto':
+        result.pop('y1_label', None)
+    return result
+
+
 def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
     """Register visualization-related callbacks."""
 
@@ -551,6 +565,7 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
                 id={'type': 'plot-tab-btn', 'index': tab['id']},
                 className='plot-tab-btn active' if is_active else 'plot-tab-btn',
                 n_clicks=0,
+                **{'aria-pressed': 'true' if is_active else 'false'},
             ))
         return children
 
@@ -1134,10 +1149,10 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
          Input('pub-table', 'sort_by'),
          Input('peak-table', 'sort_by'),
          Input('cross-sample-table', 'sort_by'),
-         Input('peak-change-trigger', 'data'),
-         Input('pub-zoom-sync', 'checked'),
-         Input('plot-y-scope', 'value')],
-        [State('loaded-files', 'data'),
+         Input('peak-change-trigger', 'data')],
+        [State('pub-zoom-sync', 'checked'),
+         State('plot-y-scope', 'value'),
+         State('loaded-files', 'data'),
          State('plot-tabs', 'data'),
          State('pub-plot-figure', 'data'),
          State('selected-peak-idx', 'data'),
@@ -1147,7 +1162,8 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
          State('baseline-mode', 'data'),
          State('deconv-markers', 'data'),
          State('deconv-result', 'data'),
-         State('int-display-opts', 'value')],
+         State('int-display-opts', 'value'),
+         State('rendered-plot-tabs', 'data')],
         prevent_initial_call=True
     )
     def master_render(active_tab_id, plot_trigger, active_file, plot_settings, render_trigger,
@@ -1155,7 +1171,7 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
                       link_x, y_scope,
                       loaded_files, plot_tabs, pub_plot_figure, selected_peak_id,
                       zoom_state, zoom_memory, custom_figures,
-                      baseline_mode, deconv_markers, deconv_result, display_opts):
+                      baseline_mode, deconv_markers, deconv_result, display_opts, rendered_tabs=None):
         """Single owner of main-plot. Renders the active plot tab's figure."""
         import plotly.graph_objects as go
         from services.plot_settings_service import PlotSettingsService, DEFAULT_PLOT_SETTINGS
@@ -1247,11 +1263,14 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
         group_key = tuple(tab.get('group_key', []))
         active_file_group = _get_active_file_group(data_manager, active_file)
         zoom_matches_tab = not active_file_group or active_file_group == group_key
-        if not is_tab_switch and not zoom_matches_tab:
-            set_zoom = None
+        if not zoom_matches_tab:
+            # The tab, its settings and its active source arrive via separate
+            # callbacks. Wait for file restoration instead of building a figure
+            # without its peak overlays and immediately building it again.
+            return dash.no_update, set_zoom
 
         render_inputs = {
-            'settings': s, 'render': render_trigger, 'peaks': peak_change_trigger,
+            'settings': _raw_render_settings(s), 'render': render_trigger, 'peaks': peak_change_trigger,
             'order': file_order, 'selected': selected_peak_id,
             'file': active_file if zoom_matches_tab else None,
             'baseline': baseline_mode, 'markers': deconv_markers,
@@ -1260,9 +1279,12 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
             'files': [record.get('id') for record in (loaded_files or [])],
             'link_x': link_x, 'y_scope': y_scope,
         }
-        cached = render_cache.get(active_tab_id, render_inputs)
-        if cached is not None:
-            return cached if is_tab_switch else dash.no_update, set_zoom
+        if render_cache.matches(active_tab_id, render_inputs):
+            if not is_tab_switch or active_tab_id in (rendered_tabs or []):
+                return dash.no_update, set_zoom
+            # A fresh browser still needs a figure even when another client has
+            # already populated the server cache. Warm clients retain their DOM.
+            return render_cache.get(active_tab_id, render_inputs), set_zoom
 
         visible_files = _collect_visible_files(
             data_manager, active_file, loaded_files, target_group_override=group_key,

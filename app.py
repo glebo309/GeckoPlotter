@@ -47,7 +47,7 @@ from components.paper_mock import create_paper_mock
 from callbacks.publication_preview_callbacks import register_publication_preview_callbacks
 
 # App setup
-app = dash.Dash(__name__, suppress_callback_exceptions=True, assets_folder='src/assets')
+app = dash.Dash(__name__, suppress_callback_exceptions=True, assets_folder='src/assets', update_title=None)
 app.config.suppress_callback_exceptions = True
 app.title = 'GeckoPlotter'
 
@@ -183,6 +183,7 @@ _layout_body = html.Div(
         dcc.Store(id='zoom-state', data=None),  # Persisted user zoom ranges across figure rebuilds
         dcc.Store(id='plot-tabs', data=[]),  # List of plot tab descriptors [{id, label, type, group_key}]
         dcc.Store(id='active-plot-tab', data=None),  # ID of currently displayed plot tab
+        dcc.Store(id='rendered-plot-tabs', data=[]),  # Raw figures retained in this browser workspace
         dcc.Store(id='tab-file-memory', data={}),  # Maps tab_id → last selected file_id
         dcc.Store(id='tab-panel-memory', data={}),  # Maps tab_id → last active bottom panel
         dcc.Store(id='tab-zoom-memory', data={}),  # Maps tab_id → saved zoom ranges

@@ -11,6 +11,11 @@ class RenderCache:
     def _key(inputs):
         return json.dumps(inputs, sort_keys=True, default=str)
 
+    def matches(self, tab_id, inputs):
+        """Check validity without copying a potentially large Plotly figure."""
+        entry = self._entries.get(tab_id)
+        return bool(entry and entry[0] == self._key(inputs))
+
     def get(self, tab_id, inputs):
         entry = self._entries.get(tab_id)
         if entry and entry[0] == self._key(inputs):

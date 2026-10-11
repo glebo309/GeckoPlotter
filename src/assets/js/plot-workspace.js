@@ -3,7 +3,7 @@
 (function () {
     'use strict';
     var plots = new Map();
-    var activeId = null;
+    var activeId = null, lastTabs = [], updateVersion = 0, publishedTabs = '';
     var config = {responsive: true, displayModeBar: false, displaylogo: false,
         doubleClick: 'reset+autosize', scrollZoom: true, edits: {shapePosition: true}};
 
@@ -45,21 +45,66 @@
         if (!gd || !host || host.style.display === 'none' || gd.style.display === 'none') return;
         var rect = host.getBoundingClientRect();
         if (!rect.width || !rect.height) return;
-        Promise.resolve(window.Plotly.Plots.resize(gd)).catch(function () {});
+        var size = rect.width + ':' + rect.height;
+        if (gd.__geckoWorkspaceSize === size) return;
+        gd.__geckoWorkspaceSize = size;
+        Promise.resolve(window.Plotly.Plots.resize(gd)).catch(function () {gd.__geckoWorkspaceSize = null;});
+    }
+
+    function publishRetainedTabs() {
+        var ids = [];
+        plots.forEach(function (entry, id) {if (entry.bound) ids.push(id);});
+        var key = ids.join('|');
+        if (key !== publishedTabs) {
+            publishedTabs = key;
+            window.dash_clientside.set_props('rendered-plot-tabs', {data: ids});
+        }
+    }
+
+    function activate(id, mirror, reveal) {
+        var changed = activeId !== id;
+        activeId = id;
+        plots.forEach(function (entry, key) {entry.gd.style.display = key === id ? 'block' : 'none';});
+        if (reveal) {
+            var raw = document.getElementById('plot-workspace');
+            var pub = document.getElementById('pub-preview-wrapper');
+            if (raw) raw.style.display = 'block';
+            if (pub) pub.style.display = 'none';
+        }
+        var current = plots.get(id);
+        if (current) {
+            resize(current.gd);
+            if (mirror && changed && current.figure) {
+                // Legacy callbacks still consume main-plot.figure. Mirror once;
+                // the visible graph itself is already on screen and untouched.
+                var layout = current.gd.layout || current.figure.layout || {};
+                layout = typeof structuredClone === 'function' ? structuredClone(layout) : JSON.parse(JSON.stringify(layout));
+                current.mirroredFigure = {data: current.figure.data, layout: layout};
+                setProps({figure: current.mirroredFigure, clickData: null, relayoutData: null});
+            }
+            if (changed) document.dispatchEvent(new CustomEvent('gecko:plot-ready'));
+        }
+        return !!current;
     }
 
     async function update(figure, tabId, tabs) {
         var host = document.getElementById('plot-workspace');
         if (!host || !window.Plotly) return window.dash_clientside.no_update;
+        var version = ++updateVersion;
         if (!host.__geckoResizeObserver && typeof ResizeObserver !== 'undefined') {
+            var queued = false;
             host.__geckoResizeObserver = new ResizeObserver(function () {
-                var gd = window.geckoActivePlot();
-                if (gd) requestAnimationFrame(function () {resize(gd);});
+                if (queued) return;
+                queued = true;
+                requestAnimationFrame(function () {
+                    queued = false;
+                    resize(window.geckoActivePlot());
+                });
             });
             host.__geckoResizeObserver.observe(host);
         }
-        var descriptors = tabs || [];
-        var allowed = new Set(descriptors.filter(function (tab) {return tab.type !== 'publication';})
+        lastTabs = tabs || [];
+        var allowed = new Set(lastTabs.filter(function (tab) {return tab.type !== 'publication';})
             .map(function (tab) {return tab.id;}));
         if (!tabId) allowed.add('__empty__');
         plots.forEach(function (entry, id) {
@@ -69,11 +114,11 @@
                 plots.delete(id);
             }
         });
+        publishRetainedTabs();
         var nextId = tabId || '__empty__';
         var changed = activeId !== nextId;
-        activeId = nextId;
-        // A response can arrive after the user has switched away. Route it to
-        // the figure's own tab rather than replacing the now-active plot.
+        // Show the cached target before serializing data or awaiting any render.
+        activate(nextId, false, false);
         var figureId = figure && figure.layout && figure.layout.meta && figure.layout.meta.gecko_tab_id;
         figureId = figureId || nextId;
         if (figure && allowed.has(figureId)) {
@@ -83,18 +128,23 @@
                 gd.dataset.workspacePlot = figureId;
                 gd.style.width = '100%'; gd.style.height = '100%';
                 gd.style.position = 'absolute'; gd.style.inset = '0';
+                gd.style.display = figureId === activeId ? 'block' : 'none';
                 host.appendChild(gd);
                 entry = {id: figureId, gd: gd};
                 plots.set(figureId, entry);
             }
-            var signature = JSON.stringify(figure);
+            var ctx = window.dash_clientside.callback_context;
+            var figureTriggered = ctx && (ctx.triggered || []).some(function (t) {return t.prop_id === 'main-plot.figure';});
+            // Dash tab/settings callbacks reuse the figure object. Explicit
+            // figure events still inspect it so in-place Patch updates are safe.
+            var isMirror = entry.mirroredFigure === figure;
+            var signature = isMirror || (entry.source === figure && !figureTriggered) ? entry.signature : JSON.stringify(figure);
+            if (isMirror) entry.mirroredFigure = null;
+            entry.source = figure;
             if (entry.signature !== signature) {
                 entry.signature = signature;
                 entry.figure = JSON.parse(signature);
-                entry.gd.style.display = figureId === activeId ? 'block' : 'none';
                 var layout = JSON.parse(JSON.stringify(entry.figure.layout || {}));
-                // dcc.Graph mutates automatic endpoints before forwarding its figure.
-                // Restore the unspecified endpoint before the retained plot consumes it.
                 Object.keys(layout).forEach(function(key){
                     if (!/^[xy]axis\d*$/.test(key) || !layout[key].range) return;
                     var axis=layout[key];
@@ -102,37 +152,58 @@
                     if (axis.autorange==='min') axis.range[0]=null;
                 });
                 await window.Plotly.react(entry.gd, entry.figure.data || [], layout, config);
+                if (!plots.has(figureId)) return '';
                 bridge(entry);
+                // Plotly.react already laid this canvas out at its current size.
+                if (figureId === activeId && host.style.display !== 'none') {
+                    var bounds = host.getBoundingClientRect();
+                    if (bounds.width && bounds.height) entry.gd.__geckoWorkspaceSize = bounds.width + ':' + bounds.height;
+                }
+                publishRetainedTabs();
+                if (version !== updateVersion) return '';
+                if (figureId === activeId) document.dispatchEvent(new CustomEvent('gecko:plot-ready'));
             }
         }
-        plots.forEach(function (entry, id) {entry.gd.style.display = id === activeId ? 'block' : 'none';});
+        if (version !== updateVersion) return '';
         var current = plots.get(activeId);
         if (current) {
-            var rect = host.getBoundingClientRect();
-            var size = rect.width + ':' + rect.height;
-            if (current.size !== size) {
-                current.size = size;
-                resize(current.gd);
-            }
+            resize(current.gd);
             if (changed && current.figure && figureId !== activeId) {
-                setProps({figure: current.figure, clickData: null, relayoutData: null});
+                var liveLayout = current.gd.layout || current.figure.layout || {};
+                liveLayout = typeof structuredClone === 'function' ? structuredClone(liveLayout) : JSON.parse(JSON.stringify(liveLayout));
+                current.mirroredFigure = {data: current.figure.data, layout: liveLayout};
+                setProps({figure: current.mirroredFigure, clickData: null, relayoutData: null});
             }
-            document.dispatchEvent(new CustomEvent('gecko:plot-ready'));
         }
         return '';
     }
 
     window.dash_clientside = Object.assign({}, window.dash_clientside, {
-        plotWorkspace: {update: update,
+        plotWorkspace: {update: update, activate: activate,
             switchTab: function (clicks, current) {
                 var ctx = window.dash_clientside.callback_context;
                 if (!(clicks || []).some(Boolean) || !ctx.triggered.length) return window.dash_clientside.no_update;
                 var id = JSON.parse(ctx.triggered[0].prop_id.replace(/\.n_clicks$/, '')).index;
-                return id === current ? window.dash_clientside.no_update : id;
+                if (id === current) return window.dash_clientside.no_update;
+                if (document.querySelectorAll) document.querySelectorAll('.plot-tab-btn').forEach(function (button) {
+                    try {
+                        var selected = JSON.parse(button.id).index === id;
+                        button.classList.toggle('active', selected);
+                        button.setAttribute('aria-pressed', selected ? 'true' : 'false');
+                    } catch (_) {}
+                });
+                var tab = lastTabs.find(function (t) {return t.id === id;});
+                if (tab && tab.type === 'publication') {
+                    activate(id, false, false);
+                    var publication = window.dash_clientside.publicationWorkspace;
+                    if (publication && publication.activate) publication.activate(id);
+                } else {
+                    activate(id, true, true);
+                }
+                return id;
             }}
     });
     window.addEventListener('resize', function () {
-        var gd = window.geckoActivePlot();
-        if (gd && window.Plotly) resize(gd);
+        if (window.Plotly) resize(window.geckoActivePlot());
     });
 })();
