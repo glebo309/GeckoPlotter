@@ -181,6 +181,7 @@ DEFAULT_PLOT_SETTINGS: Dict[str, object] = {
     "trace_overrides": {},
     "axis_overrides": {},
     "axis_label_modes": {},
+    "axis_label_overrides": {},
 }
 
 
@@ -266,6 +267,7 @@ class PlotSettings:
     trace_overrides: Dict[str, dict] = field(default_factory=dict)
     axis_overrides: Dict[str, dict] = field(default_factory=dict)
     axis_label_modes: Dict[str, str] = field(default_factory=dict)
+    axis_label_overrides: Dict[str, str] = field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
@@ -622,6 +624,8 @@ class PlotSettingsService:
         )
 
         apply_axis_overrides(fig, settings.axis_overrides)
+        from services.figure_labels import apply_figure_label_overrides
+        apply_figure_label_overrides(fig, settings.axis_label_overrides)
         return fig
 
 

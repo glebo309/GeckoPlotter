@@ -433,6 +433,9 @@ def register_plot_settings_callbacks(app, data_manager):
         for control, direction, key in [('pt-x-label', 'x', 'x_label'), ('pt-y-label', 'y', 'y1_label')]:
             if trigger == control + '.value' and new_settings[key] != current_settings.get(key):
                 new_settings['axis_label_modes'][direction] = 'custom'
+                new_settings['axis_label_overrides'] = {
+                    key:value for key,value in current_settings.get('axis_label_overrides', {}).items()
+                    if not key.startswith(direction + ':')}
 
         range_keys = ('auto_range','x_min','x_max','y_min','y_max','x_scale','y_scale')
         if any(new_settings[k] != current_settings.get(k, DEFAULT_PLOT_SETTINGS[k]) for k in range_keys):

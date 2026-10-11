@@ -32,6 +32,7 @@
         // Plotly.resize measures transformed bounds and would scale twice.
     }
     function activate(tabId, host, reveal) {
+        if (activeId !== tabId && window.GeckoFigureLabels) window.GeckoFigureLabels.cancel();
         activeId = tabId;
         var current = plots.get(tabId);
         var preset = current && current.preset || lastPreset;
@@ -103,7 +104,7 @@
                 Object.assign(entry.gd.style, {width:width+'px',height:height+'px'});
                 entry.gd.__geckoPublicationSize = null;
                 await window.Plotly.react(entry.gd,copy.data || [],copy.layout || {},
-                    {responsive:false,displayModeBar:false,displaylogo:false,scrollZoom:false,doubleClick:'reset+autosize'});
+                    {responsive:false,staticPlot:false,displayModeBar:false,displaylogo:false,scrollZoom:false,doubleClick:'reset+autosize'});
                 if (version !== updateVersion) return '';
             }
         }

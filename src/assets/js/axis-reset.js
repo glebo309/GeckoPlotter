@@ -48,6 +48,7 @@
     }
     function handle(event) {
         var gd=event.target && event.target.closest && event.target.closest('.js-plotly-plot');
+        if (window.GeckoFigureLabels && window.GeckoFigureLabels.targetAtEvent(gd,event)) return;
         var key=axisAtEvent(gd,event);
         if (!key || !window.Plotly) return;
         var last=gd.__geckoAxisPointer, now=Date.now();

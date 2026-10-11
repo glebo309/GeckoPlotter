@@ -1,0 +1,8 @@
+.js-plotly-plot text.gtitle,
+.js-plotly-plot text[class^="x"][class$="title"],
+.js-plotly-plot text[class^="y"][class$="title"],
+.js-plotly-plot .annotation-text { pointer-events:all; }
+.js-plotly-plot text.gtitle,
+.js-plotly-plot text[class^="x"][class$="title"],
+.js-plotly-plot text[class^="y"][class$="title"] { cursor:text; }
+.figure-label-editor { box-sizing:border-box; height:34px; padding:5px 9px; border:1px solid #688365; border-radius:5px; background:#fff; color:#242424; box-shadow:0 3px 15px #0002; font:14px -apple-system,BlinkMacSystemFont,sans-serif; outline:2px solid #68836533; }

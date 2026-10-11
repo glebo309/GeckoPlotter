@@ -105,6 +105,22 @@ def register_plot_context_menu_callbacks(app: dash.Dash, data_manager) -> None:
     """Register the right-click plot customization proof of concept."""
 
     @app.callback(
+        [Output('current-plot-settings','data',allow_duplicate=True),
+         Output('pt-title','value',allow_duplicate=True),
+         Output('pt-x-label','value',allow_duplicate=True),
+         Output('pt-y-label','value',allow_duplicate=True)],
+        Input('figure-label-edit','data'),
+        [State('current-plot-settings','data'),State('active-plot-tab','data'),
+         State('active-plot-context','data')], prevent_initial_call=True,
+    )
+    def edit_figure_text(event, settings, active_tab, owner):
+        from services.figure_labels import edit_figure_label
+        updated = edit_figure_label(settings,event,active_tab,owner)
+        if updated is None:
+            return (dash.no_update,) * 4
+        return updated, updated.get('title',''), updated.get('x_label',''), updated.get('y1_label','')
+
+    @app.callback(
         [
             Output('axis-context-panel', 'style'),
             Output('axis-ctx-title', 'children'),

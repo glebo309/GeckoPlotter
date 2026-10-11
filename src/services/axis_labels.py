@@ -35,7 +35,13 @@ def sync_automatic_labels(settings, figure, reset=False):
     result=deepcopy(settings)
     modes={'x':'auto','y':'auto'} if reset else label_modes(settings)
     result['axis_label_modes']=modes
+    if reset:
+        result['axis_label_overrides']={}
+    first_axes={}
+    for descriptor in axis_descriptors(figure):
+        first_axes.setdefault(descriptor['direction'], descriptor['id'])
     for direction,label in source_axis_labels(figure).items():
         if modes[direction]=='auto':
+            label=(result.get('axis_label_overrides') or {}).get(first_axes.get(direction),label)
             result['x_label' if direction=='x' else 'y1_label']=label
     return result if result!=settings else None

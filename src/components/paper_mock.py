@@ -78,6 +78,7 @@ def create_paper_mock():
         id='pub-figure-slot',
         children=[
             dcc.Store(id='pub-preview-graph', data={}),
+            dcc.Store(id='figure-label-edit'),
             html.Div(id='pub-plot-workspace', style={'width':'100%', 'height':'100%', 'position':'relative'}),
             html.Div(id='pub-workspace-sync', style={'display':'none'}),
         ],
