@@ -14,11 +14,13 @@ def editable_publication_figure(source, settings, source_settings=None):
     s = {**DEFAULT_PLOT_SETTINGS, **(settings or {})}
     original = publication_plot_settings(source, source_settings)
     fig = go.Figure(source)
+    from services.peak_display import refresh_peak_display
+    refresh_peak_display(fig)
     if 'plot_type' in original and s['plot_type'] != original['plot_type']:
         converted = []
         for trace in fig.data:
             item = trace.to_plotly_json()
-            auxiliary = (item.get('fill') or str(item.get('name', '')).startswith(('peak:', '__deselect__'))
+            auxiliary = (item.get('meta') == 'peak_overlay' or item.get('fill') or str(item.get('name', '')).startswith(('peak:', '__deselect__'))
                          or 'baseline' in str(item.get('name', '')).lower())
             if not auxiliary and trace.type in ('bar', 'scatter', 'scattergl'):
                 if s['plot_type'] == 'bar':
@@ -39,7 +41,7 @@ def editable_publication_figure(source, settings, source_settings=None):
         old = fig.layout.to_plotly_json()
         traces = list(fig.data)
         data_indices = [i for i, t in enumerate(traces)
-                        if not (getattr(t, 'fill', None) or str(t.name or '').startswith(('peak:', '__deselect__'))
+                        if not (t.meta == 'peak_overlay' or getattr(t, 'fill', None) or str(t.name or '').startswith(('peak:', '__deselect__'))
                                 or 'baseline' in str(t.name or '').lower())]
         if not data_indices:
             data_indices = list(range(len(traces)))
@@ -110,6 +112,7 @@ def editable_publication_figure(source, settings, source_settings=None):
         fig = result
     if s.get('smooth_window', 0) != original.get('smooth_window', 0):
         smooth_plotly_traces(fig.data, s.get('smooth_window', 0))
+    refresh_peak_display(fig)
     if (s.get('axis_label_modes', {}).get('x') != 'custom'
             and s['x_label'] == DEFAULT_PLOT_SETTINGS['x_label'] and fig.layout.xaxis.title.text):
         s['x_label'] = fig.layout.xaxis.title.text

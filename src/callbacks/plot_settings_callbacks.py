@@ -343,7 +343,12 @@ def register_plot_settings_callbacks(app, data_manager):
         else:
             plot_type = pt_plot_type
 
-        layout_opts = pt_layout_opts or []
+        # A tab switch/theme hydration can leave another control temporarily
+        # holding the previous figure's checklist. Only that checklist's own
+        # event is allowed to change its flags; unrelated edits keep the store.
+        triggered_props = {item['prop_id'] for item in (callback_context.triggered or [])}
+        layout_opts = (pt_layout_opts if 'pt-layout-opts.value' in triggered_props and pt_layout_opts is not None
+                       else _build_layout_opts({**DEFAULT_PLOT_SETTINGS, **current_settings}))
 
         # Axis labels: pt-x-label / pt-y-label are the sole source;
         # None means the field was never touched → keep current value
@@ -481,7 +486,7 @@ def register_plot_settings_callbacks(app, data_manager):
             if color.startswith('rgb('):
                 return '#' + ''.join(f'{int(v):02x}' for v in re.findall(r'\d+', color)[:3])
             return '#ffffff' if color == 'white' else color
-        options = set(options or []) - {'grid_x','grid_y'}
+        options = set(_build_layout_opts({**DEFAULT_PLOT_SETTINGS, **(settings or {})})) - {'grid_x','grid_y'}
         for direction in ('x','y'):
             axis = layout[direction+'axis']
             if axis.showgrid is not False and axis.gridcolor:

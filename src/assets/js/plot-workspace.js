@@ -63,6 +63,7 @@
 
     function activate(id, mirror, reveal) {
         var changed = activeId !== id;
+        if (changed) document.dispatchEvent(new CustomEvent('gecko:plot-leave'));
         activeId = id;
         plots.forEach(function (entry, key) {entry.gd.style.display = key === id ? 'block' : 'none';});
         if (reveal) {
@@ -185,6 +186,10 @@
                 if (!(clicks || []).some(Boolean) || !ctx.triggered.length) return window.dash_clientside.no_update;
                 var id = JSON.parse(ctx.triggered[0].prop_id.replace(/\.n_clicks$/, '')).index;
                 if (id === current) return window.dash_clientside.no_update;
+                // Restore the entire target workspace before revealing/resizing
+                // its retained canvas; publication uses a different panel split.
+                if (window.__geckoSyncPlotTabLayout) window.__geckoSyncPlotTabLayout(id, lastTabs);
+
                 if (document.querySelectorAll) document.querySelectorAll('.plot-tab-btn').forEach(function (button) {
                     try {
                         var selected = JSON.parse(button.id).index === id;

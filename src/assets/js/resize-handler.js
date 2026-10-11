@@ -39,8 +39,8 @@
         var activeResize = null;
         var startX = 0, startY = 0;
         var start = { left: 0, top: 0, containerWidth: 0, containerHeight: 0 };
-        var activePlotTab = null;
-        var tabLayouts = {};
+        var activePlotTab = null, activePlotKind = null;
+        var tabLayouts = {}, tabLayoutKinds = {};
         var applyingLayout = false;
 
         // Deterministic restore positions. Collapsed panels should reopen to the
@@ -63,6 +63,10 @@
             leftVertical: 0,
             rightVertical: 100
         };
+        // Capture the normal workspace once, before any publication can hide
+        // its Files and Results panes. Every new raw tab starts from this layout.
+        var rawDefaultLayout = currentLayout();
+
 
         // ── Label management ──
 
@@ -158,6 +162,14 @@
         }
 
         function ratioPercent(first, second, axis, fallback) {
+            // The split model is authoritative even if an ancestor is hidden
+            // or the browser has not painted the newly applied percentages yet.
+            var firstStyle = first.style[axis] || '';
+            var secondStyle = second.style[axis] || '';
+            if (firstStyle.endsWith('%') && secondStyle.endsWith('%')) {
+                var firstPercent = parseFloat(firstStyle), secondPercent = parseFloat(secondStyle);
+                if (firstPercent + secondPercent > 0) return 100 * firstPercent / (firstPercent + secondPercent);
+            }
             var firstRect = first.getBoundingClientRect();
             var secondRect = second.getBoundingClientRect();
             var firstSize = axis === 'height' ? firstRect.height : firstRect.width;
@@ -183,6 +195,7 @@
         function rememberActiveLayout() {
             if (!activePlotTab || applyingLayout) return;
             tabLayouts[activePlotTab] = currentLayout();
+            tabLayoutKinds[activePlotTab] = activePlotKind;
         }
 
         function applyLayout(layout) {
@@ -195,13 +208,13 @@
             rememberActiveLayout();
         }
 
-        function isPublicationTab(activeTab, tabs) {
-            if (!activeTab) return false;
-            if (String(activeTab).indexOf('publication') === 0) return true;
-            if (!Array.isArray(tabs)) return false;
-            return tabs.some(function (tab) {
-                return tab && tab.id === activeTab && tab.type === 'publication';
-            });
+        function tabKind(activeTab, tabs) {
+            if (Array.isArray(tabs)) {
+                var descriptor = tabs.find(function (tab) {return tab && tab.id === activeTab;});
+                if (!descriptor) return null;
+                return descriptor.type === 'publication' ? 'publication' : 'raw';
+            }
+            return String(activeTab).indexOf('publication') === 0 ? 'publication' : 'raw';
         }
 
         // Apply collapse / expand for a given panel pair
@@ -425,16 +438,20 @@
 
         window.__geckoSyncPlotTabLayout = function (activeTab, plotTabs) {
             if (!activeTab) return;
+            var kind = tabKind(activeTab, plotTabs);
+            if (!kind) return; // Wait for matching tab descriptors during creation/removal.
 
-            if (activePlotTab && activePlotTab !== activeTab) {
-                rememberActiveLayout();
-            }
-
+            if (activePlotTab && activePlotTab !== activeTab) rememberActiveLayout();
             activePlotTab = activeTab;
-            if (tabLayouts[activeTab]) {
-                applyLayout(tabLayouts[activeTab]);
-            } else if (isPublicationTab(activeTab, plotTabs)) {
-                applyLayout(publicationDefaultLayout);
+            activePlotKind = kind;
+            var saved = tabLayoutKinds[activeTab] === kind && tabLayouts[activeTab];
+            applyLayout(saved || (kind === 'publication' ? publicationDefaultLayout : rawDefaultLayout));
+
+            if (Array.isArray(plotTabs)) {
+                var ids = new Set(plotTabs.map(function (tab) {return tab.id;}));
+                Object.keys(tabLayouts).forEach(function (id) {
+                    if (!ids.has(id)) {delete tabLayouts[id]; delete tabLayoutKinds[id];}
+                });
             }
         };
 

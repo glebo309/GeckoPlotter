@@ -10,6 +10,28 @@
     }
 
     var GRAPH_IDS = ['main-plot'];
+    var boundActiveGraph = null;
+
+    function leaveActiveGraph() {
+        var gd = boundActiveGraph;
+        if (!gd) return;
+        if (gd.__geckoCancelDraw) gd.__geckoCancelDraw();
+        gd.__geckoManualIntegrationSelectedPeakId = null;
+        gd.__geckoManualIntegrationSuspendDrawUntilMouseUp = false;
+        clearEmptyClickTimer(gd);
+        removePreviewLine();
+        setMomentaryDrawActive(false);
+        boundActiveGraph = null;
+        if (window.dash_clientside) window.dash_clientside.set_props('selected-peak-idx', {data:null});
+    }
+
+    function sourceAtSubplot(gd, key) {
+        var candidates = (gd.data || []).filter(function(trace) {
+            return trace.meta && trace.meta.file_id && trace.visible !== false && trace.visible !== 'legendonly' &&
+                (trace.xaxis || 'x') + (trace.yaxis || 'y') === key && !trace.fill;
+        });
+        return candidates.find(function(trace) {return trace.meta.file_id === window.__geckoActiveFile;}) || candidates[0];
+    }
 
     function graphDivFromEvent(event) {
         if (!event || !event.target || typeof event.target.closest !== 'function') return null;
@@ -50,6 +72,17 @@
     function syncSelectedShape(graphId, selectedPeakId) {
         var gd = getGraphDiv(graphId);
         if (!gd || !window.Plotly || !gd.layout) return;
+        // Selection callbacks can arrive after a cached tab has already changed.
+        // A peak absent from this figure must never disable its draw tool.
+        if (selectedPeakId) {
+            var present = (gd.layout.shapes || []).some(function(shape) {return shape.name === 'baseline:' + selectedPeakId;}) ||
+                (gd.data || []).some(function(trace) {
+                    return Array.isArray(trace.customdata) && trace.customdata.some(function(custom) {
+                        return pointPeakId({customdata:custom}) === selectedPeakId;
+                    });
+                });
+            if (!present) selectedPeakId = null;
+        }
         gd.__geckoManualIntegrationSelectedPeakId = selectedPeakId || null;
 
         var shapes = gd.layout.shapes || [];
@@ -211,6 +244,8 @@
             x1: line.x1,
             y1: line.y1,
             subplot: line.subplot || 'xy',
+            file_id: line.file_id,
+            tab_id: line.tab_id,
             momentary: !!line.momentary,
             ts: Date.now()
         };
@@ -520,10 +555,13 @@
 
         stopPlotlyGesture(event);
         var startSp = subplotAtEvent(gd, event);
+        var source = sourceAtSubplot(gd, startData.subplot);
         gd.__geckoManualIntegrationDrawing = {
             startClientX: event.clientX,
             startClientY: event.clientY,
             startData: startData,
+            fileId: source && source.meta.file_id,
+            tabId: gd.dataset && gd.dataset.workspacePlot,
             startSubplot: startSp,
             momentary: isDrawModifier(event) && gd.__geckoManualIntegrationMode !== 'draw'
         };
@@ -601,6 +639,8 @@
                 x1: Number(endX),
                 y1: Number(endY),
                 subplot: drawing.startData.subplot,
+                file_id: drawing.fileId,
+                tab_id: drawing.tabId,
                 momentary: drawing.momentary
             });
         };
@@ -743,9 +783,16 @@
     function installHandlersOnGraph(graphId) {
         var gd = getGraphDiv(graphId);
         if (!gd) return false;
-        if (gd.__geckoManualIntegrationClickInstalled) return true;
+        if (boundActiveGraph !== gd) {
+            leaveActiveGraph();
+            boundActiveGraph = gd;
+            gd.__geckoManualIntegrationSelectedPeakId = null;
+            gd.__geckoManualIntegrationSuspendDrawUntilMouseUp = false;
+        }
         gd.__geckoGraphId = graphId;
         gd.__geckoManualIntegrationMode = window.__geckoBaselineMode || 'navigate';
+        syncInteractionDragmode(gd);
+        if (gd.__geckoManualIntegrationClickInstalled) return true;
 
         if (typeof gd.on === 'function') {
             gd.on('plotly_click', function (eventData) {
@@ -888,4 +935,5 @@
         window.setTimeout(installEmptyClickHandler, 100);
     });
     document.addEventListener('gecko:plot-ready', installEmptyClickHandler);
+    document.addEventListener('gecko:plot-leave', leaveActiveGraph);
 })();

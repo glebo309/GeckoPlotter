@@ -90,7 +90,7 @@ def register_workspace_callbacks(app, data_manager):
         current_owner['values']=values
         return (values['color'],values['line_width'],values['line_style'],100*values['opacity'],
                 current_owner,no_update,isbar,isbar,
-                'Edits apply only to this signal. Use All signals for figure-wide styling.',False,False,False,False)
+                'Edits apply only to this signal. Figure style sets the shared defaults.',False,False,False,False)
 
     @app.callback(Output('toolbox-tabs','value',allow_duplicate=True),Input('plot-tool-export','n_clicks'),prevent_initial_call=True)
     def show_export(clicks):return 'export' if clicks else no_update

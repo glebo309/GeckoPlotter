@@ -132,7 +132,10 @@ def add_peak_traces(fig, all_peaks, time_arr, signal_arr, selected_peak_id=None,
     _has_grid = row and hasattr(fig, '_grid_ref') and fig._grid_ref
     add_kw = dict(row=row, col=1) if _has_grid else {}
 
+    from services.peak_display import register_peak_geometry, refresh_peak_display
+
     for i, peak in enumerate(all_peaks):
+        register_peak_geometry(fig, peak)
         trace_start = len(fig.data)
         shape_start = len(fig.layout.shapes)
         is_selected = peak.peak_id == selected_peak_id
@@ -196,6 +199,8 @@ def add_peak_traces(fig, all_peaks, time_arr, signal_arr, selected_peak_id=None,
                 for shape in fig.layout.shapes[shape_start:]:
                     shape.xref = source.xaxis or 'x'
                     shape.yref = source.yaxis or 'y'
+
+    refresh_peak_display(fig)
 
 
 # Distinct colors for deconvolution preview components (matches the sandbox).
@@ -327,5 +332,6 @@ def patch_figure_with_peaks(all_peaks, current_figure, time_arr, signal_arr, sel
     for trace in new_overlays:
         patch['data'].append(trace)
     patch['layout']['shapes'] = fig_json.get('layout', {}).get('shapes', [])
+    patch['layout']['meta'] = fig_json.get('layout', {}).get('meta', {})
     patch['layout']['uirevision'] = 'main-plot'
     return patch

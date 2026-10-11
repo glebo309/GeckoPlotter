@@ -24,3 +24,11 @@ test('layout controls preserve navigation defaults and Integrate toggles back to
     action('plot-tool-integrate', 'draw');
     assert.ok(props.some(p=>p[0]==='baseline-mode' && p[1].data==='navigate'));
 });
+
+test('Integrate immediately changes the active graph tool before a server callback returns',()=>{
+    const modes=[];
+    const window={dash_clientside:{set_props(){}},GeckoPlotterManualIntegration:{syncSelectedShape(){},syncDrawMode:(id,mode)=>modes.push([id,mode])}};
+    vm.runInNewContext(fs.readFileSync(path.join(__dirname,'../../src/assets/js/plot-toolbar.js'),'utf8'),{window,document:{getElementById:()=>null}});
+    window.dash_clientside.plotToolbar.action('plot-tool-integrate','navigate');
+    assert.deepEqual(modes,[['main-plot','draw']]);
+});

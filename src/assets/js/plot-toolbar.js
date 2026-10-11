@@ -6,6 +6,10 @@
             dc.set_props('pt-layout-mode', {value: id === 'plot-tool-overlay' ? 'overlay' : 'stacked'});
         } else if (id === 'plot-tool-integrate') {
             var next = mode === 'draw' ? 'navigate' : 'draw';
+            if (window.GeckoPlotterManualIntegration) {
+                window.GeckoPlotterManualIntegration.syncSelectedShape('main-plot', null);
+                window.GeckoPlotterManualIntegration.syncDrawMode('main-plot', next);
+            }
             dc.set_props('selected-peak-idx', {data: null});
             dc.set_props('baseline-mode', {data: next});
             dc.set_props('baseline-mode-indicator', {children: next === 'draw' ? 'Draw: on' : 'Draw: off'});

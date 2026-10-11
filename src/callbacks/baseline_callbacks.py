@@ -70,7 +70,11 @@ def _baseline_area(time_arr, signal_arr, p1, p2):
     yb = y1 + (y2 - y1) * (x - x1) / (x2 - x1)
     d = y - yb
 
-    idx = np.where(np.diff(np.sign(d)))[0]
+    # Samples exactly on the baseline are not crossings. Spectra often contain
+    # runs of zero absorbance; counting every zero transition can trim away the
+    # real peak and integrate only a tiny fluctuation in its tail.
+    nonzero = np.flatnonzero(d)
+    idx = nonzero[np.flatnonzero(np.diff(np.sign(d[nonzero])))]
 
     if idx.size >= 2:
         i0 = idx[0] + 1 if d[idx[0] + 1] > 0 else idx[0]
@@ -337,9 +341,7 @@ def register_baseline_callbacks(app: dash.Dash, data_manager) -> None:
         import plotly.graph_objects as go
 
         tab = next((t for t in (plot_tabs or []) if t['id'] == active_tab_id), None)
-        if tab and tab.get('type') == 'custom':
-            raise PreventUpdate
-        if not active_file:
+        if tab and tab.get('type') in ('custom', 'publication'):
             raise PreventUpdate
 
         trigger_id = callback_context.triggered[0]['prop_id'].rsplit('.', 1)[0] if callback_context.triggered else ''
@@ -351,7 +353,19 @@ def register_baseline_callbacks(app: dash.Dash, data_manager) -> None:
                 raise PreventUpdate
             subplot_key = draw_line.get('subplot', 'xy')
             row = _subplot_row(subplot_key)
-            target_file = _file_id_for_subplot_row(row, active_file, plot_settings, loaded_files, plot_tabs, active_tab_id)
+            target_file = draw_line.get('file_id')
+            if draw_line.get('tab_id') and draw_line['tab_id'] != active_tab_id:
+                raise PreventUpdate
+            if target_file:
+                from callbacks.viz_callbacks import _get_active_file_group
+                if (not tab or tab.get('type') != 'raw'
+                        or data_manager.get_data_by_id(target_file) is None
+                        or tuple(tab.get('group_key', [])) != _get_active_file_group(data_manager, target_file)):
+                    raise PreventUpdate
+            else:
+                target_file = _file_id_for_subplot_row(row, active_file, plot_settings, loaded_files, plot_tabs, active_tab_id)
+            if not target_file:
+                raise PreventUpdate
             log.debug(f"Draw on subplot={subplot_key} row={row} target_file={target_file} active_file={active_file}")
             log.debug(f"  plot_settings layout_mode={plot_settings.get('layout_mode') if plot_settings else 'None'}")
             log.debug(f"  plot_tabs={plot_tabs}, active_tab_id={active_tab_id}")
@@ -425,7 +439,7 @@ def register_baseline_callbacks(app: dash.Dash, data_manager) -> None:
                 file_overlay_map=data_manager.build_file_overlay_map())
             from services.plot_settings_service import DEFAULT_PLOT_SETTINGS
             _s = {**DEFAULT_PLOT_SETTINGS, **(plot_settings or {})}
-            if _s.get('layout_mode') == 'stacked':
+            if _s.get('layout_mode') == 'stacked' or draw_line.get('file_id'):
                 return dash.no_update, (peak_counter or 0) + 1, (clear_counter or 0) + 1, None, (render_counter or 0) + 1
             fig_patch = patch_figure_with_peaks(
                 data_manager.peak_service.get_peaks(target_file), current_figure, time_arr, signal_arr, None
@@ -433,6 +447,8 @@ def register_baseline_callbacks(app: dash.Dash, data_manager) -> None:
             return fig_patch, (peak_counter or 0) + 1, (clear_counter or 0) + 1, None, dash.no_update
 
         # ── Edit selected/all baseline shape endpoint(s) ──
+        if not active_file:
+            raise PreventUpdate
         if not relayout:
             raise PreventUpdate
         if mode == 'edit' or selected_idx:

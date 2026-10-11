@@ -25,11 +25,11 @@ function setup() {
     const document = {getElementById: id => elements.get(id), createElement: element,
         dispatchEvent() {}, addEventListener() {}};
     vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../../src/assets/js/plot-workspace.js'), 'utf8'),
-        {window, document, CustomEvent: function() {}, ResizeObserver: class {
+        {window, document, CustomEvent: function(type) {this.type=type;}, ResizeObserver: class {
             constructor(callback) {resizeObserver = callback;} observe() {}},
             requestAnimationFrame: fn => fn(), console, setTimeout, structuredClone,
             JSON: {parse: JSON.parse, stringify(value) {serializations++; return JSON.stringify(value);}}});
-    return {window, props, host: elements.get('plot-workspace'), renders: () => renders,
+    return {window, document, props, host: elements.get('plot-workspace'), renders: () => renders,
         resizes: () => resizes, serializations: () => serializations, panelResize: () => resizeObserver()};
 }
 
@@ -153,4 +153,29 @@ test('the cached figure mirrored to the hidden Dash interface is not serialized 
  await api.update(mirrored,'lcms',tabs);
  assert.equal(s.serializations(),before);
  assert.equal(s.renders(),2);
+});
+
+test('fast tab switching restores target panel layout before revealing the cached graph',async()=>{
+ const s=setup(),api=s.window.dash_clientside.plotWorkspace;
+ await api.update(figure('lcms'),'lcms',tabs);
+ await api.update(figure('spectra'),'spectra',tabs);
+ let calls=0;
+ s.window.__geckoSyncPlotTabLayout=(id,descriptors)=>{
+   calls++;assert.equal(id,'lcms');assert.equal(descriptors,tabs);
+   assert.equal(s.window.geckoActivePlot().dataset.workspacePlot,'spectra','panels restore before active graph is resized');
+ };
+ s.window.dash_clientside.callback_context={triggered:[{prop_id:'{"type":"plot-tab-btn","index":"lcms"}.n_clicks'}]};
+ api.switchTab([1,0],'spectra');
+ assert.equal(calls,1);
+});
+
+
+test('tab departure is announced before the old raw graph is hidden, including cold targets',async()=>{
+ const s=setup(),api=s.window.dash_clientside.plotWorkspace;
+ await api.update(figure('lcms'),'lcms',tabs);
+ const events=[];
+ s.document.dispatchEvent=event=>{events.push(event.type);if(event.type==='gecko:plot-leave') assert.equal(s.window.geckoActivePlot().dataset.workspacePlot,'lcms');};
+ s.window.dash_clientside.callback_context={triggered:[{prop_id:'{"type":"plot-tab-btn","index":"spectra"}.n_clicks'}]};
+ api.switchTab([0,1],'lcms');
+ assert.equal(events[0],'gecko:plot-leave');
 });

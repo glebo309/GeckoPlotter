@@ -36,7 +36,7 @@ def arrange_workspace(root):
                   html.Div('No figure selected',id='inspector-figure-name'),
                   html.Div('Import data to begin.',id='inspector-figure-summary')],className='inspector-target'),
         section('Axes', [axis_inspector(), legacy_axes,c[10]],True),
-        section('Signals', [
+        section('Signal style', [
             dcc.Store(id='signal-inspector-owner'), dcc.Store(id='signal-inspector-options',data=[]),
             dmc.Select(id='signal-inspector-select',label='Edit signal',data=[],placeholder='Select a signal',size='xs',allowDeselect=False),
             html.Div([
@@ -46,15 +46,18 @@ def arrange_workspace(root):
                 dmc.NumberInput(id='signal-opacity',label='Opacity',value=100,min=0,max=100,step=5,suffix=' %',debounce=True,size='xs'),
             ],className='inspector-fields-grid',id='signal-inspector-fields'),
             html.Div(id='signal-inspector-note',className='inspector-note'),
-            html.Button('Use figure style',id='signal-reset-btn',n_clicks=0,className='btn btn-secondary inspector-reset'),
-            section('All signals', [c[17],c[18],c[19],c[20],c[5],c[6]]),
+            html.Button('Use figure defaults',id='signal-reset-btn',n_clicks=0,className='btn btn-secondary inspector-reset'),
         ],True),
+        section('Smoothing', [c[6],
+            html.Div('Display only. Peak areas use the original signal.', className='inspector-note')]),
         section('Labels & legend',[c[22],c[23],
             html.Button('Use data labels', id='pt-axis-labels-auto', n_clicks=0,
                         className='btn btn-secondary inspector-reset',
                         title='Restore axis names and units from the source data'),
             c[24],c[30],c[31]]),
-        section('Appearance',[c[13],c[14],c[15],c[26],c[27],c[28],c[33],c[34]]),
+        section('Figure style', [
+            html.Div('Shared defaults for signals without individual overrides.',className='inspector-note'),
+            c[14],c[17],c[18],c[19],c[20],c[13],c[15],c[26],c[27],c[28],c[33],c[34]]),
         section('Layout & size',[layout_controls,c[4],c[7]],False,id='inspector-layout-section'),
     ]
     # Exact values accompany sliders; their original callbacks remain authoritative.
