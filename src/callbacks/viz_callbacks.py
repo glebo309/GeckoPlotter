@@ -124,8 +124,8 @@ def _get_overlay_group(metadata, fdata, file_id=None, dm=None):
     "Time" or "X" column from being placed on the same plot.
 
     If the file has a group override (from cross-group drag-drop), use that.
-    Components of the same LCMS bundle share the primary component's group
-    so +TIC and -TIC always overlay.
+    Components of one LCMS run share its bundle-specific group. Equal time
+    ranges in different runs never imply an automatic comparison.
     """
     if file_id and dm and hasattr(dm, 'group_overrides'):
         override = dm.group_overrides.get(file_id)
@@ -134,6 +134,15 @@ def _get_overlay_group(metadata, fdata, file_id=None, dm=None):
 
     if file_id and dm and hasattr(dm, 'get_bundle_for_component'):
         bundle = dm.get_bundle_for_component(file_id)
+        if bundle is None and hasattr(dm, 'get_bundle'):
+            bundle = dm.get_bundle(file_id)
+        if bundle and getattr(bundle.bundle_type, 'value', bundle.bundle_type) == 'lcms':
+            primary = bundle.primary
+            entry = dm.get_data_by_id(primary.component_id) if primary else None
+            entry = entry or fdata
+            meta = entry.get('metadata', {})
+            return ('lcms_ms', _get_x_axis_name(meta, entry),
+                    _get_x_domain_signature(meta, entry), bundle.bundle_id)
         if bundle and len(bundle.component_list) > 1:
             primary = bundle.primary
             if primary and primary.component_id != file_id:
@@ -375,9 +384,13 @@ def _tab_id_from_group(group_key):
     return f"tab-{slug}"
 
 
-def _tab_label_from_group(group_key):
+def _tab_label_from_group(group_key, dm=None):
     """Create a human-readable label for a tab from its overlay group key."""
     cat, x_axis, *_rest = group_key
+    if dm is not None and cat == 'lcms_ms' and len(group_key) == 4:
+        bundle = dm.get_bundle(group_key[3])
+        if bundle:
+            return bundle.name
     base = _GROUP_LABELS.get(cat, cat.replace('_', ' ').title())
     return base
 
@@ -495,7 +508,7 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
             else:
                 new_tabs.append({
                     'id': tid,
-                    'label': _tab_label_from_group(group),
+                    'label': _tab_label_from_group(group, data_manager),
                     'type': 'raw',
                     'group_key': list(group),
                 })

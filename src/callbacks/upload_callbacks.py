@@ -336,7 +336,7 @@ def render_file_tree_with_bundles_selected(records: List[dict], data_manager, ac
         group = _get_overlay_group(metadata, fdata, file_id=file_id, dm=data_manager)
         tid = _tab_id_from_group(group)
         if tid not in groups:
-            groups[tid] = {'label': _tab_label_from_group(group), 'items': []}
+            groups[tid] = {'label': _tab_label_from_group(group, data_manager), 'items': []}
         groups[tid]['items'].append(item)
 
     tree_items = []
