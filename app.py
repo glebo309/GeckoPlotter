@@ -171,7 +171,7 @@ _layout_body = html.Div(
         dcc.Store(id='title-context-menu-close-store', data=0),  # bumped on outside click to close title editor
         dcc.Store(id='label-context-menu-store', data=None),  # {axis, x, y, ts} from axis label right-click
         dcc.Store(id='label-context-menu-close-store', data=0),  # bumped on outside click to close label editor
-        dcc.Store(id='ms-active-subplot-idx', data=0),  # which subplot row the active LCMS file is in
+        dcc.Store(id='ms-active-subplot-idx', data={'file_id': None}),  # spectral source identity for the scan cursor
         dcc.Store(id='ms-plot-context-menu-store', data=None),  # {source, x, y, ts} from MS graph right-click
         dcc.Store(id='ms-plot-context-menu-close-store', data=0),
         dcc.Store(id='figure-action-event', data=None),
@@ -1262,10 +1262,10 @@ _layout_body = html.Div(
                                                     ]),
                                                     ]),
                                                     # ── MS Scan tab ──
-                                                    dmc.TabsPanel(value="ms-scan", style={'flex': '1', 'overflow': 'auto'}, children=[
-                                                    html.Div(className="tab-content", style={
-                                                        'display': 'block', 'padding': '10px 14px',
-                                                        'height': '100%', 'overflowY': 'auto'
+                                                    dmc.TabsPanel(value="ms-scan", style={'flex': '1', 'minHeight': 0, 'overflow': 'auto'}, children=[
+                                                    html.Div(className="tab-content analysis-graph-content", style={
+                                                        'display': 'flex', 'flexDirection': 'column', 'padding': '10px 14px',
+                                                        'height': '100%', 'minHeight': 0, 'boxSizing': 'border-box', 'overflowY': 'auto'
                                                     }, children=[
                                                         html.Div([
                                                             html.Div('Apex / Scan Spectrum', style={
@@ -1298,7 +1298,9 @@ _layout_body = html.Div(
                                                                           font=dict(size=13, color='#999'),
                                                                       )])),
                                                                   responsive=True,
-                                                                  style={'width': '100%', 'height': '280px'},
+                                                                  className='analysis-graph',
+                                                                  style={'width': '100%', 'height': '0px',
+                                                                         'minHeight': '140px', 'flex': '1 0 140px'},
                                                                   config={
                                                                       'responsive': True,
                                                                       'displayModeBar': False,
@@ -1314,10 +1316,10 @@ _layout_body = html.Div(
                                                     ]),
                                                     ]),
                                                     # ── EIC tab ──
-                                                    dmc.TabsPanel(value="ms-eic", style={'flex': '1', 'overflow': 'auto'}, children=[
-                                                    html.Div(className="tab-content", style={
-                                                        'display': 'block', 'padding': '10px 14px',
-                                                        'height': '100%', 'overflowY': 'auto'
+                                                    dmc.TabsPanel(value="ms-eic", style={'flex': '1', 'minHeight': 0, 'overflow': 'auto'}, children=[
+                                                    html.Div(className="tab-content analysis-graph-content", style={
+                                                        'display': 'flex', 'flexDirection': 'column', 'padding': '10px 14px',
+                                                        'height': '100%', 'minHeight': 0, 'boxSizing': 'border-box', 'overflowY': 'auto'
                                                     }, children=[
                                                         html.Div([
                                                             html.Div('Extracted Ion Chromatogram', style={
@@ -1370,7 +1372,9 @@ _layout_body = html.Div(
                                                                           font=dict(size=13, color='#999'),
                                                                       )])),
                                                                   responsive=True,
-                                                                  style={'width': '100%', 'height': '260px'},
+                                                                  className='analysis-graph',
+                                                                  style={'width': '100%', 'height': '0px',
+                                                                         'minHeight': '140px', 'flex': '1 0 140px'},
                                                                   config={
                                                                       'responsive': True,
                                                                       'displayModeBar': False,
@@ -1381,54 +1385,54 @@ _layout_body = html.Div(
                                                     ]),
                                                     ]),
                                                     # ── Peak Mass tab ──
-                                                    dmc.TabsPanel(value="ms-peak-mass", style={'flex': '1', 'overflow': 'auto'}, children=[
-                                                    html.Div(className="tab-content", style={
-                                                        'display': 'block', 'padding': '10px 14px',
-                                                        'height': '100%', 'overflowY': 'auto'
+                                                    dmc.TabsPanel(value="ms-peak-mass", style={'flex': '1', 'minHeight': 0, 'overflow': 'auto'}, children=[
+                                                    html.Div(className="tab-content analysis-graph-content", style={
+                                                        'display': 'flex', 'flexDirection': 'column', 'padding': '10px 14px',
+                                                        'height': '100%', 'minHeight': 0, 'boxSizing': 'border-box', 'overflowY': 'auto'
                                                     }, children=[
                                                         html.Div([
-                                                            html.Div([
-                                                                html.Div('Peak Mass Spectrum', style={
-                                                                    'fontWeight': 'bold', 'fontSize': '12px'}),
-                                                                create_spectrum_polarity_control('peak-mass'),
-                                                            ], style={
-                                                                'display': 'flex', 'justifyContent': 'space-between',
-                                                                'alignItems': 'center', 'marginBottom': '6px'}),
-                                                            dcc.Graph(id='peak-mass-graph',
-                                                                      figure=go.Figure(layout=go.Layout(
-                                                                          template='plotly_white',
-                                                                          margin=dict(l=50, r=20, t=10, b=38),
-                                                                          xaxis=dict(visible=False),
-                                                                          yaxis=dict(visible=False),
-                                                                          annotations=[dict(
-                                                                              text='Select a peak to view its mass spectrum',
-                                                                              xref='paper', yref='paper',
-                                                                              x=0.5, y=0.5, showarrow=False,
-                                                                              font=dict(size=13, color='#999'),
-                                                                          )])),
-                                                                      responsive=True,
-                                                                      style={'width': '100%', 'height': '280px'},
-                                                                      config={
-                                                                          'responsive': True,
-                                                                          'displayModeBar': False,
-                                                                          'displaylogo': False,
-                                                                          'doubleClick': 'reset+autosize',
-                                                                          'scrollZoom': True,
-                                                                      }),
-                                                            html.Div(id='peak-mass-info',
-                                                                     style={'fontSize': '12px', 'padding': '6px 8px',
-                                                                            'backgroundColor': 'rgba(0,0,0,0.02)',
-                                                                            'borderRadius': '6px', 'marginTop': '4px',
-                                                                            'minHeight': '20px'}),
-                                                            dmc.Select(
-                                                                id='peak-mass-selector',
-                                                                placeholder='Select a peak...',
-                                                                data=[],
-                                                                size='xs',
-                                                                clearable=True,
-                                                                style={'marginTop': '8px'},
-                                                            ),
-                                                        ]),
+                                                            html.Div('Peak Mass Spectrum', style={
+                                                                'fontWeight': 'bold', 'fontSize': '12px'}),
+                                                            create_spectrum_polarity_control('peak-mass'),
+                                                        ], style={
+                                                            'display': 'flex', 'justifyContent': 'space-between',
+                                                            'alignItems': 'center', 'marginBottom': '6px'}),
+                                                        dmc.Select(
+                                                            id='peak-mass-selector',
+                                                            placeholder='Select a peak...',
+                                                            data=[],
+                                                            size='xs',
+                                                            clearable=True,
+                                                            style={'marginBottom': '8px'},
+                                                        ),
+                                                        dcc.Graph(id='peak-mass-graph',
+                                                                  figure=go.Figure(layout=go.Layout(
+                                                                      template='plotly_white',
+                                                                      margin=dict(l=50, r=20, t=10, b=38),
+                                                                      xaxis=dict(visible=False),
+                                                                      yaxis=dict(visible=False),
+                                                                      annotations=[dict(
+                                                                          text='Select a peak to view its mass spectrum',
+                                                                          xref='paper', yref='paper',
+                                                                          x=0.5, y=0.5, showarrow=False,
+                                                                          font=dict(size=13, color='#999'),
+                                                                      )])),
+                                                                  responsive=True,
+                                                                  className='analysis-graph',
+                                                                  style={'width': '100%', 'height': '0px',
+                                                                         'minHeight': '140px', 'flex': '1 0 140px'},
+                                                                  config={
+                                                                      'responsive': True,
+                                                                      'displayModeBar': False,
+                                                                      'displaylogo': False,
+                                                                      'doubleClick': 'reset+autosize',
+                                                                      'scrollZoom': True,
+                                                                  }),
+                                                        html.Div(id='peak-mass-info',
+                                                                 style={'fontSize': '12px', 'padding': '6px 8px',
+                                                                        'backgroundColor': 'rgba(0,0,0,0.02)',
+                                                                        'borderRadius': '6px', 'marginTop': '4px',
+                                                                        'minHeight': '20px'}),
                                                     ]),
                                                     ]),
                                                     ],

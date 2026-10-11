@@ -23,7 +23,8 @@ def editable_publication_figure(source, settings, source_settings=None, *, clean
             item = trace.to_plotly_json()
             auxiliary = (item.get('meta') == 'peak_overlay' or item.get('fill') or str(item.get('name', '')).startswith(('peak:', '__deselect__'))
                          or 'baseline' in str(item.get('name', '')).lower())
-            if not auxiliary and trace.type in ('bar', 'scatter', 'scattergl'):
+            mass_spectrum = isinstance(trace.meta, dict) and trace.meta.get('gecko_mass_spectrum')
+            if not auxiliary and not mass_spectrum and trace.type in ('bar', 'scatter', 'scattergl'):
                 if s['plot_type'] == 'bar':
                     item['type'] = 'bar'
                     trace = go.Bar(item, skip_invalid=True)
@@ -170,6 +171,11 @@ def editable_publication_figure(source, settings, source_settings=None, *, clean
                     xanchor='center', yanchor='middle', textangle=-90, showarrow=False,
                     font=dict(size=s['tick_font_size'],color=fig.layout.font.color or '#444'))
                 shared_y = True
+    # Ion labels use the figure's print typography, not desktop-sized text.
+    for annotation in fig.layout.annotations:
+        if annotation.name == 'gecko-ms-peak':
+            annotation.font.update(size=min(s['font_size'], s['tick_font_size']), color='#333333')
+            annotation.yshift = 2
     # Compact margins and legend samples suit a printed column, with room for ticks.
     for key in fig.layout:
         if re.fullmatch(r'legend\d*', key):

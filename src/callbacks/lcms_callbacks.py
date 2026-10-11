@@ -18,7 +18,6 @@ log = logging.getLogger(__name__)
 
 def register_lcms_callbacks(app, data_manager):
     """Register LC-MS viewer callbacks against *app*."""
-    from callbacks.viz_callbacks import _collect_visible_files
 
     lcms_svc = data_manager.lcms_service
 
@@ -65,21 +64,10 @@ def register_lcms_callbacks(app, data_manager):
         prevent_initial_call=True,
     )
     def configure_scan_slider(active_file, loaded_files):
-        subplot_idx = 0
-        if active_file and loaded_files:
-            visible = _collect_visible_files(
-                data_manager, active_file, loaded_files)
-            for files in visible.values():
-                for i, (name, fdata) in enumerate(files):
-                    fid = fdata.get('record', {}).get('id', '')
-                    if fid == active_file:
-                        subplot_idx = i
-                        break
-
         resolved = _resolve_lcms_spectral_entry(data_manager, active_file, lcms_svc)
         file_id, file_data = resolved if resolved else (None, None)
         if not file_data or not lcms_svc.has_spectral_data(file_data):
-            return 0, 1, 0, 'No scan selected', subplot_idx
+            return 0, 1, 0, 'No scan selected', {'file_id': None}
 
         n_scans = max(lcms_svc.get_scan_count(file_data), 1)
         time_arr, _ = lcms_svc.extract_tic(file_data)
@@ -91,7 +79,7 @@ def register_lcms_callbacks(app, data_manager):
             except ValueError:
                 apex_idx = 0
         apex_idx = min(max(apex_idx, 0), n_scans - 1)
-        return 0, n_scans - 1, apex_idx, _scan_label(lcms_svc, file_data, apex_idx), subplot_idx
+        return 0, n_scans - 1, apex_idx, _scan_label(lcms_svc, file_data, apex_idx), {'file_id': file_id}
 
     # ------------------------------------------------------------------
     # Polarity toggle: sync both toggles from active-file selection
@@ -188,7 +176,7 @@ def register_lcms_callbacks(app, data_manager):
 
     app.clientside_callback(
         """
-        function(scanIdx, activeTab, activeFile, subplotIdx, figure) {
+        function(scanIdx, activeTab, activeFile, source, figure) {
             var hidden = {
                 position: 'absolute',
                 display: 'none',
@@ -219,7 +207,10 @@ def register_lcms_callbacks(app, data_manager):
 
             var sliderRoot = document.getElementById('ms-scan-slider');
             var active = !!(sliderRoot && sliderRoot.getClientRects && sliderRoot.getClientRects().length);
-            var wrapper = document.getElementById('main-plot');
+            // Set ownership even while the viewer or source trace is hidden.
+            window.__geckoLcmsScanState = {sourceFileId: source && source.file_id, idx: scanIdx};
+            var cursor = window.GeckoLcmsScanCursor;
+            if (cursor) cursor.sync();
             var overlay = document.getElementById('lcms-scan-cursor-overlay');
             var host = overlay ? overlay.parentElement : null;
             var handle = sliderRoot ? sliderRoot.querySelector('[role="slider"]') : null;
@@ -228,11 +219,8 @@ def register_lcms_callbacks(app, data_manager):
                 return hidden;
             }
 
-            var plotDrags = wrapper ? wrapper.querySelectorAll('.nsewdrag') : [];
-            var spIdx = (typeof subplotIdx === 'number') ? subplotIdx : 0;
-            var plotDrag = plotDrags[Math.min(spIdx, plotDrags.length - 1)] || null;
-
-            if (!plotDrag) return hidden;
+            var rect = cursor ? cursor.plotRect() : null;
+            if (!rect) return hidden;
 
             var maxIdx = Number(handle.getAttribute('aria-valuemax'));
             if (!Number.isFinite(maxIdx) || maxIdx <= 0) {
@@ -240,14 +228,11 @@ def register_lcms_callbacks(app, data_manager):
             }
 
             var idx = Math.max(0, Math.min(Math.round(Number(scanIdx)), Math.round(maxIdx)));
-            var rect = plotDrag.getBoundingClientRect();
             var hostRect = host.getBoundingClientRect();
             var left = rect.left - hostRect.left + (idx / maxIdx) * rect.width;
             var top = rect.top - hostRect.top;
             var height = rect.height;
 
-            var spIdx = plotDrag ? Array.prototype.indexOf.call(plotDrags, plotDrag) : 0;
-            window.__geckoLcmsScanState = {idx: idx, left: left, active: active, maxIdx: maxIdx, subplotIdx: spIdx};
             return visibleStyle(left, top, height);
         }
         """,
@@ -502,15 +487,43 @@ def register_lcms_callbacks(app, data_manager):
         return _build_peak_mass_figure(mz, intensity, peak, polarity_label)
 
     @app.callback(
-        Output('peak-mass-selector', 'value', allow_duplicate=True),
-        Input('selected-peak-idx', 'data'),
-        State('active-file', 'data'),
+        [Output('peak-mass-selector', 'value', allow_duplicate=True),
+         Output('selected-peak-idx', 'data', allow_duplicate=True),
+         Output('active-file', 'data', allow_duplicate=True),
+         Output('render-trigger', 'data', allow_duplicate=True)],
+        [Input('selected-peak-idx', 'data'), Input('peak-mass-selector', 'value')],
+        [State('active-file', 'data'), State('render-trigger', 'data'), State('view-mode', 'data')],
         prevent_initial_call=True,
     )
-    def sync_peak_mass_to_click(selected_peak_id, active_file):
-        if not selected_peak_id or not active_file:
-            raise dash.exceptions.PreventUpdate
-        return selected_peak_id
+    def sync_peak_mass_to_click(selected_peak_id, dropdown_peak_id, active_file, render_counter, view_mode):
+        """One bidirectional selection for the spectrum and chromatogram handles."""
+        unchanged = (dash.no_update,) * 4
+        if not active_file or (view_mode or 'raw') != 'raw':
+            return unchanged
+        trigger = callback_context.triggered[0]['prop_id'].split('.')[0] if callback_context.triggered else ''
+        from_dropdown = trigger == 'peak-mass-selector'
+        peak_id = dropdown_peak_id if from_dropdown else selected_peak_id
+        if selected_peak_id == dropdown_peak_id:
+            return unchanged
+        if not peak_id:
+            return ((dash.no_update, None, dash.no_update, (render_counter or 0) + 1)
+                    if from_dropdown else (None, dash.no_update, dash.no_update, dash.no_update))
+
+        sources = [active_file]
+        bundle = data_manager.get_bundle(active_file) or data_manager.get_bundle_for_component(active_file)
+        if bundle:
+            sources.extend([bundle.bundle_id, *(component.component_id for component in bundle.component_list)])
+        peak = next((peak for file_id in dict.fromkeys(sources)
+                     for peak in data_manager.peak_service.get_peaks(file_id)
+                     if peak.peak_id == peak_id), None)
+        if peak is None:
+            return unchanged
+        owner = peak.file_id if peak.file_id != active_file else dash.no_update
+        if from_dropdown:
+            # selected-peak-idx is a render State, so explicitly refresh the
+            # figure to move the selected fill and editable baseline handles.
+            return dash.no_update, peak_id, owner, (render_counter or 0) + 1
+        return peak_id, dash.no_update, owner, ((render_counter or 0) + 1 if owner is not dash.no_update else dash.no_update)
 
 
 def _empty_peak_mass(message: str) -> go.Figure:
@@ -529,10 +542,44 @@ def _empty_peak_mass(message: str) -> go.Figure:
     return fig
 
 
+def _mass_peak_annotations(mz, relative_intensity, limit=6):
+    """Label distinct dominant ion apices, with room between their m/z labels."""
+    from scipy.signal import find_peaks
+
+    x = np.asarray(mz, dtype=float)
+    y = np.asarray(relative_intensity, dtype=float)
+    valid = np.isfinite(x) & np.isfinite(y)
+    x, y = x[valid], y[valid]
+    if not x.size or np.max(y) <= 0:
+        return []
+    order = np.argsort(x, kind='stable')
+    x, y = x[order], y[order]
+    span = float(np.ptp(x))
+    spacing = max(span * .055, .01)
+    # Distant centroid ions are independent peaks even when consecutive in
+    # the array. Within a contiguous profile, collapse shoulders/plateaus.
+    boundaries = np.r_[0, np.flatnonzero(np.diff(x) >= spacing) + 1, x.size]
+    candidates = []
+    for start, end in zip(boundaries[:-1], boundaries[1:]):
+        peaks, _ = find_peaks(np.r_[-np.inf, y[start:end], -np.inf],
+                              height=np.max(y) * .10)
+        candidates.extend(peaks + start - 1)
+    ranked = sorted(candidates, key=lambda i: (-y[i], x[i]))
+    chosen = []
+    for index in ranked:
+        if all(abs(x[index] - x[other]) >= spacing for other in chosen):
+            chosen.append(index)
+            if len(chosen) >= limit:
+                break
+    return [dict(name='gecko-ms-peak', x=float(x[i]), y=float(y[i]), xref='x', yref='y',
+                 text=f'{x[i]:.2f}', showarrow=False, yanchor='bottom', yshift=4,
+                 xanchor=('left' if x[i] < x[0] + spacing else
+                          'right' if x[i] > x[-1] - spacing else 'center'),
+                 font=dict(size=10, color='#333333')) for i in chosen]
+
+
 def _build_peak_mass_figure(mz, intensity, peak, polarity_label="+"):
     display = np.asarray(intensity, dtype=float)
-    if display.size:
-        display = display - np.nanmin(display)
     max_int = np.nanmax(display) if display.size else 1.0
     rel = display / max_int * 100 if max_int > 0 else display
 
@@ -548,12 +595,8 @@ def _build_peak_mass_figure(mz, intensity, peak, polarity_label="+"):
     fig.add_trace(TraceType(
         x=xs, y=ys, mode='lines',
         line=dict(color='#6B46C1', width=1),
-        hoverinfo='skip', showlegend=False,
-    ))
-    fig.add_trace(TraceType(
-        x=mz, y=rel, mode='markers',
-        marker=dict(color='#6B46C1', size=3, opacity=0.45),
-        customdata=intensity,
+        customdata=cd,
+        meta={'gecko_mass_spectrum':True},
         hovertemplate=(
             'm/z: %{x:.4g}<br>'
             'Intensity: %{customdata:.4g}<br>'
@@ -567,17 +610,16 @@ def _build_peak_mass_figure(mz, intensity, peak, polarity_label="+"):
         xaxis_title='m/z',
         yaxis_title='Relative Intensity (%)',
         hovermode='closest',
-        yaxis=dict(range=[0, 105], showgrid=False, showline=True,
+        yaxis=dict(range=[0, 116], showgrid=False, showline=True,
                    mirror=True, linecolor='#ccc', linewidth=1),
         xaxis=dict(showgrid=False, showline=True, mirror=True,
                    linecolor='#ccc', linewidth=1),
         uirevision='peak-mass',
+        annotations=_mass_peak_annotations(mz, rel),
     )
 
     label = peak.label or peak.name or peak.peak_id
-    top_n = min(5, mz.size)
-    top_idx = np.argsort(intensity)[-top_n:][::-1]
-    top_peaks = ", ".join(f"{mz[i]:.1f}" for i in top_idx)
+    top_peaks = ", ".join(a.text for a in fig.layout.annotations) or "none"
     info = f"{label} | RT {peak.rt_start:.2f}–{peak.rt_end:.2f} min | Mode: {polarity_label} | Top m/z: {top_peaks}"
 
     return fig, info
@@ -702,8 +744,6 @@ def _build_spectrum_at_scan(lcms_svc, file_data, scan_idx):
         return _empty_spectrum(str(exc)), str(exc), 0
 
     display_intensity = np.asarray(intensity, dtype=float)
-    if display_intensity.size:
-        display_intensity = display_intensity - np.nanmin(display_intensity)
     max_int = np.nanmax(display_intensity) if display_intensity.size else 1.0
     rel_intensity = display_intensity / max_int * 100 if max_int > 0 else display_intensity
 
@@ -719,19 +759,10 @@ def _build_spectrum_at_scan(lcms_svc, file_data, scan_idx):
         cd.extend([i_val, i_val, None])
 
     fig.add_trace(TraceType(
-        x=xs,
-        y=ys,
-        mode='lines',
+        x=xs, y=ys, mode='lines',
         line=dict(color='#2B6CB0', width=1),
-        hoverinfo='skip',
-        showlegend=False,
-    ))
-    fig.add_trace(TraceType(
-        x=mz,
-        y=rel_intensity,
-        mode='markers',
-        marker=dict(color='#2B6CB0', size=3, opacity=0.45),
-        customdata=intensity,
+        customdata=cd,
+        meta={'gecko_mass_spectrum':True},
         hovertemplate=(
             'm/z: %{x:.4g}<br>'
             'Intensity: %{customdata:.4g}<br>'
@@ -745,15 +776,14 @@ def _build_spectrum_at_scan(lcms_svc, file_data, scan_idx):
         xaxis_title='m/z',
         yaxis_title='Relative Intensity (%)',
         hovermode='closest',
-        yaxis=dict(range=[0, 105], showgrid=False, showline=True, mirror=True, linecolor='#ccc', linewidth=1),
+        yaxis=dict(range=[0, 116], showgrid=False, showline=True, mirror=True, linecolor='#ccc', linewidth=1),
         xaxis=dict(showgrid=False, showline=True, mirror=True, linecolor='#ccc', linewidth=1),
         uirevision='ms-spectrum',
+        annotations=_mass_peak_annotations(mz, rel_intensity),
     )
 
     if mz.size > 0:
-        top_n = min(5, mz.size)
-        top_idx = np.argsort(intensity)[-top_n:][::-1]
-        top_peaks = ", ".join(f"{mz[i]:.1f}" for i in top_idx)
+        top_peaks = ", ".join(a.text for a in fig.layout.annotations) or "none"
         return fig, f"Scan {scan_idx} at {rt:.3f} min | Top m/z: {top_peaks}", scan_idx
 
     return fig, f"Scan {scan_idx} at {rt:.3f} min | no peaks", scan_idx

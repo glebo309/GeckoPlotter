@@ -87,7 +87,17 @@ def _extract_xy_from_figure(fig_dict, source):
         return np.array(clean, dtype=float)
 
     if source in ('ms-spectrum-graph', 'peak-mass-graph'):
-        # The spectrum has two traces: stick-lines (hoverinfo='skip') and
+        # Tagged spectra store each measured ion at the second point of its
+        # stick, including zero-intensity ions.
+        for trace in traces:
+            meta = trace.get('meta') if isinstance(trace.get('meta'), dict) else {}
+            if meta.get('gecko_mass_spectrum'):
+                x = _safe_float_array(trace.get('x', []))[1::3]
+                y = _safe_float_array(trace.get('y', []))[1::3]
+                mask = np.isfinite(x) & np.isfinite(y)
+                if mask.any():
+                    return x[mask], y[mask], x_label, y_label
+        # Legacy spectrum copies have stick-lines (hoverinfo='skip') and
         # markers (with hovertemplate containing the real m/z data).
         # Prefer the markers trace for clean data.
         for t in traces:

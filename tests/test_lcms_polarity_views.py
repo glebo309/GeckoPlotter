@@ -92,3 +92,16 @@ def test_segment_choice_selects_requested_source(monkeypatch, control, mode, sou
         triggered=[{'prop_id': control + '-polarity-toggle.value'}]))
     args = (mode, source) if control == 'ms' else (source, mode)
     assert functions['polarity_toggle_switch'](*args, source) == mode
+
+
+def test_scan_cursor_owner_is_resolved_spectral_component_even_when_uv_selected(monkeypatch):
+    functions, _ = fixture()
+    callback = functions['configure_scan_slider']
+    store = next(cell.cell_contents for cell in callback.__closure__ if isinstance(cell.cell_contents, DataStore))
+    from callbacks.lcms_callbacks import _resolve_lcms_spectral_entry
+    _resolve_lcms_spectral_entry(store, 'negative', store.lcms_service)
+    store.lcms_service.get_scan_count = lambda entry: 3
+    store.lcms_service.extract_tic = lambda entry: (np.array([0., 1., 2.]), np.array([1., 9., 2.]))
+    monkeypatch.setattr('callbacks.lcms_callbacks._scan_label', lambda *args: 'Scan 2')
+    result = callback('uv', [{'id': fid} for fid in ('positive', 'negative', 'uv')])
+    assert result[-1] == {'file_id': 'negative'}

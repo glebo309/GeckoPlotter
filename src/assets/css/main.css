@@ -1347,3 +1347,13 @@ button[id*="collapse-btn"]:active {
 .file-group-header:focus-visible { outline:2px solid #476c98; outline-offset:1px; }
 /* Figure export shares the global status area rather than duplicating banners. */
 #pub-export-status, #exp-fig-status { display:none; }
+
+
+/* Analysis controls keep their natural height; the canvas takes the remainder
+   of either the below or right dock. Small panes scroll at a usable plot size. */
+.analysis-graph-content > :not(.analysis-graph) {
+    flex-shrink: 0;
+}
+.analysis-graph-content > .analysis-graph {
+    min-width: 0;
+}

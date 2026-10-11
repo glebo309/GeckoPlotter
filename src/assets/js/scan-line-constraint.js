@@ -1,7 +1,7 @@
 // LC-MS scan scrubber.
 //
-// Uses only public DOM signals:
-// - the plot's .nsewdrag rectangle for the visible plot bounds
+// Resolves the selected spectral source in the current rendered plot:
+// - trace metadata selects its axes, whose geometry provides the visible bounds
 // - the Dash-rendered slider handle aria-valuenow for the current scan index
 // - a hidden Dash input for click/drag -> Python/slider sync
 (function () {
@@ -22,14 +22,27 @@
     function plotRect() {
         var root = graphRoot();
         if (!root) return null;
-        var drags = root.querySelectorAll('.nsewdrag');
-        if (!drags.length) return null;
-        // Use the subplot index from the cursor overlay state if available
-        var state = window.__geckoLcmsScanState;
-        var idx = (state && typeof state.subplotIdx === 'number') ? state.subplotIdx : 0;
-        var rectNode = drags[Math.min(idx, drags.length - 1)];
-        var r = rectNode.getBoundingClientRect();
-        return r.width > 0 && r.height > 0 ? r : null;
+        if (!root._fullLayout && root.querySelector) root = root.querySelector('.js-plotly-plot');
+        var state = window.__geckoLcmsScanState || {};
+        if (!root || !root._fullLayout || !state.sourceFileId) return null;
+        // Source identity survives filtering, hiding, ordering and switching layout.
+        // An absent source has no cursor: never fall back to a neighbouring UV pane.
+        var trace = (root.data || []).find(function (t) {
+            return t.meta && t.meta.file_id === state.sourceFileId &&
+                t.visible !== false && t.visible !== 'legendonly';
+        });
+        if (!trace) return null;
+        var layout = root._fullLayout;
+        var x = layout['xaxis' + (trace.xaxis || 'x').slice(1)];
+        var y = layout['yaxis' + (trace.yaxis || 'y').slice(1)];
+        if (!x || !y || !(x._length > 0) || !(y._length > 0)) return null;
+        var box = root.getBoundingClientRect();
+        var sx = layout.width ? box.width / layout.width : 1;
+        var sy = layout.height ? box.height / layout.height : 1;
+        var left = box.left + x._offset * sx, top = box.top + y._offset * sy;
+        var width = x._length * sx, height = y._length * sy;
+        return {left: left, top: top, width: width, height: height,
+                right: left + width, bottom: top + height};
     }
 
     function overlay() {
@@ -253,6 +266,13 @@
         scheduleSync();
     }
 
+    window.GeckoLcmsScanCursor = {plotRect: plotRect, sync: scheduleSync};
+    document.addEventListener('gecko:plot-ready', install);
+    document.addEventListener('gecko:plot-leave', function () {
+        onUp();
+        var c = overlay();
+        if (c) c.style.display = 'none';
+    });
     document.addEventListener('mousemove', onMove, true);
     document.addEventListener('touchmove', onMove, true);
     document.addEventListener('mouseup', onUp, true);
