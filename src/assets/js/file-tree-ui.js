@@ -4,6 +4,7 @@
     //    (MutationObservers on dcc.Store don't work in Dash 3.x)
     // -----------------------------------------------------------------------
     window._geckoApplyActiveFile = function(fileId) {
+        window.__geckoActiveFile = fileId;
         document.querySelectorAll('.file-tree-item').forEach(function(el) {
             var elId = null;
             try {
@@ -22,6 +23,19 @@
 
     window._geckoApplyHiddenFiles = function(hiddenIds) {
         var hiddenSet = new Set(hiddenIds || []);
+        document.querySelectorAll('button[id*="visibility-btn"]').forEach(function(button) {
+            var fileId;
+            try { fileId = JSON.parse(button.id).index; } catch (_) { return; }
+            var hidden = hiddenSet.has(fileId);
+            var icon = button.querySelector('img[data-visible-src]');
+            if (icon) {
+                icon.src = icon.getAttribute(hidden ? 'data-hidden-src' : 'data-visible-src');
+            }
+            var label = hidden ? 'Show trace' : 'Hide trace';
+            button.title = label;
+            button.setAttribute('aria-label', label);
+            button.setAttribute('aria-pressed', hidden ? 'false' : 'true');
+        });
         // Grouped files: dim the .draggable-file-item wrapper
         document.querySelectorAll('.draggable-file-item').forEach(function(el) {
             var fid = el.getAttribute('data-file-id');

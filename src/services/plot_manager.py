@@ -78,11 +78,39 @@ class PlotManager:
         trace_idx = 0
         for idx, (name, file_data) in enumerate(files):
             trace_idx = self._add_traces(fig, name, file_data, color_offset=trace_idx)
+        units = {}
+        axes_by_unit = {}
+        traces_by_unit = {}
+        for trace in fig.data:
+            source = next((data for _, data in files
+                           if data.get('record', {}).get('id') == trace.meta.get('file_id')), files[0][1])
+            label = self._measurement_label(source)
+            if label not in axes_by_unit:
+                index = len(axes_by_unit) + 1
+                axes_by_unit[label] = ('y' if index == 1 else f'y{index}',
+                                       'yaxis' if index == 1 else f'yaxis{index}')
+            ref, key = axes_by_unit[label]
+            trace.yaxis = ref
+            traces_by_unit.setdefault(label, []).append(trace)
+            units[key] = label
+        for index, (label, traces) in enumerate(traces_by_unit.items(), 1):
+            _, key = axes_by_unit[label]
+            color = '#444'
+            axis = dict(title=dict(text=label, font=dict(color=color)),
+                        tickfont=dict(color=color), color=color, autorange=True,
+                        automargin=True, showgrid=index == 1)
+            if index > 1:
+                axis.update(overlaying='y', anchor='free', side='right',
+                            autoshift=True, tickmode='sync')
+            fig.update_layout(**{key: axis})
+        sr = files[0][1].get('standardized')
         fig.update_layout(
             template='plotly_white',
             autosize=True,
             showlegend=True,
             hovermode='closest',
+            meta={'gecko_axis_units': units},
+            xaxis_title=sr.x_columns[0] if sr and sr.x_columns else '',
         )
         return fig
 
@@ -129,10 +157,12 @@ class PlotManager:
         for row_idx in range(1, n + 1):
             # Compute vertical position for this subplot's legend
             # Subplots go top to bottom; row 1 is top
-            y_top = 1.0 - (row_idx - 1) / n
+            axis_key = 'yaxis' if row_idx == 1 else f'yaxis{row_idx}'
+            low, high = fig.layout[axis_key].domain
+            y_top = high - (high - low) * 0.06
             key = 'legend' if row_idx == 1 else f'legend{row_idx}'
             legend_kwargs[key] = dict(
-                x=1, y=y_top, xanchor='right', yanchor='top',
+                x=0.98, y=y_top, xanchor='right', yanchor='top',
                 bgcolor='rgba(255,255,255,0.7)',
                 font=dict(size=11),
             )
@@ -155,6 +185,13 @@ class PlotManager:
         'vwd_a': 'Absorbance (mAU)',
         'vwd_b': 'Absorbance (mAU)',
     }
+
+    def _measurement_label(self, file_data):
+        sr = file_data.get('standardized')
+        role = file_data.get('record', {}).get('type', '')
+        category = sr.source_category.value if sr else ''
+        return (self._YLABEL_MAP.get(role) or self._YLABEL_MAP.get(category)
+                or (sr.y_columns[0] if sr and sr.y_columns else 'Intensity'))
 
     def _create_stacked_plot(self, files: list, subplot_spacing: float = 0.08) -> go.Figure:
         from plotly.subplots import make_subplots
@@ -180,17 +217,19 @@ class PlotManager:
             role = file_data.get('record', {}).get('type', '')
             sr = file_data.get('standardized')
             cat = sr.source_category.value if sr else ''
-            y_label = self._YLABEL_MAP.get(role) or self._YLABEL_MAP.get(cat, '')
+            y_label = self._measurement_label(file_data)
             if y_label:
                 axis_key = 'yaxis' if row == 1 else f'yaxis{row}'
                 fig.update_layout(**{axis_key: dict(title_text=y_label)})
 
         legend_kwargs = {}
         for row in range(1, n + 1):
-            y_top = 1.0 - (row - 1) / n
+            axis_key = 'yaxis' if row == 1 else f'yaxis{row}'
+            low, high = fig.layout[axis_key].domain
+            y_top = high - (high - low) * 0.06
             key = 'legend' if row == 1 else f'legend{row}'
             legend_kwargs[key] = dict(
-                x=1, y=y_top, xanchor='right', yanchor='top',
+                x=0.98, y=y_top, xanchor='right', yanchor='top',
                 bgcolor='rgba(255,255,255,0.7)',
                 font=dict(size=11),
             )

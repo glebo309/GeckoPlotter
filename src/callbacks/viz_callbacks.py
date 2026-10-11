@@ -194,14 +194,12 @@ def _apply_zoom_state(fig, zoom_state):
     if not zoom_state:
         return
 
-    x_range = _axis_range_from_relayout(zoom_state, 'xaxis')
-    y_range = _axis_range_from_relayout(zoom_state, 'yaxis')
-
     layout_update = {}
-    if x_range:
-        layout_update['xaxis'] = dict(range=x_range, autorange=False)
-    if y_range:
-        layout_update['yaxis'] = dict(range=y_range, autorange=False)
+    for axis in fig.layout:
+        if axis.startswith(('xaxis', 'yaxis')):
+            axis_range = _axis_range_from_relayout(zoom_state, axis)
+            if axis_range:
+                layout_update[axis] = dict(range=axis_range, autorange=False)
     if layout_update:
         fig.update_layout(**layout_update)
 
@@ -434,6 +432,8 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
     """Register visualization-related callbacks."""
 
     plot_manager = PlotManager()
+    from services.render_cache import RenderCache
+    render_cache = RenderCache()
 
     # ------------------------------------------------------------------
     # Plot tab management
@@ -554,24 +554,13 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
             ))
         return children
 
-    @app.callback(
+    app.clientside_callback(
+        dash.ClientsideFunction(namespace='plotWorkspace', function_name='switchTab'),
         Output('active-plot-tab', 'data', allow_duplicate=True),
         Input({'type': 'plot-tab-btn', 'index': dash.dependencies.ALL}, 'n_clicks'),
         State('active-plot-tab', 'data'),
         prevent_initial_call=True,
     )
-    def handle_tab_click(n_clicks_list, current_tab):
-        """Switch active plot tab when a tab button is clicked."""
-        ctx = dash.callback_context
-        if not ctx.triggered or not any(n for n in n_clicks_list if n):
-            return dash.no_update
-        import json as _json
-        triggered = ctx.triggered[0]['prop_id']
-        component_str = triggered.rsplit('.', 1)[0]
-        tab_id = _json.loads(component_str)['index']
-        if tab_id == current_tab:
-            return dash.no_update
-        return tab_id
 
     @app.callback(
         [Output('active-plot-tab', 'data', allow_duplicate=True),
@@ -631,33 +620,33 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
 
     # Capture user zoom into a dedicated store so it survives figure rebuilds.
     app.clientside_callback(
-        """
-        function(relayoutData) {
+        r"""
+        function(relayoutData, settings, previous) {
             if (!relayoutData) return window.dash_clientside.no_update;
-            // User double-clicked to reset zoom — clear stored zoom
-            if (relayoutData['xaxis.autorange'] && relayoutData['yaxis.autorange']) {
-                return null;
-            }
-            // Figure rebuild / autosize / single-axis autorange — don't touch stored zoom
-            if (relayoutData['autosize'] || relayoutData['xaxis.autorange']
-                || relayoutData['yaxis.autorange']) {
-                return window.dash_clientside.no_update;
-            }
-            var zoom = {};
-            var found = false;
-            var keys = Object.keys(relayoutData);
-            for (var i = 0; i < keys.length; i++) {
-                var k = keys[i];
-                if (k.indexOf('range[') !== -1) {
-                    zoom[k] = relayoutData[k];
-                    found = true;
+            var revision=(settings || {})._axis_range_revision || 0;
+            var zoom=Object.assign({}, previous && previous._axis_range_revision===revision ? previous : {});
+            zoom._axis_range_revision=revision;
+            var found=false;
+            Object.keys(relayoutData).forEach(function(key){
+                if (/^[xy]axis\d*\.autorange$/.test(key) && relayoutData[key]===true) {
+                    var axis=key.split('.')[0];
+                    Object.keys(zoom).forEach(function(old){if(old.indexOf(axis+'.range')===0) delete zoom[old];});
+                    found=true;
                 }
-            }
+            });
+            Object.keys(relayoutData).forEach(function(key){
+                if (/^[xy]axis\d*\.range(\[\d\])?$/.test(key)) {
+                    var axis=key.split('.')[0];
+                    if(relayoutData[axis+'.autorange']!==true){zoom[key]=relayoutData[key];found=true;}
+                }
+            });
             return found ? zoom : window.dash_clientside.no_update;
         }
         """,
         Output('zoom-state', 'data', allow_duplicate=True),
         Input('main-plot', 'relayoutData'),
+        State('current-plot-settings', 'data'),
+        State('zoom-state', 'data'),
         prevent_initial_call=True,
     )
 
@@ -1131,7 +1120,9 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
          Input('pub-table', 'sort_by'),
          Input('peak-table', 'sort_by'),
          Input('cross-sample-table', 'sort_by'),
-         Input('peak-change-trigger', 'data')],
+         Input('peak-change-trigger', 'data'),
+         Input('pub-zoom-sync', 'checked'),
+         Input('plot-y-scope', 'value')],
         [State('loaded-files', 'data'),
          State('plot-tabs', 'data'),
          State('pub-plot-figure', 'data'),
@@ -1147,6 +1138,7 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
     )
     def master_render(active_tab_id, plot_trigger, active_file, plot_settings, render_trigger,
                       file_order, pub_sort, peak_sort, cross_sort, peak_change_trigger,
+                      link_x, y_scope,
                       loaded_files, plot_tabs, pub_plot_figure, selected_peak_id,
                       zoom_state, zoom_memory, custom_figures,
                       baseline_mode, deconv_markers, deconv_result, display_opts):
@@ -1167,9 +1159,15 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
         if not tab:
             return plot_manager.create_empty_plot("Upload files to get started"), None
 
+        render_cache.prune(t['id'] for t in plot_tabs)
+
         # Publication tab has its own dedicated callback and graph
         if tab.get('type') == 'publication':
             return dash.no_update, dash.no_update
+
+        owner = (plot_settings or {}).get('_context_key')
+        if owner and not owner.endswith(':' + active_tab_id):
+            return dash.no_update, no_zoom
 
         # -- Custom plot tab --
         if tab.get('type') == 'custom':
@@ -1215,8 +1213,11 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
                 ps = PlotSettingsService.from_dict(settings_for_style)
                 PlotSettingsService.apply_to_figure(fig, ps)
                 fig.update_layout(uirevision=active_tab_id)
+                fig.update_layout(meta={'gecko_tab_id': active_tab_id})
                 return fig, no_zoom
-            return entry, no_zoom
+            fig = go.Figure(entry.get('figure', entry))
+            fig.update_layout(meta={'gecko_tab_id': active_tab_id})
+            return fig, no_zoom
 
         # -- Raw tab --
         if trigger_id in ('pub-plot-trigger', 'pub-table', 'peak-table', 'cross-sample-table'):
@@ -1235,11 +1236,28 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
         if not is_tab_switch and not zoom_matches_tab:
             set_zoom = None
 
+        render_inputs = {
+            'settings': s, 'render': render_trigger, 'peaks': peak_change_trigger,
+            'order': file_order, 'selected': selected_peak_id,
+            'file': active_file if zoom_matches_tab else None,
+            'baseline': baseline_mode, 'markers': deconv_markers,
+            'deconvolution': deconv_result, 'display': display_opts,
+            'visibility': data_manager.visibility_state,
+            'files': [record.get('id') for record in (loaded_files or [])],
+            'link_x': link_x, 'y_scope': y_scope,
+        }
+        cached = render_cache.get(active_tab_id, render_inputs)
+        if cached is not None:
+            return cached if is_tab_switch else dash.no_update, set_zoom
+
         visible_files = _collect_visible_files(
             data_manager, active_file, loaded_files, target_group_override=group_key,
             file_order=file_order)
         if not visible_files:
-            return plot_manager.create_hidden_state_plot(), set_zoom
+            figure = plot_manager.create_hidden_state_plot()
+            figure.update_layout(meta={'gecko_tab_id': active_tab_id})
+            render_cache.put(active_tab_id, render_inputs, figure)
+            return figure, set_zoom
 
         subplot_spacing = s.get('subplot_spacing', 0.08)
         figure = plot_manager.create_multi_file_plot(visible_files, layout_mode, subplot_spacing=subplot_spacing)
@@ -1318,6 +1336,11 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
                 except Exception:
                     pass
 
+        if s.get('layout_mode') == 'stacked' and s.get('subplot_rows', 1) * s.get('subplot_cols', 1) > 1:
+            from services.publication_figure import editable_publication_figure
+            source = figure.to_plotly_json() if hasattr(figure, 'to_plotly_json') else figure
+            figure = editable_publication_figure(source, s, {**s, 'subplot_rows':1, 'subplot_cols':1})
+
         if is_tab_switch:
             effective_zoom = restored_zoom
         else:
@@ -1326,20 +1349,30 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
         try:
             fig_obj = go.Figure(figure) if isinstance(figure, dict) else figure
             settings_for_style = dict(s, y_label=s.get('y1_label', 'Y1'))
+            if s.get('x_label') == DEFAULT_PLOT_SETTINGS['x_label'] and len(group_key) > 1:
+                settings_for_style['x_label'] = group_key[1]
             ps = PlotSettingsService.from_dict(settings_for_style)
             PlotSettingsService.apply_to_figure(fig_obj, ps)
-            fig_obj.update_layout(uirevision=active_tab_id)
-            if effective_zoom:
+            from services.axis_linking import apply_axis_linking
+            apply_axis_linking(fig_obj, bool(link_x), y_scope == 'global')
+            fig_obj.update_layout(uirevision=active_tab_id,
+                meta={**(fig_obj.layout.meta or {}), 'gecko_tab_id': active_tab_id})
+            if (effective_zoom and s.get('auto_range', True)
+                    and effective_zoom.get('_axis_range_revision', 0) == s.get('_axis_range_revision', 0)):
                 _apply_zoom_state(fig_obj, effective_zoom)
             elif s.get('auto_range', True):
                 fig_obj.update_layout(
                     xaxis=dict(autorange=True),
                     yaxis=dict(autorange=True),
                 )
+            axis_revision = f"{active_tab_id}:range:{s.get('_axis_range_revision',0)}"
+            fig_obj.update_xaxes(uirevision=axis_revision)
+            fig_obj.update_yaxes(uirevision=axis_revision)
             figure = fig_obj
         except Exception:
             log.exception("Failed to apply plot settings to raw figure")
 
+        render_cache.put(active_tab_id, render_inputs, figure)
         return figure, set_zoom
 
     # Selection highlighting is handled centrally in app.py.

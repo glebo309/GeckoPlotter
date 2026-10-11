@@ -658,8 +658,33 @@ body {
 }
 
 .tree-action-group {
-    opacity: 0.5;
+    opacity: 1;
+    gap: 4px !important;
     transition: opacity 0.15s;
+}
+
+#file-tree button[id*="visibility-btn"],
+#file-tree button[id*="delete-btn"] {
+    width: 32px !important;
+    height: 32px !important;
+    padding: 6px !important;
+    flex-shrink: 0;
+    border-radius: 5px;
+    color: #444;
+}
+
+#file-tree button[id*="delete-btn"]:hover {
+    background: #fce8e6 !important;
+}
+
+#file-tree button:focus-visible {
+    outline: 2px solid #333;
+    outline-offset: 2px;
+}
+
+#file-tree .file-tree-item {
+    min-height: 32px;
+    min-width: 0;
 }
 
 .bundle-item:hover > div > .tree-action-group,
@@ -939,6 +964,36 @@ button[id*="collapse-btn"]:active {
 }
 
 /* Plot Tab Bar */
+.plot-toolbar {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 12px;
+    padding: 7px 12px;
+    border-bottom: 1px solid #e2e2e5;
+    background: #fafafa;
+    flex-shrink: 0;
+}
+.plot-toolbar-group { display: flex; align-items: center; gap: 4px; }
+.plot-toolbar-label { font-size: 12px; color: #666; margin-right: 4px; }
+.plot-tool {
+    height: 30px; padding: 0 10px; border: 1px solid transparent;
+    background: transparent; color: #444; border-radius: 5px;
+    font-size: 12px; cursor: pointer;
+}
+.plot-tool:hover { background: #ededf0; }
+.plot-tool.active { background: #e4ebe4; border-color: #9aac9a; color: #245c30; }
+.plot-tool:focus-visible { outline: 2px solid #476c98; outline-offset: 2px; }
+.figure-editor-actions {
+    display: flex; gap: 6px; flex-wrap: wrap;
+    padding-top: 10px; margin-top: 10px; border-top: 1px solid #ddd;
+}
+.figure-editor-actions button {
+    padding: 5px 9px; border: 1px solid #ddd; border-radius: 4px;
+    font-size: 12px; background: #fafafa; cursor: pointer;
+}
+.figure-editor-actions button:hover { background: #edf1ed; }
+
 .plot-tab-bar {
     display: flex;
     gap: 1px;

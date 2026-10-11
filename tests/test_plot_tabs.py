@@ -248,3 +248,15 @@ class TestCollectVisibleFiles:
         assert len(groups) == 1
         all_names = [name for name, _ in groups[csv_group]]
         assert not any('chromeleon' in n.lower() for n in all_names)
+
+
+def test_zoom_restore_keeps_each_pane_and_ignores_removed_axes():
+    from callbacks.viz_callbacks import _apply_zoom_state
+    from plotly.subplots import make_subplots
+    fig = make_subplots(rows=2, cols=1)
+    _apply_zoom_state(fig, {'xaxis.range':[5,9], 'xaxis2.range':[6,8],
+                           'yaxis2.range[0]':0, 'yaxis2.range[1]':600,
+                           'yaxis3.range':[0,99]})
+    assert tuple(fig.layout.xaxis2.range) == (6,8)
+    assert tuple(fig.layout.yaxis2.range) == (0,600)
+    assert 'yaxis3' not in fig.layout

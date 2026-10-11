@@ -103,10 +103,10 @@ COLOR_PALETTES: Dict[str, List[str]] = {
 # ---------------------------------------------------------------------------
 
 _LEGEND_COORDS: Dict[str, dict] = {
-    "top-right": {"x": 1, "y": 1, "xanchor": "right", "yanchor": "top"},
-    "top-left": {"x": 0, "y": 1, "xanchor": "left", "yanchor": "top"},
-    "bottom-right": {"x": 1, "y": 0, "xanchor": "right", "yanchor": "bottom"},
-    "bottom-left": {"x": 0, "y": 0, "xanchor": "left", "yanchor": "bottom"},
+    "top-right": {"x": 0.98, "y": 0.94, "xanchor": "right", "yanchor": "top"},
+    "top-left": {"x": 0.02, "y": 0.94, "xanchor": "left", "yanchor": "top"},
+    "bottom-right": {"x": 0.98, "y": 0.06, "xanchor": "right", "yanchor": "bottom"},
+    "bottom-left": {"x": 0.02, "y": 0.06, "xanchor": "left", "yanchor": "bottom"},
 }
 
 
@@ -172,6 +172,11 @@ DEFAULT_PLOT_SETTINGS: Dict[str, object] = {
     # Layout
     "layout_mode": "overlay",
     "subplot_spacing": 0.08,
+    # Per-figure view and publication controls
+    "subplot_rows": 1, "subplot_cols": 1,
+    "figure_width_mm": 84, "figure_height_mm": 63,
+    "pub_preset": "single-col", "pub_dpi": 300, "export_format": "png",
+    "link_x": True, "y_scope": "independent",
     # Per-trace overrides
     "trace_overrides": {},
 }
@@ -324,6 +329,9 @@ class PlotSettingsService:
         # validation errors from coloraxis/colorscale entries that get
         # serialised into dcc.Store JSON.  All visual properties are set
         # explicitly below.
+        import plotly.io as pio
+        theme = pio.templates[settings.theme].layout if settings.theme in pio.templates else pio.templates['plotly_white'].layout
+        foreground = '#f2f5fa' if settings.theme == 'plotly_dark' else '#444'
         fig.layout.template = None
         # Also strip any coloraxis entries that may have leaked in
         layout_json = fig.layout.to_plotly_json()
@@ -339,7 +347,7 @@ class PlotSettingsService:
 
         # -- Global font -----------------------------------------------------
         fig.update_layout(
-            font=dict(family=settings.font, size=settings.font_size),
+            font=dict(family=settings.font, size=settings.font_size, color=foreground),
         )
 
         # -- Title -----------------------------------------------------------
@@ -355,6 +363,14 @@ class PlotSettingsService:
         x_range = None if settings.auto_range else [settings.x_min, settings.x_max]
         y_range = None if settings.auto_range else [settings.y_min, settings.y_max]
 
+        import math
+        if not settings.auto_range:
+            def bounds(values, scale):
+                return [None if v in (None, '') else (math.log10(v) if v > 0 else None)
+                        for v in values] if scale == 'log' else [None if v == '' else v for v in values]
+            x_range = bounds(x_range, settings.x_scale)
+            y_range = bounds(y_range, settings.y_scale)
+
         tick_cfg = {}
         if settings.show_tick_marks and settings.tick_direction != 'none':
             tick_cfg = dict(ticks=settings.tick_direction, ticklen=settings.tick_length)
@@ -363,19 +379,22 @@ class PlotSettingsService:
 
         grid_dash = _DASH_MAP.get(settings.grid_style, 'solid')
         minor_cfg = dict(
-            ticks=settings.tick_direction if settings.show_minor_ticks else '',
+            ticks=settings.tick_direction if settings.show_minor_ticks and settings.tick_direction != 'none' else '',
             ticklen=max(1, int(settings.tick_length * 0.6)),
             showgrid=False,
         )
 
-        axis_title_font = dict(size=settings.tick_font_size)
+        axis_title_font = dict(size=settings.tick_font_size, color=foreground)
 
         axis_common_x = dict(
             title=dict(text=settings.x_label or '', standoff=10, font=axis_title_font),
             showgrid=settings.show_grid_x,
             griddash=grid_dash,
+            color=foreground,
+            gridcolor=theme.xaxis.gridcolor or "#ddd",
+            zeroline=False,
             type=settings.x_scale,
-            tickfont=dict(size=settings.tick_font_size),
+            tickfont=dict(size=settings.tick_font_size, color=foreground),
             showline=settings.show_frame,
             linewidth=settings.frame_width,
             mirror=settings.show_frame,
@@ -387,8 +406,11 @@ class PlotSettingsService:
             title=dict(text=settings.y_label or '', standoff=10, font=axis_title_font),
             showgrid=settings.show_grid_y,
             griddash=grid_dash,
+            color=foreground,
+            gridcolor=theme.xaxis.gridcolor or "#ddd",
+            zeroline=False,
             type=settings.y_scale,
-            tickfont=dict(size=settings.tick_font_size),
+            tickfont=dict(size=settings.tick_font_size, color=foreground),
             showline=settings.show_frame,
             linewidth=settings.frame_width,
             mirror=settings.show_frame,
@@ -398,9 +420,13 @@ class PlotSettingsService:
         )
         if not settings.auto_range:
             axis_common_x['range'] = x_range
-            axis_common_x['autorange'] = False
+            axis_common_x['autorange'] = (True if x_range == [None, None] else
+                                           'min' if x_range[0] is None else
+                                           'max' if x_range[1] is None else False)
             axis_common_y['range'] = y_range
-            axis_common_y['autorange'] = False
+            axis_common_y['autorange'] = (True if y_range == [None, None] else
+                                           'min' if y_range[0] is None else
+                                           'max' if y_range[1] is None else False)
 
         # Update all x/y axes (subplots: xaxis, xaxis2, …)
         # Preserve categorical tick config set by publication_plot
@@ -422,13 +448,17 @@ class PlotSettingsService:
             if _xaxis_re.match(key):
                 existing = layout_json.get(key, {})
                 merged = dict(axis_common_x)
-                if shared and key != last_xaxis:
+                suffix = key[len('xaxis'):]
+                y_domain = layout_json.get('yaxis' + suffix, {}).get('domain', [0, 1])
+                if shared and y_domain[0] > 0:
                     merged['title'] = dict(text='', standoff=20)
                 if existing.get('tickmode') == 'array' and settings.categorical_x:
                     for ck in _categorical_keys:
                         if ck in existing:
                             merged[ck] = existing[ck]
                     merged.pop('type', None)
+                if existing.get('tickmode') == 'array' and not settings.categorical_x:
+                    merged.update(tickmode='auto', ticktext=None, tickvals=None)
                 fig.update_layout(**{key: merged})
             elif _yaxis_re.match(key):
                 merged = dict(axis_common_y)
@@ -437,8 +467,8 @@ class PlotSettingsService:
                 has_custom_label = isinstance(existing_title, dict) and existing_title.get('text', '')
                 if shared and not has_custom_label:
                     merged['title'] = dict(text='', standoff=20)
-                elif has_custom_label:
-                    merged['title'] = existing_title
+                elif has_custom_label and settings.y_label == DEFAULT_PLOT_SETTINGS['y1_label']:
+                    merged['title'] = dict(axis_common_y['title'], text=existing_title['text'])
                 fig.update_layout(**{key: merged})
 
         if not x_axes:
@@ -468,6 +498,7 @@ class PlotSettingsService:
         fig.update_layout(bargap=settings.bar_gap, bargroupgap=settings.bar_group_gap)
 
         # -- Legend ----------------------------------------------------------
+        fig.layout.showlegend = settings.show_legend
         # Apply visibility to all legends (legend, legend2, legend3, …)
         _legend_re = re.compile(r'^legend\d*$')
         legend_keys = [k for k in layout_json if _legend_re.match(k)]
@@ -476,13 +507,16 @@ class PlotSettingsService:
         for lk in legend_keys:
             lk_kwargs = dict(visible=settings.show_legend)
             if settings.show_legend:
-                existing_legend = layout_json.get(lk, {})
-                if lk == 'legend':
-                    lk_kwargs.update(cls.get_legend_coords(settings.legend_pos))
-                else:
-                    for coord_key in ('x', 'y', 'xanchor', 'yanchor'):
-                        if coord_key in existing_legend:
-                            lk_kwargs[coord_key] = existing_legend[coord_key]
+                coords = cls.get_legend_coords(settings.legend_pos)
+                if len(legend_keys) > 1:
+                    suffix = lk[len('legend'):]
+                    y_domain = layout_json.get('yaxis' + suffix, {}).get('domain', [0, 1])
+                    x_domain = layout_json.get('xaxis' + suffix, {}).get('domain', [0, 1])
+                    coords['y'] = y_domain[0] + coords['y'] * (y_domain[1] - y_domain[0])
+                    coords['x'] = x_domain[0] + coords['x'] * (x_domain[1] - x_domain[0])
+                lk_kwargs.update(coords)
+                lk_kwargs.update(bgcolor=_hex_to_rgba(settings.paper_color, .85), borderwidth=0,
+                                 font=dict(size=settings.font_size, color=foreground))
             fig.update_layout(**{lk: lk_kwargs})
 
         # -- Colour palette & trace styling ----------------------------------
@@ -508,8 +542,7 @@ class PlotSettingsService:
 
             color = palette[data_trace_idx % len(palette)]
 
-            if settings.trace_opacity < 1.0:
-                trace.update(opacity=settings.trace_opacity)
+            trace.update(opacity=settings.trace_opacity)
 
             if not is_bar and hasattr(trace, "line") and trace.line is not None:
                 trace.line.width = settings.line_width

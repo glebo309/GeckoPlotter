@@ -271,6 +271,23 @@ class DataStore:
 
         return bundle
 
+    def remove_component(self, component_id: str) -> Optional[Component]:
+        """Remove a trace from its bundle and keep role and file indexes consistent."""
+        bundle = self.get_bundle_for_component(component_id)
+        if bundle is None:
+            return None
+        component = next(c for c in bundle.component_list if c.component_id == component_id)
+        bundle.component_list = [c for c in bundle.component_list if c.component_id != component_id]
+        bundle.components = {}
+        for remaining in bundle.component_list:
+            bundle.components.setdefault(remaining.role, remaining)
+        self._component_index.pop(component_id, None)
+        if not any(c.original_filename == component.original_filename for c in bundle.component_list):
+            self._file_index.pop(component.original_filename, None)
+        if not bundle.component_list:
+            self.remove_bundle(bundle.bundle_id)
+        return component
+
     def clear(self) -> None:
         self._bundles.clear()
         self._component_index.clear()
@@ -483,7 +500,7 @@ class DataStore:
             'file_id': file_id,
             'view_mode': 'raw',
             'active_tab': 'data-overview',
-            'toolbox_tab': 'pub-plotter',
+            'toolbox_tab': 'plot-tools',
             'plot_settings': {},
             'dev_settings': {'show': False},
             'pub_selections': get_empty_selections(),

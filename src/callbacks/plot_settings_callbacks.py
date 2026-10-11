@@ -50,8 +50,9 @@ def register_plot_settings_callbacks(app, data_manager):
          Input('view-mode', 'data'),
          Input('active-tab', 'data'),
          Input('active-plot-tab', 'data')],
+        State('active-plot-context', 'data'),
     )
-    def resolve_plot_context(active_file, view_mode, active_tab, plot_tab):
+    def resolve_plot_context(active_file, view_mode, active_tab, plot_tab, current_context):
         """Compute the context key for the currently visible plot.
 
         Shared tabs get their own context so settings persist across file switches.
@@ -59,12 +60,14 @@ def register_plot_settings_callbacks(app, data_manager):
         """
         suffix = f':{plot_tab}' if plot_tab else ''
         if active_tab in ('peak-analysis', 'across-samples'):
-            return f'shared:{active_tab}{suffix}'
-        if (view_mode or 'raw') == 'raw':
-            return f'shared:raw{suffix}'
-        if active_file:
-            return f'file:{active_file}{suffix}'
-        return None
+            context_key = f'shared:{active_tab}{suffix}'
+        elif (view_mode or 'raw') == 'raw':
+            context_key = f'shared:raw{suffix}'
+        elif active_file:
+            context_key = f'file:{active_file}{suffix}'
+        else:
+            context_key = None
+        return dash.no_update if context_key == current_context else context_key
 
     # ------------------------------------------------------------------
     # 2. Context Load / Hydrate
@@ -124,12 +127,23 @@ def register_plot_settings_callbacks(app, data_manager):
             Output('pt-x-label', 'value', allow_duplicate=True),
             Output('pt-y-label', 'value', allow_duplicate=True),
             Output('pt-subplot-spacing', 'value', allow_duplicate=True),
+            Output('pub-subplot-rows', 'value', allow_duplicate=True),
+            Output('pub-subplot-cols', 'value', allow_duplicate=True),
+            Output('pub-fig-width-mm', 'value', allow_duplicate=True),
+            Output('pub-fig-height-mm', 'value', allow_duplicate=True),
+            Output('pub-preset', 'value', allow_duplicate=True),
+            Output('pub-dpi', 'value', allow_duplicate=True),
+            Output('pub-export-format', 'value', allow_duplicate=True),
+            Output('pub-zoom-sync', 'checked', allow_duplicate=True),
+            Output('plot-y-scope', 'value', allow_duplicate=True),
         ],
         Input('active-plot-context', 'data'),
         State('active-file', 'data'),
+        State('active-plot-tab', 'data'),
+        State('custom-plot-figures', 'data'),
         prevent_initial_call=True,
     )
-    def hydrate_plot_settings(context_key, active_file):
+    def hydrate_plot_settings(context_key, active_file, plot_tab=None, custom_figures=None):
         """Load saved settings for the active context and push to controls."""
         import logging
         _log = logging.getLogger('geckoplotter.settings')
@@ -137,9 +151,13 @@ def register_plot_settings_callbacks(app, data_manager):
 
         # Load from persistence (or defaults)
         saved = _load_settings(data_manager, context_key)
-        s = {**DEFAULT_PLOT_SETTINGS, **(saved or {})}
+        snapshot = (custom_figures or {}).get(plot_tab, {})
+        if not saved and snapshot.get('figure'):
+            from services.figure_actions import publication_plot_settings
+            saved = snapshot.get('plot_settings') or publication_plot_settings(snapshot['figure'])
+        s = {**DEFAULT_PLOT_SETTINGS, **(saved or {}), '_context_key': context_key}
 
-        if s.get('layout_mode') != 'stacked' and active_file:
+        if not saved and active_file:
             from services.data_store import BundleType
             bundle = data_manager.get_bundle_for_component(active_file) if hasattr(data_manager, 'get_bundle_for_component') else None
             if not bundle:
@@ -204,6 +222,15 @@ def register_plot_settings_callbacks(app, data_manager):
             s['x_label'],
             s['y1_label'],
             s.get('subplot_spacing', 0.08),
+            s['subplot_rows'],
+            s['subplot_cols'],
+            s['figure_width_mm'],
+            s['figure_height_mm'],
+            s['pub_preset'],
+            s['pub_dpi'],
+            s['export_format'],
+            s['link_x'],
+            s['y_scope'],
         )
 
     # ------------------------------------------------------------------
@@ -255,7 +282,16 @@ def register_plot_settings_callbacks(app, data_manager):
          Input('pt-shared-axis-labels', 'checked'),
          Input('pt-x-label', 'value'),
          Input('pt-y-label', 'value'),
-         Input('pt-subplot-spacing', 'value')],
+         Input('pt-subplot-spacing', 'value'),
+         Input('pub-subplot-rows', 'value'),
+         Input('pub-subplot-cols', 'value'),
+         Input('pub-fig-width-mm', 'value'),
+         Input('pub-fig-height-mm', 'value'),
+         Input('pub-preset', 'value'),
+         Input('pub-dpi', 'value'),
+         Input('pub-export-format', 'value'),
+         Input('pub-zoom-sync', 'checked'),
+         Input('plot-y-scope', 'value'),],
         State('current-plot-settings', 'data'),
         prevent_initial_call=True,
     )
@@ -280,6 +316,15 @@ def register_plot_settings_callbacks(app, data_manager):
         pt_shared_axis_labels,
         pt_x_label, pt_y_label,
         pt_subplot_spacing,
+        subplot_rows,
+        subplot_cols,
+        figure_width_mm,
+        figure_height_mm,
+        pub_preset,
+        pub_dpi,
+        export_format,
+        link_x,
+        y_scope,
         # State
         current_settings,
     ):
@@ -304,6 +349,16 @@ def register_plot_settings_callbacks(app, data_manager):
         eff_y_label = pt_y_label if pt_y_label is not None else current_settings.get('y1_label', '')
 
         new_settings = {
+            **current_settings,
+            'subplot_rows': subplot_rows if subplot_rows not in (None, '') else current_settings.get('subplot_rows', DEFAULT_PLOT_SETTINGS['subplot_rows']),
+            'subplot_cols': subplot_cols if subplot_cols not in (None, '') else current_settings.get('subplot_cols', DEFAULT_PLOT_SETTINGS['subplot_cols']),
+            'figure_width_mm': figure_width_mm if figure_width_mm not in (None, '') else current_settings.get('figure_width_mm', DEFAULT_PLOT_SETTINGS['figure_width_mm']),
+            'figure_height_mm': figure_height_mm if figure_height_mm not in (None, '') else current_settings.get('figure_height_mm', DEFAULT_PLOT_SETTINGS['figure_height_mm']),
+            'pub_preset': pub_preset if pub_preset not in (None, '') else current_settings.get('pub_preset', DEFAULT_PLOT_SETTINGS['pub_preset']),
+            'pub_dpi': pub_dpi if pub_dpi not in (None, '') else current_settings.get('pub_dpi', DEFAULT_PLOT_SETTINGS['pub_dpi']),
+            'export_format': export_format if export_format not in (None, '') else current_settings.get('export_format', DEFAULT_PLOT_SETTINGS['export_format']),
+            'link_x': link_x if link_x not in (None, '') else current_settings.get('link_x', DEFAULT_PLOT_SETTINGS['link_x']),
+            'y_scope': y_scope if y_scope not in (None, '') else current_settings.get('y_scope', DEFAULT_PLOT_SETTINGS['y_scope']),
             # Data Selector (normalized)
             'plot_type': plot_type or 'bar',
             'y1_stats': y1_stats or [],
@@ -366,6 +421,10 @@ def register_plot_settings_callbacks(app, data_manager):
             'trace_overrides': current_settings.get('trace_overrides', {}),
         }
 
+        range_keys = ('auto_range','x_min','x_max','y_min','y_max','x_scale','y_scale')
+        if any(new_settings[k] != current_settings.get(k, DEFAULT_PLOT_SETTINGS[k]) for k in range_keys):
+            new_settings['_axis_range_revision'] = current_settings.get('_axis_range_revision', 0) + 1
+
         # Break hydration loop: if nothing changed, don't propagate
         if new_settings == current_settings:
             return dash.no_update
@@ -388,8 +447,38 @@ def register_plot_settings_callbacks(app, data_manager):
         if not context_key or not settings:
             return dash.no_update
         _log.debug(f"PERSIST [{context_key}] y1_stats={settings.get('y1_stats')}")
-        _save_settings(data_manager, context_key, settings)
+        _save_settings(data_manager, settings.get('_context_key') or context_key, settings)
         return dash.no_update
+
+    @app.callback(
+        [Output('pt-bg-color', 'value', allow_duplicate=True),
+         Output('pt-paper-color', 'value', allow_duplicate=True),
+         Output('pt-layout-opts', 'value', allow_duplicate=True)],
+        Input('pt-theme', 'value'),
+        State('current-plot-settings', 'data'),
+        State('pt-layout-opts', 'value'),
+        prevent_initial_call=True,
+    )
+    def apply_theme_controls(theme, settings, options):
+        if theme == (settings or {}).get('theme'):
+            return (dash.no_update,) * 3
+        import plotly.io as pio
+        import re
+        if theme not in pio.templates:
+            return (dash.no_update,) * 3
+        layout = pio.templates[theme].layout
+        def hex_color(color):
+            if not color:
+                return '#ffffff'
+            if color.startswith('rgb('):
+                return '#' + ''.join(f'{int(v):02x}' for v in re.findall(r'\d+', color)[:3])
+            return '#ffffff' if color == 'white' else color
+        options = set(options or []) - {'grid_x','grid_y'}
+        for direction in ('x','y'):
+            axis = layout[direction+'axis']
+            if axis.showgrid is not False and axis.gridcolor:
+                options.add('grid_'+direction)
+        return hex_color(layout.plot_bgcolor), hex_color(layout.paper_bgcolor), sorted(options)
 
     # ------------------------------------------------------------------
     # 5. Visibility — context-aware panel sections
@@ -411,6 +500,7 @@ def register_plot_settings_callbacks(app, data_manager):
             Output('pt-marker-wrapper', 'style'),
             # Phase 1.4 — conditional dependents
             Output('pt-range-wrapper', 'style'),
+            Output('pt-categorical-x', 'style'),
             Output('pt-legend-pos-wrapper', 'style'),
             Output('pt-tick-grid-detail-wrapper', 'style'),
         ],
@@ -435,7 +525,8 @@ def register_plot_settings_callbacks(app, data_manager):
             layout_opts.append('ticks')
 
         # 1.1 — header text
-        header = 'Raw Plot Settings' if is_raw else 'Analysis Plot Settings'
+        header = ('Publication Plot Settings' if ':publication-' in (s.get('_context_key') or '')
+                  else 'Raw Plot Settings' if is_raw else 'Analysis Plot Settings')
 
         # 1.2 — analysis-only vs raw-only
         plot_type_vis = _HIDE if is_raw else _SHOW
@@ -468,6 +559,7 @@ def register_plot_settings_callbacks(app, data_manager):
             line_vis,
             marker_vis,
             range_vis,
+            _HIDE if is_raw else _SHOW,
             legend_pos_vis,
             tick_grid_vis,
         )
@@ -478,24 +570,22 @@ def register_plot_settings_callbacks(app, data_manager):
 # ----------------------------------------------------------------------
 
 def _load_settings(data_manager, context_key):
-    """Load saved plot settings for a context key."""
+    """Load persisted settings, leaving initial defaults to the hydrator."""
     if not context_key:
-        return dict(DEFAULT_PLOT_SETTINGS)
+        return {}
 
     if context_key.startswith('shared:'):
         # Shared settings stored in data_manager under a special key
         shared_store = getattr(data_manager, '_shared_plot_settings', {})
-        return shared_store.get(context_key, dict(DEFAULT_PLOT_SETTINGS))
+        return shared_store.get(context_key, {})
 
     if context_key.startswith('file:'):
         file_id = context_key[5:]  # strip 'file:'
         state = data_manager.get_file_state(file_id)
         saved = state.get('plot_settings', {})
-        if saved:
-            return saved
-        return dict(DEFAULT_PLOT_SETTINGS)
+        return saved
 
-    return dict(DEFAULT_PLOT_SETTINGS)
+    return {}
 
 
 def _save_settings(data_manager, context_key, settings):

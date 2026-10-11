@@ -37,6 +37,8 @@ def register_publication_preview_callbacks(app, data_manager):
     from components.paper_mock import PUB_PRESETS
 
     plot_manager = PlotManager()
+    from services.render_cache import RenderCache
+    render_cache = RenderCache()
 
     def _build_pub_figure(plot_settings, active_file, sub_rows, sub_cols,
                           zoom_sync, selected_peak_id,
@@ -150,17 +152,10 @@ def register_publication_preview_callbacks(app, data_manager):
             None,
         )
 
-    def _style_snapshot_figure(fig_data, plot_settings):
-        fig_obj = go.Figure(fig_data)
-        s = {**DEFAULT_PLOT_SETTINGS, **(plot_settings or {})}
-        ps = PlotSettingsService.from_dict(dict(s, y_label=s.get('y1_label', 'Y1')))
-        PlotSettingsService.apply_to_figure(fig_obj, ps)
-        return fig_obj
-
     # ── Toggle paper mock visibility ─────────────────────────────────
     @app.callback(
         [Output('pub-preview-wrapper', 'style'),
-         Output('main-plot', 'style')],
+         Output('plot-workspace', 'style')],
         Input('active-plot-tab', 'data'),
         State('plot-tabs', 'data'),
         prevent_initial_call=True,
@@ -175,26 +170,41 @@ def register_publication_preview_callbacks(app, data_manager):
             )
         return (
             {'display': 'none'},
-            {'width': '100%', 'height': '100%'},
+            {'width': '100%', 'height': '100%', 'position': 'relative'},
         )
 
-    # ── Sync preset → figure size inputs (respecting custom dims) ────
+    # Preset defaults adapt to panel count; explicit dimensions survive layout changes.
     @app.callback(
         [Output('pub-fig-width-mm', 'value'),
-         Output('pub-fig-height-mm', 'value')],
+         Output('pub-fig-height-mm', 'value'),
+         Output('pt-font-size', 'value', allow_duplicate=True),
+         Output('pt-tick-font-size', 'value', allow_duplicate=True),
+         Output('pt-title-font-size', 'value', allow_duplicate=True)],
         Input('pub-preset', 'value'),
-        State('pub-custom-dims', 'data'),
+        Input('pt-layout-mode', 'value'),
+        Input('pub-subplot-rows', 'value'),
+        Input('pub-subplot-cols', 'value'),
+        State('current-plot-settings', 'data'),
+        State('pub-preview-graph', 'data'),
+        State('active-plot-tab', 'data'),
         prevent_initial_call=True,
     )
-    def sync_preset_to_dims(preset, custom_dims):
-        custom_dims = custom_dims or {}
-        if preset in custom_dims:
-            cd = custom_dims[preset]
-            return cd.get('w', 84), cd.get('h', 63)
-        p = PUB_PRESETS.get(preset)
-        if p:
-            return p['mm_w'], p['mm_h']
-        return dash.no_update, dash.no_update
+    def sync_preset_to_dims(preset, mode, rows, cols, settings, figure, active):
+        from services.publication_presets import publication_preset_settings, publication_pane_rows
+        unchanged = (dash.no_update,) * 5
+        settings = settings or {}
+        if not str(active).startswith('publication-'):
+            return unchanged
+        next_settings = dict(settings, layout_mode=mode, subplot_rows=rows, subplot_cols=cols)
+        defaults = publication_preset_settings(preset, publication_pane_rows(figure, next_settings))
+        if preset != settings.get('pub_preset'):
+            return tuple(defaults[k] for k in ('figure_width_mm', 'figure_height_mm', 'font_size',
+                                               'tick_font_size', 'title_font_size'))
+        previous = publication_preset_settings(preset, publication_pane_rows(figure, settings))
+        if settings.get('figure_height_mm') == previous['figure_height_mm']:
+            if defaults['figure_height_mm'] != previous['figure_height_mm']:
+                return (dash.no_update, defaults['figure_height_mm'], *unchanged[2:])
+        return unchanged
 
     # ── Toggle journal paper vs PowerPoint slide mock ───────────────────
     @app.callback(
@@ -218,49 +228,21 @@ def register_publication_preview_callbacks(app, data_manager):
         return paper_style, slide_style
 
     @app.callback(
-        Output('pub-slide-graph', 'figure'),
-        [Input('pub-preview-graph', 'figure'),
-         Input('pub-preset', 'value')],
-    )
-    def sync_slide_figure(fig, preset):
-        if preset != 'presentation' or not fig:
-            raise dash.exceptions.PreventUpdate
-        return fig
-
-    # ── Save custom dims per preset ──────────────────────────────────
-    @app.callback(
-        Output('pub-custom-dims', 'data'),
-        [Input('pub-fig-width-mm', 'value'),
-         Input('pub-fig-height-mm', 'value')],
-        [State('pub-preset', 'value'),
-         State('pub-custom-dims', 'data')],
-        prevent_initial_call=True,
-    )
-    def save_custom_dims(w, h, preset, custom_dims):
-        if w is None or h is None or not preset:
-            return dash.no_update
-        custom_dims = custom_dims or {}
-        existing = custom_dims.get(preset, {})
-        if existing.get('w') == w and existing.get('h') == h:
-            return dash.no_update
-        return {**custom_dims, preset: {'w': w, 'h': h}}
-
-    # ── Sync subplot grid → layout mode ───────────────────────────────
-    @app.callback(
         Output('pt-layout-mode', 'value', allow_duplicate=True),
-        [Input('pub-subplot-rows', 'value'),
-         Input('pub-subplot-cols', 'value')],
-        prevent_initial_call=True,
+        [Input('pub-subplot-rows', 'value'), Input('pub-subplot-cols', 'value')],
+        State('current-plot-settings', 'data'), prevent_initial_call=True,
     )
-    def sync_grid_to_layout_mode(rows, cols):
-        """Publication grid is preview-local; do not mutate the raw plot layout."""
-        return dash.no_update
+    def sync_grid_to_layout_mode(rows, cols, settings):
+        settings = settings or {}
+        if (rows, cols) == (settings.get('subplot_rows', 1), settings.get('subplot_cols', 1)):
+            return dash.no_update
+        return 'stacked' if (rows or 1) * (cols or 1) > 1 else dash.no_update
 
     # ── Render figure into pub-preview-graph ─────────────────────────
     # Display-only: peaks are shown but not interactive (no selection,
     # no integration drawing). Use the Chromatograms tab for analysis.
     @app.callback(
-        Output('pub-preview-graph', 'figure'),
+        Output('pub-preview-graph', 'data'),
         [Input('active-plot-tab', 'data'),
          Input('current-plot-settings', 'data'),
          Input('pub-preset', 'value'),
@@ -285,7 +267,18 @@ def register_publication_preview_callbacks(app, data_manager):
         if not pub_tab:
             raise dash.exceptions.PreventUpdate
 
+        owner = (plot_settings or {}).get('_context_key')
+        if owner and not owner.endswith(':' + active_tab_id):
+            raise dash.exceptions.PreventUpdate
         entry = (custom_figures or {}).get(active_tab_id, {})
+        render_cache.prune(t['id'] for t in (plot_tabs or []))
+        cache_key = {'settings':plot_settings, 'snapshot':entry, 'rows':sub_rows, 'cols':sub_cols,
+                     'link_x':zoom_sync}
+        if entry.get('source_group_key'):
+            cache_key.update(render=render_trigger, peak=peak_trigger, files=loaded_files, order=file_order)
+        cached = render_cache.get(active_tab_id, cache_key)
+        if cached is not None:
+            return cached
         source_group_key = entry.get('source_group_key')
         snapshot = entry.get('figure')
 
@@ -296,34 +289,48 @@ def register_publication_preview_callbacks(app, data_manager):
                 loaded_files, plot_tabs, file_order, display_opts,
                 source_group_key=source_group_key)
         elif snapshot:
-            fig_obj = _style_snapshot_figure(snapshot, plot_settings)
+            from services.publication_figure import editable_publication_figure
+            from services.figure_actions import publication_plot_settings
+            settings = dict(plot_settings or {})
+            settings.setdefault('layout_mode', entry.get('plot_settings', {}).get('layout_mode',
+                publication_plot_settings(snapshot)['layout_mode']))
+            settings.setdefault('subplot_rows', sub_rows or 1)
+            settings.setdefault('subplot_cols', sub_cols or 1)
+            settings.setdefault('link_x', zoom_sync)
+            fig_obj = editable_publication_figure(snapshot, settings, entry.get('plot_settings'))
         else:
             fig_obj = go.Figure()
 
         fig_obj.update_layout(
             uirevision=active_tab_id,
+            meta={**(fig_obj.layout.meta or {}), 'gecko_tab_id': active_tab_id},
             hovermode=False,
             dragmode='zoom',
         )
 
+        axis_revision = f"{active_tab_id}:range:{(plot_settings or {}).get('_axis_range_revision',0)}"
+        fig_obj.update_xaxes(uirevision=axis_revision)
+        fig_obj.update_yaxes(uirevision=axis_revision)
+        render_cache.put(active_tab_id, cache_key, fig_obj)
         return fig_obj
 
     # ── Update figure slot + readout based on size inputs ─────────────
     @app.callback(
         [Output('pub-figure-slot', 'style'),
          Output('pub-right-col', 'style'),
-         Output('pub-dim-readout', 'children')],
+         Output('pub-dim-readout', 'children'),
+         Output('pub-slide-figure-slot', 'style')],
         [Input('pub-fig-width-mm', 'value'),
          Input('pub-fig-height-mm', 'value'),
          Input('pub-dpi', 'value')],
         prevent_initial_call=True,
     )
     def update_figure_layout(w_mm, h_mm, dpi):
-        w_mm = max(20, int(w_mm or 84))
-        h_mm = max(15, int(h_mm or 63))
+        w_mm = max(1, float(w_mm or 84))
+        h_mm = max(1, float(h_mm or 63))
         dpi = max(72, int(dpi or 300))
-        readout = f"{w_mm} × {h_mm} mm · {dpi} DPI"
-        aspect = f"{w_mm} / {h_mm}"
+        readout = f"{w_mm:g} × {h_mm:g} mm · {dpi} DPI"
+        aspect = f"{w_mm:g} / {h_mm:g}"
 
         is_full = w_mm > 90
 
@@ -340,7 +347,7 @@ def register_publication_preview_callbacks(app, data_manager):
             slot_style = {**base_slot_style, 'width': '100%'}
             right_style = {'flex': '1', 'minWidth': '0'}
 
-        return slot_style, right_style, readout
+        return slot_style, right_style, readout, {**base_slot_style, 'width':'100%'}
 
     # ── Export from preview ─────────────────────────────────────────
     @app.callback(
@@ -350,15 +357,15 @@ def register_publication_preview_callbacks(app, data_manager):
          State('pub-fig-width-mm', 'value'),
          State('pub-fig-height-mm', 'value'),
          State('pub-dpi', 'value'),
-         State('pub-preview-graph', 'figure')],
+         State('pub-preview-graph', 'data')],
         prevent_initial_call=True,
     )
     def export_from_preview(n_clicks, fmt, w_mm, h_mm, dpi, fig_data):
         if not n_clicks or not fig_data:
             return dash.no_update
 
-        w_mm = max(20, int(w_mm or 84))
-        h_mm = max(15, int(h_mm or 63))
+        w_mm = max(1, float(w_mm or 84))
+        h_mm = max(1, float(h_mm or 63))
         dpi = max(72, int(dpi or 300))
 
         fig = go.Figure(fig_data)

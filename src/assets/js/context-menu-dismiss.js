@@ -8,31 +8,25 @@
 (function () {
     'use strict';
 
-    function isMenuOpen() {
-        var dropdown = document.querySelector('.mantine-Menu-dropdown');
-        return dropdown && dropdown.offsetParent !== null;
+    var menus = [
+        {id: 'context-menu', dropdown: 'context-menu-dropdown', close: 'context-menu-close-store'},
+        {id: 'ms-plot-context-menu', dropdown: 'ms-plot-context-dropdown', close: 'ms-plot-context-menu-close-store'},
+        {id: 'figure-context-menu', dropdown: 'figure-context-dropdown', close: 'figure-context-close'}
+    ];
+    function dismiss(event) {
+        var dc = window.dash_clientside;
+        if (!dc || !dc.set_props) return;
+        menus.forEach(function (menu) {
+            var dropdown = document.getElementById(menu.dropdown);
+            if (!dropdown || dropdown.offsetParent === null) return;
+            if (event && dropdown.contains(event.target)) return;
+            dc.set_props(menu.id, {opened: false});
+            dc.set_props(menu.close, {data: Date.now()});
+        });
     }
-
-    document.addEventListener('mousedown', function (e) {
-        if (!isMenuOpen()) return;
-        var dropdown = document.querySelector('.mantine-Menu-dropdown');
-        if (dropdown && !dropdown.contains(e.target)) {
-            var store = document.getElementById('context-menu-close-store');
-            if (store) {
-                var cur = parseInt(store._dashprivate_value || '0', 10) || 0;
-                window.dash_clientside && window.dash_clientside.set_props
-                    ? window.dash_clientside.set_props('context-menu-close-store', {data: cur + 1})
-                    : null;
-            }
-        }
-    }, true);
-
-    document.addEventListener('keydown', function (e) {
-        if (e.key === 'Escape' && isMenuOpen()) {
-            window.dash_clientside && window.dash_clientside.set_props
-                ? window.dash_clientside.set_props('context-menu-close-store',
-                    {data: (Date.now ? Date.now() : 0)})
-                : null;
-        }
+    document.addEventListener('pointerdown', dismiss, true);
+    document.addEventListener('keydown', function (event) {
+        if (event.key === 'Escape') dismiss();
     });
+    document.addEventListener('scroll', function () {dismiss();}, true);
 })();

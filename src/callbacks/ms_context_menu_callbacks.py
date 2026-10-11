@@ -154,10 +154,13 @@ def register_ms_context_menu_callbacks(app: dash.Dash, data_manager) -> None:
 
     @app.callback(
         Output('ms-plot-context-menu', 'opened', allow_duplicate=True),
-        Input('ms-plot-context-menu-close-store', 'data'),
+        [Input('ms-plot-context-menu-close-store', 'data'),
+         Input('active-plot-tab', 'data'),
+         Input('active-tab', 'data'),
+         Input('ms-ctx-open-new-plot', 'n_clicks')],
         prevent_initial_call=True,
     )
-    def close_ms_menu(_):
+    def close_ms_menu(*_):
         return False
 
     @app.callback(

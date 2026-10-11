@@ -24,23 +24,6 @@ def register_lcms_callbacks(app, data_manager):
 
     from services.data_store import BundleType, ComponentRole
 
-    @app.callback(
-        Output('pt-layout-mode', 'value', allow_duplicate=True),
-        Input('active-file', 'data'),
-        State('pt-layout-mode', 'value'),
-        prevent_initial_call=True,
-    )
-    def auto_subplot_for_lcms(active_file, current_mode):
-        if not active_file:
-            raise dash.exceptions.PreventUpdate
-        bundle = data_manager.get_bundle_for_component(active_file) if hasattr(data_manager, 'get_bundle_for_component') else None
-        if not bundle:
-            bundle = data_manager.get_bundle(active_file) if hasattr(data_manager, 'get_bundle') else None
-        if bundle and bundle.bundle_type == BundleType.LCMS and len(bundle.component_list) > 1:
-            if current_mode != 'stacked':
-                return 'stacked'
-        raise dash.exceptions.PreventUpdate
-
     # ------------------------------------------------------------------
     # 1. Click on main-plot → update mass spectrum figure
     # ------------------------------------------------------------------

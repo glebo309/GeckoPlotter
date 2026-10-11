@@ -167,65 +167,23 @@ def register_file_tree_callbacks(app: dash.Dash, data_manager: DataManager) -> N
                 log.error(f"Parent file not found or not multi-well: {parent_file_id}")
                 updated_files = current_files.copy()
 
-        elif data_manager.bundle_manager.get_bundle_by_id(file_id) or data_manager.get_lcms_bundle_by_id(file_id):
-            bundle = data_manager.bundle_manager.get_bundle_by_id(file_id)
-            lcms_bundle = data_manager.get_lcms_bundle_by_id(file_id)
-            if bundle:
-                bundle_base_name = bundle.base_name
-            elif lcms_bundle:
-                bundle_base_name = file_id[: -len('_LCMS_BUNDLE')]
-
-            files_to_remove = []
-            for f in current_files:
-                file_name = f.get('name', '')
-                if bundle:
-                    if (bundle_base_name in file_name and
-                        (file_name.endswith('_UV_VIS_1.txt') or
-                         file_name.endswith('_Chromatogram.txt') or
-                         file_name.endswith('_Integration.txt') or
-                         file_name.endswith('_Peak Analysis.txt') or
-                         file_name.endswith('_SST.txt'))):
-                        files_to_remove.append(f.get('id'))
-                else:
-                    _, bundle_record = data_manager.find_lcms_bundle_for_component(f.get('id'))
-                    if bundle_record and bundle_record.get('base_name') == bundle_base_name:
-                        files_to_remove.append(f.get('id'))
-                    elif file_name.startswith(bundle_base_name):
-                        files_to_remove.append(f.get('id'))
-            if lcms_bundle:
-                files_to_remove.append(file_id)
-
-            if lcms_bundle:
-                data_manager.remove_lcms_bundle(bundle_base_name)
-
-            updated_files = [f for f in current_files if f.get('id') not in files_to_remove]
-            if bundle:
-                data_manager.bundle_manager.remove_bundle(file_id)
-            if lcms_bundle:
-                updated_files = [f for f in updated_files if f.get('id') != file_id]
-
         else:
-            log.debug(f"Deleting individual file: {file_id}")
-
-            lcms_base, lcms_bundle = data_manager.find_lcms_bundle_for_component(file_id)
-            is_lcms_component_deletion = False
-            lcms_parent_id = None
-            if lcms_bundle:
-                if not hasattr(data_manager, 'collapse_state'):
-                    data_manager.collapse_state = {}
-                lcms_parent_id = f"{lcms_base}_LCMS_BUNDLE"
-                data_manager.collapse_state[lcms_parent_id] = 'expanded'
-                is_lcms_component_deletion = True
-                bundle_files = lcms_bundle.get('files', [])
-                if file_id in bundle_files:
-                    bundle_files.remove(file_id)
-                if file_id in lcms_bundle.get('records', {}):
-                    lcms_bundle['records'].pop(file_id, None)
-                lcms_bundle.setdefault('components', {}).pop(file_id, None)
-
-            data_manager.remove_bundle(file_id)
-
-            updated_files = [f for f in current_files if f.get('id') != file_id]
+            bundle = data_manager.get_bundle(file_id)
+            if bundle is not None:
+                files_to_remove = [file_id] + [c.component_id for c in bundle.component_list]
+                data_manager.remove_bundle(file_id)
+            else:
+                bundle = data_manager.get_bundle_for_component(file_id)
+                if bundle is None:
+                    return (dash.no_update,) * 8
+                parent_to_expand = bundle.bundle_id
+                files_to_remove = [file_id]
+                data_manager.remove_component(file_id)
+                data_manager.collapse_state[parent_to_expand] = 'expanded'
+            for removed_id in files_to_remove:
+                data_manager.visibility_state.pop(removed_id, None)
+                data_manager.file_ui_state.pop(removed_id, None)
+                data_manager.lcms_eic_overlays.pop(removed_id, None)
 
         # Clean up peaks for all deleted files/bundles
         deleted_ids = set(files_to_remove) if files_to_remove else set()
@@ -267,7 +225,8 @@ def register_file_tree_callbacks(app: dash.Dash, data_manager: DataManager) -> N
                 active_was_deleted = True
 
         if active_was_deleted or not updated_files:
-            new_active = updated_files[0]['id'] if updated_files else None
+            remaining = data_manager.get_bundle(updated_files[0]['id']) if updated_files else None
+            new_active = remaining.primary.component_id if remaining and remaining.primary else None
             table_editor = create_data_table_editor(None, table_id='pub-table')
             pub_data = None
             pub_sel = get_empty_selections()

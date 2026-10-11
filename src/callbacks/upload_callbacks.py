@@ -6,8 +6,27 @@ from typing import List, Dict, Any
 import dash
 from dash import dcc, html, Input, Output, State, dash_table
 import pandas as pd
+from urllib.parse import quote
 
 def _icon(name, width=14, height=14, color='#333', **kw):
+    paths = {
+        'tabler:eye': '<path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7S2 12 2 12Z"/><circle cx="12" cy="12" r="3"/>',
+        'tabler:eye-off': '<path d="m3 3 18 18M10 5a12 12 0 0 1 12 7 17 17 0 0 1-4 5M6 6a17 17 0 0 0-4 6s3.5 7 10 7a13 13 0 0 0 5-1M10 10a3 3 0 0 0 4 4"/>',
+        'tabler:trash': '<path d="M3 6h18M9 6V3h6v3M5 6l1 15h12l1-15M10 10v7M14 10v7"/>',
+        'tabler:chart-line': '<path d="M3 3v18h18M5 16l5-6 4 3 6-8"/>',
+        'tabler:spectrum': '<path d="M3 20h18M4 18l3-3 3 3 2-14 3 14 3-7 2 7"/>',
+    }
+    if name in paths:
+        def source(icon_name):
+            svg = (f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" '
+                   f'fill="none" stroke="{color}" stroke-width="1.8" '
+                   f'stroke-linecap="round" stroke-linejoin="round">{paths[icon_name]}</svg>')
+            return 'data:image/svg+xml,' + quote(svg)
+        if name in ('tabler:eye', 'tabler:eye-off'):
+            kw.update({'data-visible-src': source('tabler:eye'),
+                       'data-hidden-src': source('tabler:eye-off')})
+        return html.Img(src=source(name), alt='',
+                        style={'width': f'{max(width, 18)}px', 'height': f'{max(height, 18)}px'}, **kw)
     glyphs = {
         'tabler:eye': '○',
         'tabler:trash': '×',
@@ -39,6 +58,19 @@ def _icon(name, width=14, height=14, color='#333', **kw):
     if isinstance(extra_style, dict):
         style.update(extra_style)
     return html.Span(glyphs.get(name, '□'), style=style, **kw)
+
+
+def _visibility_button(file_id, data_manager=None):
+    visible = getattr(data_manager, 'visibility_state', {}).get(file_id, True)
+    label = 'Hide trace' if visible else 'Show trace'
+    return html.Button(
+        _icon('tabler:eye' if visible else 'tabler:eye-off', width=18),
+        id={'type': 'visibility-btn', 'index': file_id},
+        title=label, className='tree-action-btn', n_clicks=0,
+        style={'background': 'none', 'border': 'none', 'cursor': 'pointer',
+               'display': 'flex', 'alignItems': 'center', 'justifyContent': 'center'},
+        **{'aria-label': label, 'aria-pressed': str(visible).lower()}
+    )
 
 
 
@@ -462,18 +494,7 @@ def render_bundle_item_selected(bundle_item: dict, is_selected: bool = False, da
 
             # Control buttons
             html.Div([
-                html.Button(
-                    _icon('tabler:eye', width=12, height=12),
-                    id={'type': 'visibility-btn', 'index': bundle_id},
-                    title='Toggle visibility',
-                    className='tree-action-btn',
-                    style={
-                        'background': 'none', 'border': 'none', 'cursor': 'pointer',
-                        'padding': '0', 'fontSize': '11px',
-                        'width': '18px', 'height': '18px',
-                        'display': 'flex', 'alignItems': 'center', 'justifyContent': 'center',
-                    }
-                ),
+                _visibility_button(bundle_id, data_manager),
                 html.Button(
                     _icon('tabler:trash', width=12, height=12, color='#333'),
                     id={'type': 'delete-btn', 'index': bundle_id},
@@ -528,6 +549,10 @@ def render_individual_file_item_selected(item: dict, is_selected: bool = False, 
         'lcms_ms_negative': 'tabler:minus',
         'lcms_uv_a': 'tabler:spectrum',
         'lcms_uv_b': 'tabler:spectrum',
+        'ms_positive': 'tabler:chart-line',
+        'ms_negative': 'tabler:chart-line',
+        'vwd_a': 'tabler:spectrum',
+        'vwd_b': 'tabler:spectrum',
         'text': 'tabler:file-text',
         'binary': 'tabler:file-code',
         'unknown': 'tabler:file-question',
@@ -592,25 +617,7 @@ def render_individual_file_item_selected(item: dict, is_selected: bool = False, 
                     
                     # Control buttons for child items
                     html.Div([
-                        html.Button(
-                            child_icon,
-                            id={'type': 'visibility-btn', 'index': child_id},
-                            title='Toggle visibility',
-                            style={
-                                'background': 'none',
-                                'border': 'none',
-                                'cursor': 'pointer',
-                                'padding': '0 4px',
-                                'fontSize': '14px',
-                                'opacity': child_opacity,
-                                'width': '24px',
-                                'height': '24px',
-                                'display': 'flex',
-                                'alignItems': 'center',
-                                'justifyContent': 'center',
-                                'borderRadius': '3px'
-                            }
-                        ),
+                        _visibility_button(child_id, data_manager),
                         html.Button(
                             _icon('tabler:trash', width=12, height=12, color='#333'),
                             id={'type': 'delete-btn', 'index': child_id},
@@ -717,18 +724,7 @@ def render_individual_file_item_selected(item: dict, is_selected: bool = False, 
 
             # Control buttons
             html.Div([
-                html.Button(
-                    _icon('tabler:eye', width=12, height=12),
-                    id={'type': 'visibility-btn', 'index': file_id},
-                    title='Toggle visibility',
-                    className='tree-action-btn',
-                    style={
-                        'background': 'none', 'border': 'none', 'cursor': 'pointer',
-                        'padding': '0', 'fontSize': '11px',
-                        'width': '18px', 'height': '18px',
-                        'display': 'flex', 'alignItems': 'center', 'justifyContent': 'center',
-                    }
-                ),
+                _visibility_button(file_id, data_manager),
                 html.Button(
                     _icon('tabler:trash', width=12, height=12, color='#333'),
                     id={'type': 'delete-btn', 'index': file_id},

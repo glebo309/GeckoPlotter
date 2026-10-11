@@ -15,6 +15,7 @@
     var suppressNextClick = false;
 
     function graphRoot() {
+        if (window.geckoActivePlot) return window.geckoActivePlot();
         return document.getElementById('main-plot');
     }
 

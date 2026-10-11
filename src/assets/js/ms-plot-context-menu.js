@@ -26,6 +26,7 @@
         var dc = window.dash_clientside ||
             (window.parent && window.parent !== window ? window.parent.dash_clientside : null);
         if (!dc || typeof dc.set_props !== 'function') return;
+        dc.set_props('ms-plot-context-menu', { opened: false });
         dc.set_props('ms-plot-context-menu-close-store', { data: Date.now() });
     }
 
@@ -51,9 +52,7 @@
 
     // Dismiss on outside click
     document.addEventListener('mousedown', function (e) {
-        var anchor = document.getElementById('ms-plot-context-menu-anchor');
-        if (!anchor) return;
-        var dropdown = anchor.querySelector('.mantine-Menu-dropdown');
+        var dropdown = document.getElementById('ms-plot-context-dropdown');
         if (!dropdown || dropdown.offsetParent === null) return;
         if (!dropdown.contains(e.target)) bumpClose();
     }, true);
@@ -61,4 +60,5 @@
     document.addEventListener('keydown', function (e) {
         if (e.key === 'Escape') bumpClose();
     });
+    document.addEventListener('scroll', bumpClose, true);
 })();

@@ -55,9 +55,6 @@ def smooth_trace_y(y_values, requested_window):
 def smooth_plotly_traces(traces: Iterable, requested_window) -> None:
     """Apply display-only smoothing to line-like Plotly traces in-place."""
     window = normalize_smooth_window(requested_window, 10**9)
-    if not window:
-        return
-
     for trace in traces:
         if getattr(trace, "type", "") not in ("scatter", "scattergl"):
             continue
@@ -66,9 +63,19 @@ def smooth_plotly_traces(traces: Iterable, requested_window) -> None:
             continue
         if getattr(trace, "y", None) is None:
             continue
-
-        smoothed = smooth_trace_y(trace.y, window)
+        if getattr(trace, 'fill', None) or 'baseline' in str(trace.name or '').lower():
+            continue
+        meta = dict(trace.meta) if isinstance(trace.meta, dict) else {}
+        original = meta.get('gecko_original_y')
+        if original is None:
+            original = list(trace.y)
+        elif not window:
+            trace.y = original
+        if not window:
+            continue
+        smoothed = smooth_trace_y(original, window)
         if smoothed is not None:
+            trace.meta = {**meta, 'gecko_original_y': original}
             trace.y = tuple(smoothed)
 
 

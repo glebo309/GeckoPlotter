@@ -36,7 +36,7 @@ def register_context_callbacks(app, data_manager):
         return (
             state,
             dash.no_update,
-            state.get('toolbox_tab', 'pub-plotter'),
+            state.get('toolbox_tab', 'plot-tools'),
             state.get('dev_settings', {'show': False}),
         )
 
@@ -61,7 +61,7 @@ def register_context_callbacks(app, data_manager):
             **current_state,
             'view_mode': view_mode or 'raw',
             'active_tab': active_tab or 'data-overview',
-            'toolbox_tab': toolbox_tab or 'pub-plotter',
+            'toolbox_tab': toolbox_tab or 'plot-tools',
             'dev_settings': dev_settings or {'show': False},
         }
 

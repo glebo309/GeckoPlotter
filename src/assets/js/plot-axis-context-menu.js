@@ -21,6 +21,7 @@
     }
 
     function getGraphDiv() {
+        if (window.geckoActivePlot) return window.geckoActivePlot();
         return document.querySelector('#' + GRAPH_ID + ' .js-plotly-plot');
     }
 
@@ -468,4 +469,5 @@
         document.addEventListener('DOMContentLoaded', install);
     }
     window.addEventListener('load', function () { window.setTimeout(install, 100); });
+    document.addEventListener('gecko:plot-ready', install);
 })();

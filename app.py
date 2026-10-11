@@ -38,6 +38,7 @@ from callbacks.integration_callbacks import register_integration_callbacks
 from callbacks.baseline_callbacks import register_baseline_callbacks
 from callbacks.context_menu_callbacks import register_context_menu_callbacks
 from callbacks.ms_context_menu_callbacks import register_ms_context_menu_callbacks
+from callbacks.figure_actions_callbacks import register_figure_actions_callbacks
 from callbacks.plot_context_menu_callbacks import register_plot_context_menu_callbacks
 from callbacks.deconvolution_callbacks import register_deconvolution_callbacks
 from callbacks.export_callbacks import register_export_callbacks
@@ -52,6 +53,13 @@ app.title = 'GeckoPlotter'
 
 # Global data store (Bundle-first architecture)
 data_manager = DataStore()
+
+
+def _figure_actions(context, menu=True):
+    constructor = dmc.MenuItem if menu else html.Button
+    return [constructor(label, n_clicks=0, id={'type': 'figure-action', 'context': context, 'action': action},
+                        **{'data-figure-action': action})
+            for label, action in [('Send to publication', 'publication'), ('Quick export SVG', 'export')]]
 
 def _icon(name, width=16, height=16, **kw):
     color = kw.pop('color', None)
@@ -126,7 +134,7 @@ _layout_body = html.Div(
         dcc.Store(id='view-mode', data='raw'),
         dcc.Store(id='active-plot-context', data=None),
         dcc.Store(id='current-plot-settings', data={}),
-        dcc.Store(id='toolbox-tab', data='pub-plotter'),
+        dcc.Store(id='toolbox-tab', data='plot-tools'),
         dcc.Store(id='dev-settings', data={'show': False}),
         dcc.Store(id='pub-data-store'),  # Store for publication plotter data
         dcc.Store(id='pub-plot-figure'),  # Store for the publication plot figure
@@ -156,6 +164,8 @@ _layout_body = html.Div(
         dcc.Store(id='ms-active-subplot-idx', data=0),  # which subplot row the active LCMS file is in
         dcc.Store(id='ms-plot-context-menu-store', data=None),  # {source, x, y, ts} from MS graph right-click
         dcc.Store(id='ms-plot-context-menu-close-store', data=0),
+        dcc.Store(id='figure-action-event', data=None),
+        dcc.Store(id='figure-context-close', data=0),
         dcc.Store(id='deconv-markers', data=[]),  # [{x, y}, ...] peak-center markers
         dcc.Store(id='deconv-result', data=None),  # serialized DeconvResult (preview/accept)
         dcc.Store(id='deconv-marker-click-store', data=None),  # browser-side marker click {x, ts}
@@ -319,15 +329,15 @@ _layout_body = html.Div(
                                         # callbacks reading controls in other panels keep working off-tab.
                                         dmc.Tabs(
                                             id='toolbox-tabs',
-                                            value='pub-plotter',
+                                            value='plot-tools',
                                             keepMounted=True,
                                             className='toolbox-tabs',
                                             style={'display': 'flex', 'flexDirection': 'column',
                                                    'flex': '1', 'overflow': 'hidden'},
                                             children=[
                                             dmc.TabsList([
-                                                dmc.TabsTab("Data Selector", value="pub-plotter"),
                                                 dmc.TabsTab("Plot Settings", value="plot-tools"),
+                                                dmc.TabsTab("Data Selector", value="pub-plotter"),
                                                 dmc.TabsTab("Integration", value="integration"),
                                                 dmc.TabsTab("Export", value="export"),
                                             ]),
@@ -362,8 +372,8 @@ _layout_body = html.Div(
                                                                 size='xs',
                                                                 mb=10,
                                                                 children=dmc.Group([
-                                                                    dmc.Radio(label='Superposed', value='overlay'),
-                                                                    dmc.Radio(label='Subplots', value='stacked'),
+                                                                    dmc.Radio(label='Overlay', value='overlay'),
+                                                                    dmc.Radio(label='Separate', value='stacked'),
                                                                 ], gap='md'),
                                                             ),
                                                             html.Div(id='pt-subplot-spacing-wrapper', children=[
@@ -381,18 +391,15 @@ _layout_body = html.Div(
                                                         html.Div([
                                                             html.Div([
                                                                 html.Div([html.Label('Rows', className='form-label'),
-                                                                          dmc.NumberInput(id='pub-subplot-rows', value=1, min=1, max=6, step=1,
+                                                                          dmc.NumberInput(id='pub-subplot-rows', debounce=True, clampBehavior='blur', allowDecimal=False, value=1, min=1, max=20, step=1,
                                                                                           size='xs', style={'width': '100%'})],
                                                                          style={'flex': '1'}),
                                                                 html.Span('×', style={'fontSize': '14px', 'color': '#555', 'alignSelf': 'flex-end', 'paddingBottom': '6px'}),
                                                                 html.Div([html.Label('Cols', className='form-label'),
-                                                                          dmc.NumberInput(id='pub-subplot-cols', value=1, min=1, max=6, step=1,
+                                                                          dmc.NumberInput(id='pub-subplot-cols', debounce=True, clampBehavior='blur', allowDecimal=False, value=1, min=1, max=20, step=1,
                                                                                           size='xs', style={'width': '100%'})],
                                                                          style={'flex': '1'}),
                                                             ], style={'display': 'flex', 'gap': '6px', 'alignItems': 'center'}),
-                                                            dmc.Checkbox(id='pub-zoom-sync', label='Sync zoom across subplots',
-                                                                         size='xs', checked=True,
-                                                                         style={'marginTop': '4px'}),
                                                         ], style={'marginBottom': '10px'}),
 
                                                         # -- Figure Dimensions (Publication tab only) --
@@ -400,12 +407,12 @@ _layout_body = html.Div(
                                                             html.Div('Figure Dimensions', className='toolbox-section-title'),
                                                             html.Div([
                                                                 html.Div([html.Label('Width', className='form-label'),
-                                                                          dmc.NumberInput(id='pub-fig-width-mm', value=84, min=20, max=210, step=1,
+                                                                          dmc.NumberInput(id='pub-fig-width-mm', debounce=True, clampBehavior='blur', value=84, min=1, step=1,
                                                                                           size='xs', style={'width': '100%'}, suffix=' mm')],
                                                                          style={'flex': '1'}),
                                                                 html.Span('×', style={'fontSize': '14px', 'color': '#555', 'alignSelf': 'flex-end', 'paddingBottom': '6px'}),
                                                                 html.Div([html.Label('Height', className='form-label'),
-                                                                          dmc.NumberInput(id='pub-fig-height-mm', value=63, min=15, max=297, step=1,
+                                                                          dmc.NumberInput(id='pub-fig-height-mm', debounce=True, clampBehavior='blur', value=63, min=1, step=1,
                                                                                           size='xs', style={'width': '100%'}, suffix=' mm')],
                                                                          style={'flex': '1'}),
                                                             ], style={'display': 'flex', 'gap': '6px', 'alignItems': 'center', 'marginBottom': '10px'}),
@@ -862,6 +869,26 @@ _layout_body = html.Div(
                                     className='panel content-panel',
                                     style={'display': 'flex', 'flexDirection': 'column', 'overflow': 'hidden'},
                                     children=[
+                                        html.Div(id='plot-toolbar', className='plot-toolbar', role='toolbar',
+                                                 **{'aria-label': 'Plot tools'}, children=[
+                                            html.Div(className='plot-toolbar-group', children=[
+                                                html.Button('Overlay', id='plot-tool-overlay', n_clicks=0,
+                                                            className='plot-tool active', title='Draw signals in the same pane'),
+                                                html.Button('Separate', id='plot-tool-separate', n_clicks=0,
+                                                            className='plot-tool', title='Draw each signal in its own pane'),
+                                            ]),
+                                            dmc.Checkbox(id='pub-zoom-sync', label='Link X axes', checked=True, size='xs'),
+                                            html.Div(className='plot-toolbar-group', children=[
+                                                html.Span('Y scale', className='plot-toolbar-label'),
+                                                dmc.SegmentedControl(id='plot-y-scope', value='independent', size='xs',
+                                                    data=[{'label': 'Per pane', 'value': 'independent'},
+                                                          {'label': 'Global', 'value': 'global'}]),
+                                            ], title='Global scaling links signals with the same measurement units'),
+                                            html.Button('Integrate', id='plot-tool-integrate', n_clicks=0,
+                                                        className='plot-tool', title='Toggle baseline drawing. Shift-drag also integrates when off.',
+                                                        **{'aria-pressed': 'false'}),
+                                            html.Div(id='plot-toolbar-sync', style={'display': 'none'}),
+                                        ]),
                                         html.Div(
                                             className='panel-content viz-container',
                                             style={'position': 'relative'},
@@ -886,7 +913,7 @@ _layout_body = html.Div(
                                                         )
                                                     ),
                                                     responsive=True,
-                                                    style={'width': '100%', 'height': '100%'},
+                                                    style={'display': 'none'},
                                                     config={
                                                         'responsive': True,
                                                         'displayModeBar': False,
@@ -896,6 +923,9 @@ _layout_body = html.Div(
                                                         'edits': {'shapePosition': True},
                                                     },
                                                 ),
+                                                html.Div(id='plot-workspace', style={
+                                                    'width': '100%', 'height': '100%', 'position': 'relative'}),
+                                                html.Div(id='plot-workspace-sync', style={'display': 'none'}),
                                                 html.Div(
                                                     id='lcms-scan-cursor-overlay',
                                                     style={
@@ -1511,7 +1541,9 @@ _layout_body = html.Div(
                         dmc.MenuItem('Deconvolute', id='ctx-deconvolve-item'),
                         dmc.MenuItem('Show Mass', id='ctx-show-mass-item'),
                         dmc.MenuItem('Integrate in All Files', id='ctx-integrate-item'),
-                    ]),
+                        dmc.MenuDivider(),
+                        *_figure_actions('peak'),
+                    ], id='context-menu-dropdown'),
                 ],
             ),
         ),
@@ -1545,11 +1577,21 @@ _layout_body = html.Div(
                     dmc.MenuTarget(html.Div(style={'width': '1px', 'height': '1px'})),
                     dmc.MenuDropdown([
                         dmc.MenuItem('Open as new plot', id='ms-ctx-open-new-plot'),
-                    ]),
+                        dmc.MenuDivider(),
+                        *_figure_actions('ms'),
+                    ], id='ms-plot-context-dropdown'),
                 ],
             ),
         ),
         # -- Right-click plot customization panel (axis editor) --
+        html.Div(id='figure-context-anchor',
+            style={'position': 'fixed', 'left': '0px', 'top': '0px',
+                   'width': '1px', 'height': '1px', 'zIndex': 4000, 'pointerEvents': 'none'},
+            children=dmc.Menu(id='figure-context-menu', opened=False, position='bottom-start',
+                withinPortal=True, shadow='md', children=[
+                    dmc.MenuTarget(html.Div(style={'width': '1px', 'height': '1px'})),
+                    dmc.MenuDropdown(_figure_actions('figure'), id='figure-context-dropdown'),
+                ])),
         html.Div(
             id='axis-context-panel',
             className='axis-context-panel',
@@ -1903,6 +1945,33 @@ _layout_body = html.Div(
 )
 
 # DMC 2.x requires a MantineProvider ancestor for any DMC component to render.
+def _add_figure_actions_to_editors(component):
+    children = getattr(component, 'children', None)
+    if getattr(component, 'id', None) in (
+            'axis-context-panel', 'legend-context-panel', 'trace-context-panel',
+            'title-context-panel', 'label-context-panel'):
+        component.children = [*(children or []), html.Div(
+            _figure_actions(component.id, menu=False), className='figure-editor-actions')]
+        return
+    for child in children if isinstance(children, (list, tuple)) else [children]:
+        if hasattr(child, 'children'):
+            _add_figure_actions_to_editors(child)
+
+
+_add_figure_actions_to_editors(_layout_body)
+
+
+def _commit_numeric_inputs_on_enter(component):
+    if isinstance(component, dmc.NumberInput):
+        component.debounce = True
+    children = getattr(component, 'children', None)
+    for child in children if isinstance(children, (list, tuple)) else [children]:
+        if child is not None:
+            _commit_numeric_inputs_on_enter(child)
+
+
+_commit_numeric_inputs_on_enter(_layout_body)
+
 app.layout = dmc.MantineProvider(
     theme={"primaryColor": "dark"},
     children=[_layout_body],
@@ -1934,6 +2003,7 @@ register_calibration_callbacks(app, data_manager)
 register_plot_settings_callbacks(app, data_manager)
 register_lcms_callbacks(app, data_manager)
 register_ms_context_menu_callbacks(app, data_manager)
+register_figure_actions_callbacks(app)
 
 # Toolbox tabs (DMC) <-> toolbox-tab store, kept in sync both ways.
 # dmc.Tabs owns the visible panel; the store stays the source of truth for
@@ -1960,12 +2030,33 @@ def toolbox_tab_to_store(tab_value, current):
 )
 def store_to_toolbox_tab(toolbox_tab, tab_value):
     """Reflect external toolbox-tab changes (context restore) into the UI."""
-    target = toolbox_tab or 'pub-plotter'
+    target = toolbox_tab or 'plot-tools'
     if target != tab_value:
         return target
     return dash.no_update
 
+clientside_callback(
+    ClientsideFunction(namespace='publicationWorkspace', function_name='update'),
+    Output('pub-workspace-sync', 'children'),
+    [Input('pub-preview-graph', 'data'), Input('active-plot-tab', 'data'),
+     Input('plot-tabs', 'data'), Input('pub-preset', 'value')],
+)
+
 # Clientside callback for resize functionality
+clientside_callback(
+    ClientsideFunction(namespace='plotToolbar', function_name='update'),
+    Output('plot-toolbar-sync', 'children'),
+    [Input('plot-tool-overlay', 'n_clicks'), Input('plot-tool-separate', 'n_clicks'),
+     Input('plot-tool-integrate', 'n_clicks'), Input('current-plot-settings', 'data'),
+     Input('baseline-mode', 'data')],
+)
+
+clientside_callback(
+    ClientsideFunction(namespace='plotWorkspace', function_name='update'),
+    Output('plot-workspace-sync', 'children'),
+    [Input('main-plot', 'figure'), Input('active-plot-tab', 'data'), Input('plot-tabs', 'data')],
+)
+
 clientside_callback(
     ClientsideFunction(namespace='resize', function_name='initializeResizeHandlers'),
     Output('resize-init-trigger', 'children'),
@@ -2036,10 +2127,11 @@ def store_to_analysis_tab(active_tab, tab_value):
     [State('plot-tabs', 'data'),
      State('active-plot-tab', 'data'),
      State('main-plot', 'figure'),
-     State('custom-plot-figures', 'data')],
+     State('custom-plot-figures', 'data'),
+     State('current-plot-settings', 'data')],
     prevent_initial_call=True,
 )
-def open_publication_preview(n_clicks, tabs, active_plot_tab, main_figure, figures):
+def open_publication_preview(n_clicks, tabs, active_plot_tab, main_figure, figures, plot_settings):
     if not n_clicks or not active_plot_tab:
         return dash.no_update, dash.no_update, dash.no_update, dash.no_update
     tabs = tabs or []
@@ -2063,6 +2155,8 @@ def open_publication_preview(n_clicks, tabs, active_plot_tab, main_figure, figur
     elif source_tab.get('type') == 'custom':
         entry['figure'] = (figures.get(active_plot_tab) or {}).get('figure', main_figure)
 
+    from services.figure_actions import publication_plot_settings
+    entry['plot_settings'] = publication_plot_settings(entry.get('figure') or {}, plot_settings)
     figures[pub_id] = entry
     return [*tabs, pub_tab], pub_id, figures, 'plot-tools'
 

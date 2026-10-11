@@ -133,6 +133,8 @@ def add_peak_traces(fig, all_peaks, time_arr, signal_arr, selected_peak_id=None,
     add_kw = dict(row=row, col=1) if _has_grid else {}
 
     for i, peak in enumerate(all_peaks):
+        trace_start = len(fig.data)
+        shape_start = len(fig.layout.shapes)
         is_selected = peak.peak_id == selected_peak_id
         base_color = peak.color
         fill_color = rgba(base_color, 0.58 if is_selected else 0.30) if base_color else FILL_COLORS[i % len(FILL_COLORS)]
@@ -180,6 +182,20 @@ def add_peak_traces(fig, all_peaks, time_arr, signal_arr, selected_peak_id=None,
                 showlegend=False,
                 meta='peak_overlay',
             ), **add_kw)
+
+        # Overlay traces can have their own Y scales. Peak fills and handles
+        # must follow the axis of the data file rather than the first axis.
+        if not _has_grid:
+            source = next((trace for trace in fig.data
+                           if isinstance(trace.meta, dict)
+                           and trace.meta.get('file_id') == peak.file_id), None)
+            if source:
+                for trace in fig.data[trace_start:]:
+                    trace.xaxis = source.xaxis or 'x'
+                    trace.yaxis = source.yaxis or 'y'
+                for shape in fig.layout.shapes[shape_start:]:
+                    shape.xref = source.xaxis or 'x'
+                    shape.yref = source.yaxis or 'y'
 
 
 # Distinct colors for deconvolution preview components (matches the sandbox).

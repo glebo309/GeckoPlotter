@@ -54,7 +54,7 @@ def create_paper_mock():
             html.Div(style={'flex': '1'}),
             html.Span(id='pub-dim-readout', style={'fontSize': '11px', 'color': '#888'}),
             dmc.NumberInput(
-                id='pub-dpi', value=300, min=72, max=1200, step=50,
+                id='pub-dpi', debounce=True, value=300, min=72, max=1200, step=50,
                 size='xs', style={'width': '80px'}, suffix=' DPI',
             ),
             dmc.Select(
@@ -71,17 +71,9 @@ def create_paper_mock():
     figure_slot = html.Div(
         id='pub-figure-slot',
         children=[
-            dcc.Graph(
-                id='pub-preview-graph', figure={},
-                responsive=True,
-                style={'width': '100%', 'height': '100%'},
-                config={
-                    'responsive': True, 'displayModeBar': False,
-                    'displaylogo': False, 'staticPlot': False,
-                    'scrollZoom': False,
-                    'doubleClick': 'reset+autosize',
-                },
-            ),
+            dcc.Store(id='pub-preview-graph', data={}),
+            html.Div(id='pub-plot-workspace', style={'width':'100%', 'height':'100%', 'position':'relative'}),
+            html.Div(id='pub-workspace-sync', style={'display':'none'}),
         ],
         style={'margin': '4px 0', 'overflow': 'hidden', 'aspectRatio': '84 / 63'},
     )
@@ -181,17 +173,7 @@ def create_paper_mock():
     slide_figure_slot = html.Div(
         id='pub-slide-figure-slot',
         children=[
-            dcc.Graph(
-                id='pub-slide-graph', figure={},
-                responsive=True,
-                style={'width': '100%', 'height': '100%'},
-                config={
-                    'responsive': True, 'displayModeBar': False,
-                    'displaylogo': False, 'staticPlot': False,
-                    'scrollZoom': False,
-                    'doubleClick': 'reset+autosize',
-                },
-            ),
+            html.Div(id='pub-slide-workspace', style={'width':'100%', 'height':'100%', 'position':'relative'}),
         ],
         style={
             'overflow': 'hidden',

@@ -285,7 +285,7 @@ class DataManager:
             'file_id': file_id,
             'view_mode': 'raw',
             'active_tab': 'data-overview',
-            'toolbox_tab': 'pub-plotter',
+            'toolbox_tab': 'plot-tools',
             'plot_settings': {},
             'dev_settings': {'show': False},
             'pub_selections': get_empty_selections(),

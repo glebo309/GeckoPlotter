@@ -3,6 +3,7 @@
     'use strict';
 
     function getGraphDiv(graphId) {
+        if (graphId === 'main-plot' && window.geckoActivePlot) return window.geckoActivePlot();
         var root = document.getElementById(graphId);
         if (!root) return null;
         return root.querySelector('.js-plotly-plot') || root;
@@ -13,6 +14,7 @@
     function graphDivFromEvent(event) {
         if (!event || !event.target || typeof event.target.closest !== 'function') return null;
         var gd = event.target.closest('.js-plotly-plot');
+        if (gd && gd.dataset.workspacePlot) return gd;
         if (gd && GRAPH_IDS.indexOf(gd.id) !== -1) return gd;
         for (var i = 0; i < GRAPH_IDS.length; i++) {
             var root = event.target.closest('#' + GRAPH_IDS[i]);
@@ -84,6 +86,7 @@
     }
 
     function syncDrawMode(graphId, mode) {
+        window.__geckoBaselineMode = mode;
         var gd = getGraphDiv(graphId);
         if (!gd || !window.Plotly) return;
         gd.__geckoManualIntegrationMode = mode;
@@ -287,6 +290,15 @@
 
         var plots = gd._fullLayout._plots;
         if (plots) {
+            var selectedTrace = (gd.data || []).find(function (trace) {
+                return trace.meta && trace.meta.file_id === window.__geckoActiveFile;
+            });
+            var selectedKey = selectedTrace ? (selectedTrace.xaxis || 'x') + (selectedTrace.yaxis || 'y') : null;
+            var selectedPlot = selectedKey && plots[selectedKey];
+            if (selectedPlot && selectedPlot.yaxis && selectedPlot.yaxis.overlaying) {
+                return {key: selectedKey, xaxis: selectedPlot.xaxis, yaxis: selectedPlot.yaxis,
+                    plotArea: hitDrag, bounds: hitBounds};
+            }
             // The drag rect's parent <g> has the subplot key as its class
             // e.g. <g class="xy">, <g class="x2y2">
             var parentG = hitDrag.parentNode;
@@ -707,6 +719,7 @@
         if (!gd) return false;
         if (gd.__geckoManualIntegrationClickInstalled) return true;
         gd.__geckoGraphId = graphId;
+        gd.__geckoManualIntegrationMode = window.__geckoBaselineMode || 'navigate';
 
         if (typeof gd.on === 'function') {
             gd.on('plotly_click', function (eventData) {
@@ -717,6 +730,7 @@
                 }
             });
             gd.on('plotly_doubleclick', function () {
+                if (Date.now() - (gd.__geckoAxisResetAt || 0) < 500) return;
                 gd.__geckoManualIntegrationLastDoubleClickAt = Date.now();
                 clearEmptyClickTimer(gd);
                 resetAxes(gd);
@@ -736,7 +750,8 @@
             consumeSelectedBlankClick(gd, event);
         }, true);
 
-        gd.addEventListener('dblclick', function () {
+        gd.addEventListener('dblclick', function (event) {
+            if (window.GeckoPlotterAxisReset && window.GeckoPlotterAxisReset.axisAtEvent(gd,event)) return;
             gd.__geckoManualIntegrationLastDoubleClickAt = Date.now();
             clearEmptyClickTimer(gd);
             resetAxes(gd);
@@ -830,6 +845,7 @@
     }
 
     window.GeckoPlotterManualIntegration = {
+        subplotAtEvent: subplotAtEvent,
         clearTransientShapes: clearTransientShapes,
         syncSelectedShape: syncSelectedShape,
         syncDrawMode: syncDrawMode,
@@ -844,4 +860,5 @@
     window.addEventListener('load', function () {
         window.setTimeout(installEmptyClickHandler, 100);
     });
+    document.addEventListener('gecko:plot-ready', installEmptyClickHandler);
 })();
