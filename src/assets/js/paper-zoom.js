@@ -2,7 +2,7 @@
  * Zoom and navigate the publication preview mock.
  * - Ctrl+wheel / pinch: zoom the visible paper or slide preview
  * - Arrow keys: pan the visible preview container when focused/hovered
- * - Browser-level zoom is blocked so the app chrome does not scale
+ * - Browser keyboard zoom remains available outside this preview gesture
  */
 (function () {
     var MIN_SCALE = 0.3;
@@ -11,7 +11,7 @@
     var PAN_STEP = 60;
 
     function visible(el) {
-        return !!el && window.getComputedStyle(el).display !== 'none';
+        return !!el && window.getComputedStyle(el).display !== 'none' && el.getBoundingClientRect().width > 0;
     }
 
     function getActivePreview() {
@@ -26,11 +26,13 @@
             };
         }
 
-        return {
+        if (visible(paperContainer)) return {
             container: paperContainer,
             wrapper: document.getElementById('pub-paper-page-wrapper'),
             page: document.getElementById('pub-paper-page')
         };
+        return {};
+
     }
 
     function setPreviewFocusability() {
@@ -114,25 +116,15 @@
         applyScale(anchor);
     }
 
-    // Block ALL ctrl+wheel / pinch events at the document level so the browser
-    // never zooms the page. Then apply preview zoom when the event originated
-    // inside whichever publication preview container is visible.
+    // Pinch/ctrl-wheel magnifies only the page preview under the pointer.
+    // Standard browser zoom shortcuts remain available everywhere.
     document.addEventListener('wheel', function (e) {
         if (!e.ctrlKey) return;
-        e.preventDefault();
-
         var preview = getActivePreview();
         if (!preview.container || !preview.container.contains(e.target)) return;
-
+        e.preventDefault();
         zoom(-e.deltaY * 0.01, { clientX: e.clientX, clientY: e.clientY });
     }, { passive: false });
-
-    // Block Ctrl/Cmd +/-/0 keyboard zoom from changing browser zoom.
-    document.addEventListener('keydown', function (e) {
-        if ((e.ctrlKey || e.metaKey) && (e.key === '+' || e.key === '-' || e.key === '=' || e.key === '0')) {
-            e.preventDefault();
-        }
-    });
 
     // Arrow keys pan the active visible preview container.
     document.addEventListener('keydown', function (e) {

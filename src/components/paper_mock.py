@@ -6,12 +6,15 @@ import dash_mantine_components as dmc
 
 PUB_PRESETS = {
     'single-col': {'w': 992, 'h': 744, 'mm_w': 84, 'mm_h': 63, 'label': 'Single-column (84 mm)'},
-    'full-width': {'w': 2055, 'h': 1541, 'mm_w': 174, 'mm_h': 131, 'label': 'Full-width (174 mm)'},
+    'full-width': {'w': 2055, 'h': 1228, 'mm_w': 174, 'mm_h': 104, 'label': 'Full-width (174 mm)'},
     'presentation': {'w': 1920, 'h': 1080, 'mm_w': 254, 'mm_h': 143, 'label': 'Presentation (16:9)'},
 }
 
 PAGE_SCREEN_WIDTH = 680
 PAGE_SCREEN_HEIGHT = int(PAGE_SCREEN_WIDTH * 297 / 210)
+PAGE_PX_PER_MM = PAGE_SCREEN_WIDTH / 210
+PAGE_SIDE_MARGIN = PAGE_PX_PER_MM * 18
+PAGE_COLUMN_GAP = PAGE_PX_PER_MM * 6
 
 
 def _paragraph(lines, last_width=55):
@@ -36,12 +39,13 @@ def _section_header(text):
 def create_paper_mock():
     preset_bar = html.Div(
         style={
-            'display': 'flex', 'alignItems': 'center', 'gap': '12px',
+            'display': 'flex', 'alignItems': 'center', 'gap': '8px',
             'padding': '8px 12px', 'borderBottom': '1px solid #e0e0e0',
-            'background': '#fafafa', 'flexShrink': '0',
+            'background': '#fafafa', 'flexShrink': '0', 'flexWrap': 'wrap',
         },
         children=[
-            html.Span('Preset:', style={'fontSize': '12px', 'fontWeight': '600', 'color': '#555'}),
+            dmc.SegmentedControl(id='pub-view-mode', value='page', size='xs',
+                data=[{'label':'Page preview','value':'page'}, {'label':'Figure','value':'figure'}]),
             dmc.SegmentedControl(
                 id='pub-preset', value='single-col',
                 data=[
@@ -51,8 +55,9 @@ def create_paper_mock():
                 ],
                 size='xs',
             ),
-            html.Div(style={'flex': '1'}),
-            html.Span(id='pub-dim-readout', style={'fontSize': '11px', 'color': '#888'}),
+            html.Div(id='pub-export-controls', style={'display':'flex','alignItems':'center',
+                'gap':'8px','marginLeft':'auto','flexShrink':0}, children=[
+            html.Span(id='pub-dim-readout', style={'fontSize': '11px', 'color': '#888', 'whiteSpace':'nowrap'}),
             dmc.NumberInput(
                 id='pub-dpi', debounce=True, value=300, min=72, max=1200, step=50,
                 size='xs', style={'width': '80px'}, suffix=' DPI',
@@ -64,7 +69,8 @@ def create_paper_mock():
                 clearable=False, allowDeselect=False,
             ),
             dmc.Button('Export', id='pub-export-btn', size='xs', variant='filled'),
-            dcc.Download(id='pub-export-download'),
+            ]),
+            html.Span(id='pub-export-status', role='status', style={'fontSize':'11px','color':'#666'}),
         ],
     )
 
@@ -75,7 +81,7 @@ def create_paper_mock():
             html.Div(id='pub-plot-workspace', style={'width':'100%', 'height':'100%', 'position':'relative'}),
             html.Div(id='pub-workspace-sync', style={'display':'none'}),
         ],
-        style={'margin': '4px 0', 'overflow': 'hidden', 'aspectRatio': '84 / 63'},
+        style={'margin': '4px 0', 'overflow': 'hidden', 'aspectRatio': '84 / 63', 'width': f'{84 * PAGE_PX_PER_MM}px'},
     )
 
     caption = html.Div(
@@ -135,7 +141,7 @@ def create_paper_mock():
 
     two_col_body = html.Div(
         id='pub-two-col-body',
-        style={'display': 'flex', 'gap': '10px'},
+        style={'display': 'flex', 'gap': f'{PAGE_COLUMN_GAP}px'},
         children=[left_col, right_col],
     )
 
@@ -145,11 +151,12 @@ def create_paper_mock():
             'width': f'{PAGE_SCREEN_WIDTH}px',
             'minHeight': f'{PAGE_SCREEN_HEIGHT}px',
             'background': 'white',
-            'padding': '24px 28px',
+            'paddingTop': '24px', 'paddingBottom': '24px',
+            'paddingLeft': f'{PAGE_SIDE_MARGIN}px', 'paddingRight': f'{PAGE_SIDE_MARGIN}px',
             'boxShadow': '0 2px 12px rgba(0,0,0,0.15)',
             'fontFamily': 'Arial, sans-serif',
             'fontSize': '6px', 'lineHeight': '1.4',
-            'border': '1px solid #ddd', 'boxSizing': 'border-box',
+            'outline': '1px solid #ddd', 'boxSizing': 'border-box',
         },
         children=[
             html.Div('Title of the Research Paper', style={
@@ -203,11 +210,11 @@ def create_paper_mock():
                 'marginBottom': '12px',
             }),
             html.Div(
-                style={'flex': '1', 'display': 'flex', 'gap': '24px',
+                style={'flex': '1', 'display': 'flex', 'gap': '16px',
                        'alignItems': 'stretch', 'minHeight': '0'},
                 children=[
-                    html.Div(slide_figure_slot, style={
-                        'flex': '1.8', 'display': 'flex', 'alignItems': 'center',
+                    html.Div(slide_figure_slot, id='pub-slide-chart-column', style={
+                        'flex': '1 1 0', 'minWidth': 0, 'display': 'flex', 'alignItems': 'center',
                     }),
                     html.Div([
                         html.Div('Key points', style={
@@ -222,8 +229,9 @@ def create_paper_mock():
                             'fontSize': '11px', 'lineHeight': '1.55',
                             'paddingLeft': '18px', 'margin': '0', 'color': '#444',
                         }),
-                    ], style={
-                        'flex': '1', 'borderLeft': '3px solid #1f77b4',
+                    ], id='pub-slide-notes', style={
+                        'flex': '0 0 150px', 'minWidth':0, 'boxSizing':'border-box',
+                        'borderLeft': '3px solid #1f77b4',
                         'paddingLeft': '16px', 'alignSelf': 'center',
                     }),
                 ],
@@ -271,5 +279,10 @@ def create_paper_mock():
             'position': 'absolute', 'top': '0', 'left': '0',
             'zIndex': '10', 'background': '#e8e8e8',
         },
-        children=[preset_bar, paper_container, slide_container],
+        children=[preset_bar,
+            html.Div(id='pub-figure-container', style={'flex':'1','minHeight':0,'position':'relative',
+                'padding':'24px','display':'none','background':'#edf0ed'}, children=[
+                html.Div(id='pub-figure-workspace', style={'position':'relative','width':'100%','height':'100%',
+                    'minHeight':0,'flex':'1'})]),
+            paper_container, slide_container],
     )

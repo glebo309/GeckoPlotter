@@ -18,8 +18,9 @@ test('publication snapshots and SVG export use the clicked figure, including its
     assert.deepEqual(Array.from(event.figure.layout.xaxis.range),[100,200]);
     assert.equal(event.figure.data[0].name,'Peak mass');
     window.GeckoFigureActions.run('export',gd);
-    assert.equal(downloads[0][0],gd);
-    assert.equal(downloads[0][1].format,'svg');
+    const exported = props.find(p=>p[0]==='figure-export-request')[1].data;
+    assert.equal(exported.format,'svg');
+    assert.deepEqual(Array.from(exported.figure.layout.xaxis.range),[100,200]);
 });
 
 test('a Dash menu-item click dispatches publication using the right-clicked overlay', () => {
@@ -64,8 +65,24 @@ test('publication is captured before the menu auto-closes and unmounts its Dash 
     const click = listeners.find(l=>l.name==='click' && l.capture);
     assert.ok(click, 'handle the action before Mantine removes the clicked menu item');
     let stopped = false;
-    click.fn({target:{closest:()=>({getAttribute:()=> 'publication'})},preventDefault(){},stopPropagation(){stopped=true;}});
+    click.fn({target:{closest:selector=>selector==='[data-figure-action]' ? ({getAttribute:()=> 'publication'}) : null},preventDefault(){},stopPropagation(){stopped=true;}});
     assert.equal(props.filter(p=>p[0]==='figure-action-event').length,1);
     assert.equal(props.find(p=>p[0]==='figure-action-event')[1].data.figure.data[0].name,'UV');
     assert.ok(stopped, 'avoid dispatching the same action a second time through Dash');
+});
+
+test('toolbar export captures the visible graph and its resolved current ranges', () => {
+    const stale={data:[{name:'old'}],layout:{},getBoundingClientRect:()=>({width:0,height:0})};
+    const active={data:[{name:'UV',x:new Float64Array([1,2]),y:[3,4]}],layout:{xaxis:{autorange:true}},
+        _fullLayout:{width:600,height:400,xaxis:{range:[6,9],type:'linear'}},
+        getBoundingClientRect:()=>({width:1200,height:800})};
+    const window={Plotly:{},dash_clientside:{no_update:{},callback_context:{triggered:[{prop_id:'exp-fig-btn.n_clicks'}]}}};
+    const document={addEventListener(){},getElementById:()=>null,querySelectorAll:()=>[stale,active]};
+    vm.runInNewContext(fs.readFileSync('src/assets/js/figure-actions.js','utf8'),{window,document,ArrayBuffer,Date,JSON});
+    const request=window.dash_clientside.geckoFigureActions.exportRequest(1,0,'svg','current',84,63,300,'png',84,63,300);
+    assert.equal(request.figure.data[0].name,'UV');
+    assert.deepEqual(Array.from(request.figure.layout.xaxis.range),[6,9]);
+    assert.equal(request.figure.layout.xaxis.autorange,false);
+    assert.equal(request.render_width,600);
+    assert.deepEqual(Array.from(request.figure.data[0].x),[1,2]);
 });

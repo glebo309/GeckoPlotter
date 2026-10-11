@@ -1,0 +1,214 @@
+"""Removal is a reversible workspace action, independent of peak undo."""
+from dataclasses import replace
+
+import dash
+import pytest
+
+from callbacks.file_tree_callbacks import register_file_tree_callbacks
+from services.data_store import Bundle, BundleType, DataStore
+from services.peak_service import Peak
+from test_file_controls import component
+
+
+def populated():
+    store = DataStore()
+    store.peak_service.clear_all_peaks()
+    store.add_bundle(Bundle('sample', 'Sample', BundleType.LCMS,
+                            component_list=[component('tic'), component('uv')]))
+    store.add_bundle(Bundle('other', 'Other', BundleType.GENERIC,
+                            component_list=[component('other-data')]))
+    store.file_ui_state['tic'] = {'plot_settings': {'layout_mode': 'overlay', 'xmin': 4}}
+    store.visibility_state['tic'] = False
+    store.collapse_state['sample'] = 'expanded'
+    store.peak_service._peaks['tic'] = [Peak('p1', 'tic', 'Peak 1', 1, 0, 2, 3, 3, 2)]
+    return store
+
+
+def test_disclosure_has_no_selection_callback():
+    app = dash.Dash(__name__)
+    register_file_tree_callbacks(app, DataStore())
+    for cb in app.callback_map.values():
+        if any('expand-btn' in value['id'] for value in cb['inputs']):
+            outputs = cb['output'] if isinstance(cb['output'], list) else [cb['output']]
+            assert all(out.component_id != 'active-file' for out in outputs)
+
+
+def test_remove_and_undo_bundle_restore_data_peaks_settings_without_peak_undo():
+    store = populated()
+    signal = store.get_data_by_id('tic')['data']
+    removal = store.file_removal_service.remove('sample', active_file='tic')
+    assert removal.label == 'Sample'
+    assert store.get_bundle('sample') is None
+    assert 'tic' not in store.peak_service._peaks
+    assert 'tic' not in store.file_ui_state
+    assert store.peak_service.can_undo is False
+    # Later edits on another dataset must survive undo removal.
+    store.file_ui_state['other-data'] = {'changed': True}
+    restored = store.file_removal_service.undo()
+    assert restored.active_file == 'tic'
+    assert store.get_data_by_id('tic')['data'] is signal  # no duplicate large arrays
+    assert store.file_ui_state['tic']['plot_settings']['xmin'] == 4
+    assert store.visibility_state['tic'] is False
+    assert store.collapse_state['sample'] == 'expanded'
+    assert store.peak_service._peaks['tic'][0].peak_id == 'p1'
+    assert store.file_ui_state['other-data'] == {'changed': True}
+    assert list(store.all_bundles()) == ['sample', 'other']
+
+
+def test_undo_component_keeps_sibling_edits_and_new_files():
+    store = populated()
+    store.file_removal_service.remove('tic', active_file='tic')
+    store.get_bundle('sample').component_list[0].metadata['edited'] = True
+    store.add_bundle(Bundle('new', 'New', BundleType.GENERIC, component_list=[component('new-data')]))
+    store.file_removal_service.undo()
+    assert [c.component_id for c in store.get_bundle('sample').component_list] == ['tic', 'uv']
+    assert store.get_bundle('sample').component_list[1].metadata['edited'] is True
+    assert store.get_bundle('new') is not None
+
+
+def test_remove_all_and_undo_preserve_temp_source_files(tmp_path):
+    store = populated()
+    path = tmp_path / 'source.dx'
+    path.write_bytes(b'source data')
+    store.temp_files.append(str(path))
+    store.file_removal_service.remove_all(active_file='tic')
+    assert store.get_loaded_files_list() == []
+    assert path.exists()
+    store.file_removal_service.undo()
+    assert len(store.get_loaded_files_list()) == 2
+    assert store.get_data_by_id('tic') is not None
+    assert store.peak_service._peaks['tic'][0].name == 'Peak 1'
+
+
+def test_remove_well_changes_real_dataframe_and_undo_restores_it():
+    from src.ingestion.types import ColumnRole, PlotHint
+    store = populated()
+    trace = component('plate')
+    trace.dataframe = trace.dataframe.rename(columns={'signal': 'A1'})
+    trace.dataframe['B1'] = [1, 2, 3]
+    trace.column_roles = {'time': ColumnRole.X, 'A1': ColumnRole.Y, 'B1': ColumnRole.Y}
+    trace.metadata = {'filled_wells': ['A1', 'B1']}
+    trace.standardized = replace(trace.standardized, data=trace.dataframe,
+                                 column_roles=trace.column_roles, plot_hint=PlotHint.MULTI_Y,
+                                 metadata=trace.metadata)
+    store.add_bundle(Bundle('plate-bundle', 'Plate', BundleType.PLATE_READER, component_list=[trace]))
+    store.file_removal_service.remove('plate|A1', active_file='plate|A1')
+    assert 'A1' not in store.get_data_by_id('plate')['data'].columns
+    assert 'A1' not in store.get_data_by_id('plate')['standardized'].y_columns
+    store.file_removal_service.undo()
+    assert list(store.get_data_by_id('plate')['data'].columns) == ['time', 'A1', 'B1']
+
+
+def test_unknown_removal_does_not_replace_available_undo():
+    store = populated()
+    store.file_removal_service.remove('tic')
+    assert store.file_removal_service.remove('missing') is None
+    assert store.file_removal_service.undo().label == 'tic'
+
+
+def test_remove_callback_exposes_undo_and_undo_restores_selection(monkeypatch):
+    import json
+    from types import SimpleNamespace
+    from callbacks import file_tree_callbacks
+    store = populated()
+    app = dash.Dash(__name__)
+    register_file_tree_callbacks(app, store)
+    callbacks = {cb['callback'].__wrapped__.__name__: cb['callback'].__wrapped__
+                 for cb in app.callback_map.values()}
+    monkeypatch.setattr(file_tree_callbacks, 'callback_context', SimpleNamespace(
+        triggered=[{'prop_id': json.dumps({'type': 'delete-btn', 'index': 'sample'}) + '.n_clicks', 'value': 1}]))
+    result = callbacks['handle_file_deletion']([1], store.get_loaded_files_list(), 'tic', 2)
+    assert result[8] == {'display': 'flex'}
+    assert 'Sample' in result[9]
+    assert result[10] is False
+    restored = callbacks['undo_file_removal'](1, 3)
+    assert restored[3] == 'tic'
+    assert restored[2] == 4
+    assert restored[10] is True
+    assert 'Restored' in restored[9]
+    assert 'tic' in restored[11]
+
+
+def test_bundle_visibility_includes_primary_without_selecting(monkeypatch):
+    import json
+    from types import SimpleNamespace
+    from callbacks import file_tree_callbacks
+    store = populated()
+    store.visibility_state.clear()
+    app = dash.Dash(__name__)
+    register_file_tree_callbacks(app, store)
+    callback = next(cb['callback'].__wrapped__ for cb in app.callback_map.values()
+                    if cb['callback'].__wrapped__.__name__ == 'handle_visibility_toggles')
+    monkeypatch.setattr(file_tree_callbacks, 'callback_context', SimpleNamespace(
+        triggered=[{'prop_id': json.dumps({'type': 'visibility-btn', 'index': 'sample'}) + '.n_clicks', 'value': 1}]))
+    _, hidden = callback([1], [{'type': 'visibility-btn', 'index': 'sample'}], 3)
+    assert set(hidden) == {'sample', 'tic', 'uv'}
+
+
+def test_clear_all_callback_offers_undo(monkeypatch):
+    from callbacks.upload_callbacks import register_clear_callbacks
+    store = populated()
+    app = dash.Dash(__name__)
+    register_clear_callbacks(app, store)
+    callback = next(cb['callback'].__wrapped__ for cb in app.callback_map.values()
+                    if cb['callback'].__wrapped__.__name__ == 'clear_all_files')
+    result = callback(1, 'tic', 0)
+    assert result[0] == []
+    assert result[7] == {'display': 'flex'}
+    assert result[9] is False
+    assert store.file_removal_service.undo().active_file == 'tic'
+
+
+def test_tree_rows_are_keyboard_selectable_and_controls_announce_expansion():
+    from callbacks.upload_callbacks import render_bundle_item_selected
+    store = populated()
+    item = render_bundle_item_selected({'id': 'sample', 'name': 'Sample', 'children': []}, data_manager=store)
+    def walk(component):
+        if isinstance(component, (list, tuple)):
+            for child in component:
+                yield from walk(child)
+        elif hasattr(component, 'to_plotly_json'):
+            props = component.to_plotly_json()['props']
+            yield props
+            yield from walk(props.get('children', []))
+    props = list(walk(item))
+    row = next(p for p in props if p.get('id') == {'type': 'file-tree-item', 'index': 'sample'})
+    assert row['tabIndex'] == 0
+    assert row['role'] == 'button'
+    disclosure = next(p for p in props if p.get('id') == {'type': 'expand-btn', 'index': 'sample'})
+    assert disclosure['aria-expanded'] == 'true'
+    assert disclosure['className'] == 'tree-disclosure-btn'
+
+
+def test_removing_last_well_removes_empty_file_and_undo_restores_it():
+    from src.ingestion.types import ColumnRole, PlotHint
+    store = DataStore()
+    trace = component('plate')
+    trace.dataframe = trace.dataframe.rename(columns={'signal': 'A1'})
+    trace.column_roles = {'time': ColumnRole.X, 'A1': ColumnRole.Y}
+    trace.metadata = {'filled_wells': ['A1']}
+    trace.standardized = replace(trace.standardized, data=trace.dataframe,
+                                 column_roles=trace.column_roles, plot_hint=PlotHint.MULTI_Y,
+                                 metadata=trace.metadata)
+    store.add_bundle(Bundle('plate-bundle', 'Plate', BundleType.PLATE_READER, component_list=[trace]))
+    store.file_removal_service.remove('plate|A1', active_file='plate|A1')
+    assert store.get_bundle('plate-bundle') is None
+    assert store.get_data_by_id('plate') is None
+    store.file_removal_service.undo()
+    assert 'A1' in store.get_data_by_id('plate')['data'].columns
+
+
+def test_showing_one_component_updates_bundle_visibility(monkeypatch):
+    import json
+    from types import SimpleNamespace
+    from callbacks import file_tree_callbacks
+    store = populated()
+    store.visibility_state.update({'sample': False, 'tic': False, 'uv': False})
+    app = dash.Dash(__name__)
+    register_file_tree_callbacks(app, store)
+    callback = next(cb['callback'].__wrapped__ for cb in app.callback_map.values()
+                    if cb['callback'].__wrapped__.__name__ == 'handle_visibility_toggles')
+    monkeypatch.setattr(file_tree_callbacks, 'callback_context', SimpleNamespace(
+        triggered=[{'prop_id': json.dumps({'type': 'visibility-btn', 'index': 'tic'}) + '.n_clicks', 'value': 1}]))
+    _, hidden = callback([1], [{'type': 'visibility-btn', 'index': 'tic'}], 3)
+    assert hidden == ['uv']

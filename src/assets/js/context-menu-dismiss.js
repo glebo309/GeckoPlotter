@@ -14,6 +14,11 @@
         {id: 'figure-context-menu', dropdown: 'figure-context-dropdown', close: 'figure-context-close'}
     ];
     function dismiss(event) {
+        if (document.querySelectorAll) {
+            document.querySelectorAll('details.gesture-help[open]').forEach(function (details) {
+                if (!event || !details.contains(event.target)) details.removeAttribute('open');
+            });
+        }
         var dc = window.dash_clientside;
         if (!dc || !dc.set_props) return;
         menus.forEach(function (menu) {

@@ -449,7 +449,9 @@ def render_bundle_item_selected(bundle_item: dict, is_selected: bool = False, da
                 html.Button(
                     initial_icon,
                     id={'type': 'expand-btn', 'index': bundle_id},
-                    title='Collapse/Expand',
+                    title='Collapse bundle' if children_display == 'block' else 'Expand bundle',
+                    className='tree-disclosure-btn',
+                    **{'aria-expanded': str(children_display == 'block').lower(), 'aria-label': 'Expand or collapse bundle'},
                     style={
                         'background': 'none',
                         'border': 'none',
@@ -476,6 +478,7 @@ def render_bundle_item_selected(bundle_item: dict, is_selected: bool = False, da
                 }),
             ],
             className='file-tree-item',
+            role='button', tabIndex=0,
             id={'type': 'file-tree-item', 'index': bundle_id},
             n_clicks=0,
             style={
@@ -498,7 +501,7 @@ def render_bundle_item_selected(bundle_item: dict, is_selected: bool = False, da
                 html.Button(
                     _icon('tabler:trash', width=12, height=12, color='#333'),
                     id={'type': 'delete-btn', 'index': bundle_id},
-                    title='Delete bundle',
+                    title='Remove bundle from workspace',
                     className='tree-action-btn',
                     style={
                         'background': 'none', 'border': 'none', 'cursor': 'pointer',
@@ -601,6 +604,7 @@ def render_individual_file_item_selected(item: dict, is_selected: bool = False, 
                         ], style={'flex': '1'})
                     ], 
                     className='file-tree-item',
+            role='button', tabIndex=0,
                     id={'type': 'file-tree-item', 'index': child_id}, 
                     n_clicks=0,
                     style={
@@ -621,7 +625,8 @@ def render_individual_file_item_selected(item: dict, is_selected: bool = False, 
                         html.Button(
                             _icon('tabler:trash', width=12, height=12, color='#333'),
                             id={'type': 'delete-btn', 'index': child_id},
-                            title='Delete component',
+                            title='Remove signal from workspace',
+                            className='tree-action-btn',
                             style={
                                 'background': 'none',
                                 'border': 'none',
@@ -672,7 +677,9 @@ def render_individual_file_item_selected(item: dict, is_selected: bool = False, 
             html.Button(
                 initial_icon,
                 id={'type': 'collapse-btn', 'index': file_id},
-                title='Expand/Collapse',
+                title='Collapse signals' if initial_icon == '▼' else 'Expand signals',
+                className='tree-disclosure-btn',
+                **{'aria-expanded': str(initial_icon == '▼').lower(), 'aria-label': 'Expand or collapse signals'},
                 style={
                     'background': 'none',
                     'border': 'none',
@@ -705,6 +712,7 @@ def render_individual_file_item_selected(item: dict, is_selected: bool = False, 
                 }),
             ],
             className='file-tree-item',
+            role='button', tabIndex=0,
             id={'type': 'file-tree-item', 'index': file_id},
             n_clicks=0,
             title=f"{(item.get('type') or 'unknown').capitalize()} · {item.get('size_display', '')}",
@@ -728,7 +736,7 @@ def render_individual_file_item_selected(item: dict, is_selected: bool = False, 
                 html.Button(
                     _icon('tabler:trash', width=12, height=12, color='#333'),
                     id={'type': 'delete-btn', 'index': file_id},
-                    title='Delete file',
+                    title='Remove file from workspace',
                     className='tree-action-btn',
                     style={
                         'background': 'none', 'border': 'none', 'cursor': 'pointer',
@@ -782,20 +790,28 @@ def register_clear_callbacks(app: dash.Dash, data_manager) -> None:
          Output('metadata-container', 'children', allow_duplicate=True),
          Output('table-editor-container', 'children', allow_duplicate=True),
          Output('pub-data-store', 'data', allow_duplicate=True),
-         Output('pub-selections', 'data', allow_duplicate=True)],
+         Output('pub-selections', 'data', allow_duplicate=True),
+         Output('file-removal-feedback', 'style', allow_duplicate=True),
+         Output('file-removal-message', 'children', allow_duplicate=True),
+         Output('undo-file-removal-btn', 'disabled', allow_duplicate=True),
+         Output('render-trigger', 'data', allow_duplicate=True),
+         Output('hidden-files', 'data', allow_duplicate=True)],
         Input('clear-files-btn', 'n_clicks'),
+        State('active-file', 'data'), State('render-trigger', 'data'),
         prevent_initial_call=True
     )
-    def clear_all_files(n_clicks):
+    def clear_all_files(n_clicks, active_file, render_counter):
         """Clear all loaded files.  Sets active-file to None; master_render
         picks up the change and shows the empty-state plot."""
         if not n_clicks:
-            return (dash.no_update,) * 7
+            return (dash.no_update,) * 12
 
         from components.data_table_editor import create_data_table_editor
         from components.axis_mapper import get_empty_selections
 
-        data_manager.clear_data()
+        record = data_manager.file_removal_service.remove_all(active_file=active_file)
+        if record is None:
+            return (dash.no_update,) * 12
 
         empty_tree = [html.Div(
             'No files loaded',
@@ -809,7 +825,9 @@ def register_clear_callbacks(app: dash.Dash, data_manager) -> None:
 
         empty_table_editor = create_data_table_editor(None, table_id='pub-table')
 
-        return [], empty_tree, None, empty_table, empty_table_editor, None, get_empty_selections()
+        return ([], empty_tree, None, empty_table, empty_table_editor, None, get_empty_selections(),
+                {'display': 'flex'}, f'Removed {record.label}', False,
+                (render_counter or 0) + 1, [])
 
     @app.callback(
         Output('status-text', 'children', allow_duplicate=True),

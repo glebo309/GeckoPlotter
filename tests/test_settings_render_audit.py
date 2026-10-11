@@ -60,3 +60,14 @@ def test_dark_theme_sets_legible_neutral_axis_and_legend_text():
 def test_log_axis_limits_are_entered_in_data_units():
  fig=render({'auto_range':False,'x_scale':'log','x_min':10,'x_max':1000})
  assert list(fig.layout.xaxis.range)==[1,3]
+
+
+def test_duplicate_trace_names_have_independent_stable_overrides():
+ fig=go.Figure([
+  go.Scatter(x=[1,2],y=[2,3],name='+TIC',meta={'file_id':'a'}),
+  go.Scatter(x=[1,2],y=[3,4],name='+TIC',meta={'file_id':'b'}),
+  go.Scatter(x=[1,2],y=[4,5],name='Unnamed')])
+ styled=render({'trace_overrides':{'id:b:+TIC':{'line_width':5},'trace:2':{'opacity':.4}}},fig)
+ assert styled.data[0].line.width==1.5
+ assert styled.data[1].line.width==5
+ assert styled.data[2].opacity==.4

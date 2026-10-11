@@ -39,3 +39,16 @@ test('axis double-click events are consumed while canvas double-clicks pass thro
  assert.equal(updates[1]['xaxis.autorange'],true);
  assert.deepEqual(Array.from(updates[1]['yaxis.range']),[0,600]);
 });
+
+test('axis reset publishes owner and current scales for inspector persistence',()=>{
+ const events=[];
+ const window={Plotly:{relayout(){return Promise.resolve();}},dash_clientside:{set_props(id,props){events.push([id,props]);}}};
+ const document={addEventListener(){}};
+ vm.runInNewContext(fs.readFileSync('src/assets/js/axis-reset.js','utf8'),{window,document,Date});
+ const gd={_fullLayout:{meta:{gecko_tab_id:'plot-a'},xaxis:{range:[5,9],type:'linear'},yaxis:{range:[0,600],type:'linear'}}};
+ window.GeckoPlotterAxisReset.reset(gd,'yaxis');
+ assert.equal(events[0][0],'axis-inspector-reset');
+ assert.equal(events[0][1].data.tab,'plot-a');
+ assert.equal(events[0][1].data.axis,'yaxis');
+ assert.deepEqual(Array.from(events[0][1].data.axes.xaxis.range),[5,9]);
+});

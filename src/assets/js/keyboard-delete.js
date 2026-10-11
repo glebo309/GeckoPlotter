@@ -21,7 +21,7 @@
     function isTypingTarget(el) {
         if (!el) return false;
         var tag = el.tagName;
-        if (tag === 'INPUT' || tag === 'TEXTAREA') return true;
+        if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return true;
         if (el.isContentEditable) return true;
         if (el.closest && el.closest('.dash-cell')) return true;
         return false;
@@ -63,6 +63,25 @@
     }
 
     document.addEventListener('keydown', function (e) {
+        // Escape is a cancellation action even while an inspector field has
+        // focus. Let the field/dropdown also handle it; do not consume the key.
+        if (e.key === 'Escape') {
+            if (window.GeckoPlotterManualIntegration) {
+                window.GeckoPlotterManualIntegration.cancelInteraction('main-plot');
+            }
+            setProps('selected-peak-idx', null);
+            setProps('baseline-mode', 'navigate');
+            if (window.dash_clientside && window.dash_clientside.set_props) {
+                window.dash_clientside.set_props('baseline-mode-indicator', {children: 'Draw: off'});
+            }
+            setProps('keyboard-action-trigger', {action: 'escape', ts: Date.now()});
+            if (document.querySelectorAll) {
+                document.querySelectorAll('details.gesture-help[open]').forEach(function (details) {
+                    details.removeAttribute('open');
+                });
+            }
+            return;
+        }
         if (isTypingTarget(e.target)) return;
 
         var mod = e.ctrlKey || e.metaKey;
@@ -92,11 +111,9 @@
             return;
         }
 
-        // Escape — deselect
-        if (e.key === 'Escape') {
-            setProps('keyboard-action-trigger', { action: 'escape', ts: Date.now() });
-            return;
-        }
+        // Leave tab, menu, slider and button navigation to the focused control.
+        if ((e.key === 'ArrowLeft' || e.key === 'ArrowRight') && e.target && e.target.closest &&
+            e.target.closest('button, a, summary, [role="button"], [role="tab"], [role="slider"], [role="combobox"], [role="listbox"], [role="menu"]')) return;
 
         // Arrow keys — cycle peaks
         if (e.key === 'ArrowLeft') {

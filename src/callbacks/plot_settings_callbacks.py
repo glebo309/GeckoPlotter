@@ -155,7 +155,9 @@ def register_plot_settings_callbacks(app, data_manager):
         if not saved and snapshot.get('figure'):
             from services.figure_actions import publication_plot_settings
             saved = snapshot.get('plot_settings') or publication_plot_settings(snapshot['figure'])
+        from services.axis_labels import label_modes
         s = {**DEFAULT_PLOT_SETTINGS, **(saved or {}), '_context_key': context_key}
+        s['axis_label_modes'] = label_modes(saved or {})
 
         if not saved and active_file:
             from services.data_store import BundleType
@@ -421,6 +423,12 @@ def register_plot_settings_callbacks(app, data_manager):
             'trace_overrides': current_settings.get('trace_overrides', {}),
         }
 
+        from services.axis_labels import label_modes
+        new_settings['axis_label_modes'] = label_modes(current_settings)
+        for control, direction, key in [('pt-x-label', 'x', 'x_label'), ('pt-y-label', 'y', 'y1_label')]:
+            if trigger == control + '.value' and new_settings[key] != current_settings.get(key):
+                new_settings['axis_label_modes'][direction] = 'custom'
+
         range_keys = ('auto_range','x_min','x_max','y_min','y_max','x_scale','y_scale')
         if any(new_settings[k] != current_settings.get(k, DEFAULT_PLOT_SETTINGS[k]) for k in range_keys):
             new_settings['_axis_range_revision'] = current_settings.get('_axis_range_revision', 0) + 1
@@ -563,6 +571,35 @@ def register_plot_settings_callbacks(app, data_manager):
             legend_pos_vis,
             tick_grid_vis,
         )
+
+
+    @app.callback(
+        [Output('current-plot-settings', 'data', allow_duplicate=True),
+         Output('pt-x-label', 'value', allow_duplicate=True),
+         Output('pt-y-label', 'value', allow_duplicate=True),
+         Output('x-label-input', 'value', allow_duplicate=True),
+         Output('y1-label-input', 'value', allow_duplicate=True)],
+        [Input('main-plot', 'figure'), Input('pub-preview-graph', 'data'),
+         Input('active-plot-tab', 'data'), Input('pt-axis-labels-auto', 'n_clicks')],
+        [State('plot-tabs', 'data'), State('current-plot-settings', 'data'),
+         State('active-plot-context', 'data')],
+        prevent_initial_call=True,
+    )
+    def sync_axis_label_controls(raw, publication, tab, reset_clicks, tabs, settings, owner):
+        from services.workspace_inspector import active_figure
+        from services.axis_labels import sync_automatic_labels
+        if not settings or settings.get('_context_key') != owner or not tab:
+            return (dash.no_update,) * 5
+        if owner and not owner.endswith(':' + tab):
+            return (dash.no_update,) * 5
+        figure = active_figure(tab, tabs, raw, publication)
+        if figure is None or not figure.get('data'):
+            return (dash.no_update,) * 5
+        trigger = callback_context.triggered[0]['prop_id'] if callback_context.triggered else ''
+        updated = sync_automatic_labels(settings, figure, reset=trigger == 'pt-axis-labels-auto.n_clicks')
+        if updated is None:
+            return (dash.no_update,) * 5
+        return updated, updated['x_label'], updated['y1_label'], updated['x_label'], updated['y1_label']
 
 
 # ----------------------------------------------------------------------

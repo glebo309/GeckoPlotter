@@ -336,8 +336,8 @@ _layout_body = html.Div(
                                                    'flex': '1', 'overflow': 'hidden'},
                                             children=[
                                             dmc.TabsList([
-                                                dmc.TabsTab("Plot Settings", value="plot-tools"),
-                                                dmc.TabsTab("Data Selector", value="pub-plotter"),
+                                                dmc.TabsTab("Figure", value="plot-tools"),
+                                                dmc.TabsTab("Data", value="pub-plotter"),
                                                 dmc.TabsTab("Integration", value="integration"),
                                                 dmc.TabsTab("Export", value="export"),
                                             ]),
@@ -768,12 +768,12 @@ _layout_body = html.Div(
                                                         html.Div('Figure Export', className='toolbox-section-title'),
                                                         html.Div([
                                                             html.Label('Preset', className='form-label'),
-                                                            dmc.Select(id='exp-preset', value='two-col', size='xs',
+                                                            dmc.Select(id='exp-preset', value='current', size='xs',
                                                                        data=[
-                                                                           {'label': 'Two-column (84 mm)', 'value': 'two-col'},
-                                                                           {'label': 'One-column (174 mm)', 'value': 'one-col'},
-                                                                           {'label': '1.5 column (114 mm)', 'value': '1.5-col'},
-                                                                           {'label': 'PowerPoint (254 mm)', 'value': 'ppt'},
+                                                                           {'label': 'Keep current figure', 'value': 'current'},
+                                                                           {'label': 'Single-column (84 mm)', 'value': 'single-col'},
+                                                                           {'label': 'Full-width (174 mm)', 'value': 'full-width'},
+                                                                           {'label': 'Presentation (16:9)', 'value': 'presentation'},
                                                                            {'label': 'Custom', 'value': 'custom'},
                                                                        ],
                                                                        clearable=False, allowDeselect=False),
@@ -781,31 +781,28 @@ _layout_body = html.Div(
                                                         html.Div([
                                                             html.Label('Format', className='form-label'),
                                                             dmc.Select(id='exp-fig-format', value='png', size='xs',
-                                                                       data=[{'label': f, 'value': f} for f in ['png', 'svg', 'html', 'pdf']],
+                                                                       data=[{'label': f.upper(), 'value': f} for f in ['png', 'svg', 'html', 'pdf', 'tiff']],
                                                                        clearable=False, allowDeselect=False),
                                                         ], style={'marginBottom': '6px'}),
                                                         html.Div(id='exp-custom-dims', children=[
                                                             html.Div([
-                                                                html.Div([html.Label('Width (px)', className='form-label'),
-                                                                          dmc.NumberInput(id='exp-width', value=800, min=200, max=4000, step=50,
+                                                                html.Div([html.Label('Width (mm)', className='form-label'),
+                                                                          dmc.NumberInput(id='exp-width', value=84, min=1, step=1,
                                                                                           size='xs', style={'width': '100%'})],
                                                                          style={'flex': '1'}),
-                                                                html.Div([html.Label('Height (px)', className='form-label'),
-                                                                          dmc.NumberInput(id='exp-height', value=500, min=200, max=3000, step=50,
+                                                                html.Div([html.Label('Height (mm)', className='form-label'),
+                                                                          dmc.NumberInput(id='exp-height', value=63, min=1, step=1,
                                                                                           size='xs', style={'width': '100%'})],
                                                                          style={'flex': '1'}),
                                                             ], style={'display': 'flex', 'gap': '8px', 'marginBottom': '6px'}),
                                                         ], style={'display': 'none'}),
                                                         html.Div([
-                                                            html.Label('DPI scale', className='form-label'),
-                                                            dmc.Slider(id='exp-dpi', min=1, max=6, step=1, value=3,
-                                                                       marks=[{'value': 1, 'label': '1x'}, {'value': 2, 'label': '2x'},
-                                                                              {'value': 3, 'label': '3x'}, {'value': 4, 'label': '4x'},
-                                                                              {'value': 6, 'label': '6x'}]),
+                                                            html.Label('Resolution', className='form-label'),
+                                                            dmc.NumberInput(id='exp-dpi', min=72, max=1200, step=50, value=300, suffix=' DPI', debounce=True, size='xs'),
                                                         ], style={'marginBottom': '10px'}),
                                                         html.Div(id='exp-preset-info',
                                                                  style={'fontSize': '11px', 'color': '#666', 'marginBottom': '6px'}),
-                                                        html.Button('Export Figure', id='exp-fig-btn', className='btn btn-primary',
+                                                        dmc.Button('Export Figure', id='exp-fig-btn', className='btn btn-primary', size='xs',
                                                                     style={'width': '100%', 'marginBottom': '6px'}),
                                                         dcc.Download(id='exp-fig-download'),
                                                         html.Button(
@@ -879,10 +876,10 @@ _layout_body = html.Div(
                                             ]),
                                             dmc.Checkbox(id='pub-zoom-sync', label='Link X axes', checked=True, size='xs'),
                                             html.Div(className='plot-toolbar-group', children=[
-                                                html.Span('Y scale', className='plot-toolbar-label'),
+                                                html.Span('Y scaling', className='plot-toolbar-label'),
                                                 dmc.SegmentedControl(id='plot-y-scope', value='independent', size='xs',
-                                                    data=[{'label': 'Per pane', 'value': 'independent'},
-                                                          {'label': 'Global', 'value': 'global'}]),
+                                                    data=[{'label': 'Independent', 'value': 'independent'},
+                                                          {'label': 'Shared', 'value': 'global'}]),
                                             ], title='Global scaling links signals with the same measurement units'),
                                             html.Button('Integrate', id='plot-tool-integrate', n_clicks=0,
                                                         className='plot-tool', title='Toggle baseline drawing. Shift-drag also integrates when off.',
@@ -1012,7 +1009,7 @@ _layout_body = html.Div(
                                                                         _icon('tabler:table', width=36, height=36, color='#bbb'),
                                                                         html.H4('Select a file to view data', className='empty-state__title'),
                                                                         html.P(
-                                                                            'Choose a dataset from the File Explorer to display it as a table.',
+                                                                            'Select a dataset in Files to view its table.',
                                                                             className='empty-state__subtitle'
                                                                         ),
                                                                     ],
@@ -1970,6 +1967,9 @@ def _commit_numeric_inputs_on_enter(component):
             _commit_numeric_inputs_on_enter(child)
 
 
+from components.workspace_layout import arrange_workspace
+arrange_workspace(_layout_body)
+
 _commit_numeric_inputs_on_enter(_layout_body)
 
 app.layout = dmc.MantineProvider(
@@ -2004,6 +2004,10 @@ register_plot_settings_callbacks(app, data_manager)
 register_lcms_callbacks(app, data_manager)
 register_ms_context_menu_callbacks(app, data_manager)
 register_figure_actions_callbacks(app)
+from callbacks.axis_inspector_callbacks import register_axis_inspector_callbacks
+register_axis_inspector_callbacks(app)
+from callbacks.workspace_callbacks import register_workspace_callbacks
+register_workspace_callbacks(app, data_manager)
 
 # Toolbox tabs (DMC) <-> toolbox-tab store, kept in sync both ways.
 # dmc.Tabs owns the visible panel; the store stays the source of truth for
@@ -2039,7 +2043,7 @@ clientside_callback(
     ClientsideFunction(namespace='publicationWorkspace', function_name='update'),
     Output('pub-workspace-sync', 'children'),
     [Input('pub-preview-graph', 'data'), Input('active-plot-tab', 'data'),
-     Input('plot-tabs', 'data'), Input('pub-preset', 'value')],
+     Input('plot-tabs', 'data'), Input('pub-preset', 'value'), Input('pub-view-mode', 'value')],
 )
 
 # Clientside callback for resize functionality

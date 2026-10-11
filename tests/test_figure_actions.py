@@ -43,8 +43,9 @@ def test_send_to_publication_preserves_layout_and_axis_assignments(layout_mode, 
                          'yaxis2': {'domain': domains[1], 'title': {'text': 'Absorbance (mAU)'},
                                     **({'overlaying': 'y', 'side': 'right'} if layout_mode == 'overlay' else {})}}}
     settings = {'layout_mode': layout_mode, 'line_width': 3}
-    tabs, tab_id, figures, _ = send({'action': 'publication', 'figure': figure},
+    tabs, tab_id, figures, _, status = send({'action': 'publication', 'figure': figure},
                                   [{'id': 'lcms', 'type': 'raw'}], {}, settings)
+    assert 'created' in status
     loaded = hydrate('shared:raw:' + tab_id, 'tic', tab_id, figures)[0]
     assert loaded['layout_mode'] == layout_mode
     assert loaded['line_width'] == 3

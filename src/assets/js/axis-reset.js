@@ -25,8 +25,12 @@
         return null;
     }
     function reset(gd, key) {
-        var update={};
+        var update={}, axes={};
         Object.keys(gd._fullLayout).forEach(function(other){
+            if (/^[xy]axis\d*$/.test(other) && gd._fullLayout[other].range) {
+                axes[other]={range:gd._fullLayout[other].range.slice(),type:gd._fullLayout[other].type || 'linear',
+                    userZoom:!!(gd.__geckoInspectorZoom && gd.__geckoInspectorZoom[other])};
+            }
             if (/^[xy]axis\d*$/.test(other) && other[0]!==key[0]) {
                 update[other+'.range']=gd._fullLayout[other].range.slice();
                 update[other+'.autorange']=false;
@@ -35,6 +39,11 @@
         update[key+'.range']=[null,null];
         update[key+'.autorange']=true;
         gd.__geckoAxisResetAt=Date.now();
+        if (window.dash_clientside && window.dash_clientside.set_props) {
+            window.dash_clientside.set_props('axis-inspector-reset',{data:{
+                tab:(gd._fullLayout.meta || {}).gecko_tab_id, axis:key, axes:axes, ts:Date.now()
+            }});
+        }
         return window.Plotly.relayout(gd,update);
     }
     function handle(event) {

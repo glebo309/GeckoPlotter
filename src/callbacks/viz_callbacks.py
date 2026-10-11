@@ -603,20 +603,34 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
         Input('active-plot-tab', 'data'),
         [State('tab-file-memory', 'data'),
          State('active-file', 'data'),
-         State('tab-zoom-memory', 'data')],
+         State('tab-zoom-memory', 'data'),
+         State('plot-tabs', 'data')],
         prevent_initial_call=True,
     )
-    def restore_file_on_tab_switch(active_tab_id, memory, current_file, zoom_memory):
-        """When the plot tab changes, restore the last-touched file and zoom for that tab."""
+    def restore_file_on_tab_switch(active_tab_id, memory, current_file, zoom_memory, tabs):
+        """Keep the displayed raw figure and its data/results selection together."""
+        tab = next((item for item in tabs or [] if item.get('id') == active_tab_id), None)
+        if not tab or tab.get('type') != 'raw':
+            return dash.no_update, dash.no_update
         restored_zoom = (zoom_memory or {}).get(active_tab_id)
-        if not active_tab_id or not memory:
-            return dash.no_update, restored_zoom
-        remembered = memory.get(active_tab_id)
-        if not remembered or remembered == current_file:
-            return dash.no_update, restored_zoom
-        if data_manager.get_data_by_id(remembered):
-            return remembered, restored_zoom
-        return dash.no_update, restored_zoom
+        group = tuple(tab.get('group_key') or ())
+        def belongs(file_id):
+            return bool(file_id and data_manager.get_data_by_id(file_id)
+                        and _get_active_file_group(data_manager, file_id) == group)
+        remembered = (memory or {}).get(active_tab_id)
+        if belongs(remembered):
+            selected = remembered
+        elif belongs(current_file):
+            selected = current_file
+        else:
+            members = [file_id for file_id, data in data_manager.loaded_data.items()
+                       if data.get('standardized') is not None and belongs(file_id)]
+            visibility = getattr(data_manager, 'visibility_state', {})
+            selected = next((file_id for file_id in members if visibility.get(file_id, True)),
+                            members[0] if members else None)
+        # Updating active-file also refreshes Data Overview, metadata and peak
+        # results; the figure's settings remain owned by its existing tab key.
+        return (selected if selected != current_file else dash.no_update), restored_zoom
 
     # Capture user zoom into a dedicated store so it survives figure rebuilds.
     app.clientside_callback(
@@ -1010,11 +1024,11 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
         programmatic active-file changes (tab switches, initial load).
         """
         if not active_file:
-            return dash.no_update, dash.no_update, dash.no_update
+            return html.Div('Select source data to view its table.', className='inspector-empty'), None, html.Div()
 
         file_data = data_manager.get_data_by_id(active_file)
         if not file_data:
-            return dash.no_update, dash.no_update, dash.no_update
+            return html.Div('Source data is no longer available.', className='inspector-empty'), None, html.Div()
 
         on_shared_tab = active_tab in ('peak-analysis', 'across-samples')
 
@@ -1349,7 +1363,8 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
         try:
             fig_obj = go.Figure(figure) if isinstance(figure, dict) else figure
             settings_for_style = dict(s, y_label=s.get('y1_label', 'Y1'))
-            if s.get('x_label') == DEFAULT_PLOT_SETTINGS['x_label'] and len(group_key) > 1:
+            if ((s.get('axis_label_modes') or {}).get('x') != 'custom'
+                    and s.get('x_label') == DEFAULT_PLOT_SETTINGS['x_label'] and len(group_key) > 1):
                 settings_for_style['x_label'] = group_key[1]
             ps = PlotSettingsService.from_dict(settings_for_style)
             PlotSettingsService.apply_to_figure(fig_obj, ps)
@@ -1365,6 +1380,8 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
                     xaxis=dict(autorange=True),
                     yaxis=dict(autorange=True),
                 )
+            from services.axis_inspector import apply_axis_overrides
+            apply_axis_overrides(fig_obj, s.get('axis_overrides', {}))
             axis_revision = f"{active_tab_id}:range:{s.get('_axis_range_revision',0)}"
             fig_obj.update_xaxes(uirevision=axis_revision)
             fig_obj.update_yaxes(uirevision=axis_revision)

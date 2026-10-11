@@ -1260,3 +1260,90 @@ button[id*="collapse-btn"]:active {
 .mantine-Button-root:hover {
     background-color: #333 !important;
 }
+
+/* Contextual workspace: the figure remains the visual focus. */
+:root { --workspace-accent:#355f49; --workspace-border:#dedfe2; --workspace-muted:#666b72; }
+.app-header { height:36px; }
+.panel-header { text-transform:none; letter-spacing:0; font-size:12px; padding:8px 12px; color:#555b62; background:#f4f5f6; }
+#left-column { min-width:260px; }
+#left-bottom-panel .panel-header { padding:7px 12px; }
+#plot-tools-container { padding:0 12px 16px !important; max-height:none !important; overflow:visible !important; }
+.toolbox-tabs > .mantine-Tabs-list { flex-wrap:nowrap; }
+.toolbox-tabs .mantine-Tabs-tab { padding:10px 11px; font-size:12px; }
+.inspector-target { padding:12px 0; border-bottom:1px solid var(--workspace-border); margin-bottom:2px; }
+.inspector-eyebrow { font-size:10px; text-transform:uppercase; letter-spacing:.08em; color:var(--workspace-muted); margin-bottom:3px; }
+#inspector-figure-name { font-size:14px; font-weight:650; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+#inspector-figure-summary { color:var(--workspace-muted); font-size:11px; margin-top:4px; }
+.inspector-section { border-bottom:1px solid var(--workspace-border); }
+.inspector-section > summary { font-size:12px; font-weight:600; padding:11px 0; cursor:pointer; list-style:none; display:flex; align-items:center; gap:8px; }
+.inspector-section > summary::before { content:'›'; display:inline-block; font-size:17px; font-weight:400; width:10px; color:#737880; transform-origin:center; }
+.inspector-section[open] > summary::before { transform:rotate(90deg); }
+.inspector-section > summary::-webkit-details-marker { display:none; }
+.inspector-section > summary:hover { color:var(--workspace-accent); }
+.inspector-section > summary:focus-visible { outline:2px solid #476c98; outline-offset:2px; }
+.inspector-section-content { padding:0 0 12px; }
+.inspector-section .inspector-section { border:0; margin-top:4px; }
+.inspector-section .inspector-section > summary { color:var(--workspace-muted); font-weight:500; }
+.inspector-section .toolbox-section-title { font-size:11px; font-weight:600; text-transform:none; letter-spacing:0; border:0; margin:10px 0 7px; padding:0; }
+.inspector-fields-grid { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:9px; margin-top:9px; }
+.inspector-note,.inspector-empty { font-size:11px; line-height:1.5; color:var(--workspace-muted); padding:6px 0; }
+.inspector-reset { font-size:11px; margin:3px 0 6px; }
+.slider-exact-value { width:88px; margin:9px 0 12px auto; }
+.axis-inspector-card { border:1px solid #e2e4e6; border-radius:7px; padding:10px; background:#fff; }
+.axis-inspector-heading { display:flex; justify-content:space-between; align-items:baseline; gap:8px; margin-bottom:8px; }
+.axis-inspector-name { font-weight:600; font-size:12px; overflow-wrap:anywhere; }
+.axis-inspector-dimension { color:var(--workspace-muted); font-size:10px; white-space:nowrap; }
+.axis-inspector-card .mantine-SegmentedControl-root { margin-bottom:8px; }
+.axis-inspector-card .mantine-Select-root { margin-top:8px; }
+.axis-inspector-card .mantine-InputWrapper-label { font-size:11px; }
+.inspector-field-error { color:#a32626; font-size:11px; padding:4px 0; }
+.plot-toolbar { gap:10px; padding:7px 10px; background:#f7f8f8; }
+.plot-toolbar-group { flex-shrink:0; gap:3px; }
+.plot-toolbar-group:first-child { border:1px solid #d7dadb; border-radius:6px; padding:2px; background:#eff1f1; }
+.plot-toolbar-group:first-child .plot-tool { height:27px; }
+.plot-tool.active { background:#fff; border-color:#c9cecb; box-shadow:0 1px 2px #0000000c; color:#254d36; }
+#plot-tool-integrate.active { background:#e5eee8; box-shadow:inset 0 0 0 1px #69947a; }
+.toolbar-spacer { flex:1; min-width:0; }
+.plot-tool-primary { background:#253e30; color:#fff; border-color:#253e30; }
+.plot-tool-primary:hover { background:#355f49; }
+.plot-tool:disabled { opacity:.42; cursor:default; }
+.plot-toolbar .mantine-Checkbox-label { padding-left:6px; font-size:12px; }
+.gesture-help { position:relative; }
+.gesture-help > summary { width:25px; height:25px; border:1px solid #d2d5d7; border-radius:50%; text-align:center; line-height:23px; font-size:12px; color:#6b7178; cursor:pointer; list-style:none; }
+.gesture-help > summary::-webkit-details-marker { display:none; }
+.gesture-help-content { position:absolute; right:0; top:33px; width:260px; padding:12px; font-size:12px; line-height:1.8; background:white; border:1px solid #dadde0; border-radius:8px; box-shadow:0 8px 25px #0002; z-index:1001; }
+.workspace-feedback:empty { display:none; }
+.workspace-feedback { padding:7px 12px; font-size:12px; color:#355f49; background:#f1f6f3; border-bottom:1px solid #dce6df; flex-shrink:0; }
+.file-removal-feedback { gap:8px; align-items:center; padding:8px 12px; border-top:1px solid #dce6df; background:#f1f6f3; font-size:12px; flex-shrink:0; }
+.tree-disclosure-btn { min-width:28px; min-height:28px; display:inline-flex; align-items:center; justify-content:center; border:0; background:transparent; cursor:pointer; }
+.tree-disclosure-btn:hover { background:#ecefee; border-radius:4px; }
+.file-tree-item:focus-visible,.tree-action-btn:focus-visible { outline:2px solid #476c98; outline-offset:1px; }
+.results-navigation { display:flex; gap:12px; align-items:center; justify-content:space-between; padding:0 6px; border-bottom:1px solid var(--workspace-border); flex-shrink:0; min-height:44px; }
+.results-navigation .mantine-Tabs-list { border:0; flex-wrap:nowrap; }
+.results-navigation .mantine-Tabs-tab { padding:12px 14px; }
+.results-navigation .mantine-Select-root { flex-shrink:0; }
+#right-bottom-panel > .panel-content { padding:0; }
+#data-overview-content { padding:10px !important; }
+#pub-plot-workspace,#pub-figure-workspace { min-height:0; }
+.status-bar { font-size:11px; }
+@media (max-width:1100px) {
+  .plot-toolbar { gap:7px; }
+  .plot-tool { padding:0 7px; }
+  .plot-toolbar-label { display:none; }
+  .toolbar-spacer { display:none; }
+  .results-navigation { gap:4px; }
+  .results-navigation .mantine-Tabs-tab { padding:11px 9px; }
+}
+
+/* Action feedback belongs to the persistent footer, without moving the figure. */
+.status-bar { min-height:28px; gap:10px; color:#bfc2c1; }
+.workspace-status-message { color:#e1e8e3; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; min-width:0; }
+.workspace-status-message:empty { display:none; }
+.status-bar:has(.workspace-status-message:not(:empty)) #status-text { display:none; }
+.status-bar .file-removal-feedback { border:0; background:transparent; padding:0; }
+.status-bar #file-removal-message { display:none; }
+.status-bar #undo-file-removal-btn { background:transparent; border-color:#777; color:#eee; font-size:10px; padding:1px 7px; height:22px; }
+.status-bar #undo-file-removal-btn:disabled { display:none; }
+.file-group-header:focus-visible { outline:2px solid #476c98; outline-offset:1px; }
+/* Figure export shares the global status area rather than duplicating banners. */
+#pub-export-status, #exp-fig-status { display:none; }

@@ -26,14 +26,11 @@ if not log.handlers:
     log.addHandler(_h)
     log.setLevel(logging.DEBUG)
 
-# Publication preset dimensions (px at 300 DPI)
-# Journal: 84mm single col, 114mm 1.5 col, 174mm full width
+# Names and physical sizes match the publication presets.
 PRESETS = {
-    'two-col':  {'w': 992,  'h': 744,  'label': '84 × 63 mm (two-column)'},
-    'one-col':  {'w': 2055, 'h': 1541, 'label': '174 × 131 mm (full width)'},
-    '1.5-col':  {'w': 1346, 'h': 1009, 'label': '114 × 86 mm (1.5 column)'},
-    'ppt':      {'w': 1920, 'h': 1080, 'label': '16:9 PowerPoint slide'},
-    'custom':   None,
+    'single-col': {'w': 84, 'h': 63, 'label': '84 × 63 mm · single-column'},
+    'full-width': {'w': 174, 'h': 104, 'label': '174 × 104 mm · full-width'},
+    'presentation': {'w': 254, 'h': 143, 'label': '254 × 143 mm · presentation'},
 }
 
 
@@ -55,67 +52,50 @@ def register_export_callbacks(app: dash.Dash, data_manager) -> None:
     def apply_preset(preset):
         p = PRESETS.get(preset)
         if p is None:
-            return dash.no_update, dash.no_update, {'display': 'block'}, 'Custom dimensions'
+            return (dash.no_update, dash.no_update,
+                    {'display': 'block' if preset == 'custom' else 'none'},
+                    'Custom size in millimetres' if preset == 'custom' else 'Keeps the displayed figure, styling and zoom')
         return p['w'], p['h'], {'display': 'none'}, p['label']
 
     # ── Export Figure ─────────────────────────────────────────────────
 
-    @app.callback(
-        Output('exp-fig-download', 'data'),
-        Input('exp-fig-btn', 'n_clicks'),
-        [State('main-plot', 'figure'),
-         State('exp-fig-format', 'value'),
-         State('exp-preset', 'value'),
-         State('exp-width', 'value'),
-         State('exp-height', 'value'),
-         State('exp-dpi', 'value')],
+    app.clientside_callback(
+        dash.ClientsideFunction(namespace='geckoFigureActions', function_name='exportRequest'),
+        Output('figure-export-request', 'data'),
+        [Input('exp-fig-btn', 'n_clicks'), Input('pub-export-btn', 'n_clicks')],
+        [State('exp-fig-format', 'value'), State('exp-preset', 'value'),
+         State('exp-width', 'value'), State('exp-height', 'value'), State('exp-dpi', 'value'),
+         State('pub-export-format', 'value'), State('pub-fig-width-mm', 'value'),
+         State('pub-fig-height-mm', 'value'), State('pub-dpi', 'value')],
         prevent_initial_call=True,
     )
-    def export_figure(n_clicks, fig_data, fmt, preset, width, height, dpi):
-        if not n_clicks or not fig_data:
-            log.debug("Export figure: no figure data available")
-            return dash.no_update
 
-        p = PRESETS.get(preset)
-        if p is not None:
-            width = p['w']
-            height = p['h']
-
-        fig = go.Figure(fig_data)
-        width = int(width or 800)
-        height = int(height or 500)
-        scale = int(dpi or 3)
-
+    @app.callback(
+        [Output('exp-fig-download', 'data'), Output('exp-fig-status', 'children'),
+         Output('pub-export-status', 'children'),
+         Output('figure-action-status', 'children', allow_duplicate=True)],
+        Input('figure-export-request', 'data'),
+        prevent_initial_call=True,
+        running=[(Output('exp-fig-btn', 'loading'), True, False),
+                 (Output('pub-export-btn', 'loading'), True, False)],
+    )
+    def export_figure(request):
+        if not request:
+            return (dash.no_update,) * 4
+        from services.figure_export import export_displayed_figure
         try:
-            if fmt == 'html':
-                html_str = export_svc.export_figure_html(fig)
-                return dict(content=html_str, filename='figure.html')
-            elif fmt == 'svg':
-                svg_bytes = export_svc.export_figure_svg(fig, width=width, height=height)
-                return dict(
-                    content=base64.b64encode(svg_bytes).decode(),
-                    filename='figure.svg',
-                    base64=True,
-                )
-            elif fmt == 'pdf':
-                fig = export_svc.prepare_figure_for_static_export(fig, width, height)
-                pdf_bytes = fig.to_image(format='pdf', width=width, height=height,
-                                         scale=scale)
-                return dict(
-                    content=base64.b64encode(pdf_bytes).decode(),
-                    filename='figure.pdf',
-                    base64=True,
-                )
-            else:  # png
-                png_bytes = export_svc.export_figure_png(fig, width=width, height=height, scale=scale)
-                return dict(
-                    content=base64.b64encode(png_bytes).decode(),
-                    filename='figure.png',
-                    base64=True,
-                )
-        except Exception as e:
-            log.exception(f"Figure export failed: {e}")
-            return dash.no_update
+            if request.get('error'):
+                raise ValueError(request['error'])
+            result = export_displayed_figure(
+                request['figure'], request.get('format'), request['width_mm'],
+                request['height_mm'], request.get('dpi'), request.get('render_width'),
+                request.get('label'))
+            message = f"Download ready: {result['filename']}"
+            return result, message, message, message
+        except Exception:
+            log.exception('Displayed figure export failed')
+            message = request.get('error') or 'Export failed. Try another format or a lower resolution.'
+            return dash.no_update, message, message, message
 
     # ── Export Table Data ─────────────────────────────────────────────
 

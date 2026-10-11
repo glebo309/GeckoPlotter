@@ -85,6 +85,19 @@
         window.Plotly.relayout(gd, update);
     }
 
+    function cancelInteraction(graphId) {
+        window.__geckoBaselineMode = 'navigate';
+        var gd = getGraphDiv(graphId);
+        if (!gd) return;
+        if (gd.__geckoCancelDraw) gd.__geckoCancelDraw();
+        gd.__geckoManualIntegrationMode = 'navigate';
+        gd.__geckoManualIntegrationSelectedPeakId = null;
+        clearEmptyClickTimer(gd);
+        removePreviewLine();
+        setMomentaryDrawActive(false);
+        syncInteractionDragmode(gd);
+    }
+
     function syncDrawMode(graphId, mode) {
         window.__geckoBaselineMode = mode;
         var gd = getGraphDiv(graphId);
@@ -545,13 +558,26 @@
             );
         };
 
+        var cleanupDrawListeners = function () {
+            window.removeEventListener('pointermove', move, true);
+            window.removeEventListener('pointerup', finish, true);
+            window.removeEventListener('pointercancel', cancel, true);
+            gd.__geckoCancelDraw = null;
+        };
+        var cancel = function () {
+            cleanupDrawListeners();
+            gd.__geckoManualIntegrationDrawing = null;
+            removePreviewLine();
+            setDragBoxSuppressed(gd, false);
+            setMomentaryDrawActive(false);
+            syncInteractionDragmode(gd);
+        };
+        gd.__geckoCancelDraw = cancel;
+
         var finish = function (upEvent) {
             if (!gd.__geckoManualIntegrationDrawing) return;
             stopPlotlyGesture(upEvent);
-
-            window.removeEventListener('pointermove', move, true);
-            window.removeEventListener('pointerup', finish, true);
-            window.removeEventListener('pointercancel', finish, true);
+            cleanupDrawListeners();
 
             var drawing = gd.__geckoManualIntegrationDrawing;
             gd.__geckoManualIntegrationDrawing = null;
@@ -581,7 +607,7 @@
 
         window.addEventListener('pointermove', move, true);
         window.addEventListener('pointerup', finish, true);
-        window.addEventListener('pointercancel', finish, true);
+        window.addEventListener('pointercancel', cancel, true);
         return true;
     }
 
@@ -846,6 +872,7 @@
 
     window.GeckoPlotterManualIntegration = {
         subplotAtEvent: subplotAtEvent,
+        cancelInteraction: cancelInteraction,
         clearTransientShapes: clearTransientShapes,
         syncSelectedShape: syncSelectedShape,
         syncDrawMode: syncDrawMode,

@@ -34,7 +34,8 @@ def register_file_tree_callbacks(app: dash.Dash, data_manager: DataManager) -> N
     """Register file tree interaction callbacks."""
     @app.callback(
         [Output({'type': 'expand-btn', 'index': dash.dependencies.MATCH}, 'children'),
-         Output({'type': 'bundle-children', 'index': dash.dependencies.MATCH}, 'style')],
+         Output({'type': 'bundle-children', 'index': dash.dependencies.MATCH}, 'style'),
+         Output({'type': 'expand-btn', 'index': dash.dependencies.MATCH}, 'aria-expanded')],
         Input({'type': 'expand-btn', 'index': dash.dependencies.MATCH}, 'n_clicks'),
         State({'type': 'bundle-children', 'index': dash.dependencies.MATCH}, 'style'),
         prevent_initial_call=True
@@ -42,7 +43,7 @@ def register_file_tree_callbacks(app: dash.Dash, data_manager: DataManager) -> N
     def toggle_bundle_expansion(n_clicks, current_style):
         """Toggle bundle expansion/collapse and update button icon."""
         if not n_clicks:
-            return dash.no_update, dash.no_update
+            return (dash.no_update,) * 3
 
         current_display = current_style.get('display', 'block')
         new_display = 'none' if current_display == 'block' else 'block'
@@ -60,31 +61,13 @@ def register_file_tree_callbacks(app: dash.Dash, data_manager: DataManager) -> N
             except Exception:
                 pass
 
-        return new_icon, {**current_style, 'display': new_display}
-
-    @app.callback(
-        Output('active-file', 'data', allow_duplicate=True),
-        Input({'type': 'expand-btn', 'index': dash.dependencies.ALL}, 'n_clicks'),
-        prevent_initial_call=True
-    )
-    def select_bundle_on_expand(n_clicks_list):
-        """Select the bundle when its expand button is clicked."""
-        if not any(n_clicks_list):
-            return dash.no_update
-        ctx = callback_context
-        if not ctx.triggered:
-            return dash.no_update
-        try:
-            import json
-            component_id = json.loads(ctx.triggered[0]['prop_id'].rsplit('.', 1)[0])
-            return component_id['index']
-        except Exception:
-            return dash.no_update
+        return new_icon, {**current_style, 'display': new_display}, str(new_display == 'block').lower()
 
     # UV-Vis file collapse/expand callback
     @app.callback(
         [Output({'type': 'collapse-btn', 'index': dash.dependencies.MATCH}, 'children'),
-         Output({'type': 'file-children', 'index': dash.dependencies.MATCH}, 'style')],
+         Output({'type': 'file-children', 'index': dash.dependencies.MATCH}, 'style'),
+         Output({'type': 'collapse-btn', 'index': dash.dependencies.MATCH}, 'aria-expanded')],
         Input({'type': 'collapse-btn', 'index': dash.dependencies.MATCH}, 'n_clicks'),
         State({'type': 'file-children', 'index': dash.dependencies.MATCH}, 'style'),
         prevent_initial_call=True
@@ -92,153 +75,92 @@ def register_file_tree_callbacks(app: dash.Dash, data_manager: DataManager) -> N
     def toggle_file_expansion(n_clicks, current_style):
         """Toggle UV-Vis file expansion/collapse and update button icon."""
         if not n_clicks:
-            return dash.no_update, dash.no_update
+            return (dash.no_update,) * 3
         
         current_display = current_style.get('display', 'none')  # Default collapsed
         new_display = 'block' if current_display == 'none' else 'none'
         new_icon = '▼' if new_display == 'block' else '▶'  # Expanded or collapsed
-        
-        return new_icon, {**current_style, 'display': new_display}
-
-    @app.callback(
-        [Output('loaded-files', 'data', allow_duplicate=True),
-         Output('file-tree', 'children', allow_duplicate=True),
-         Output('render-trigger', 'data', allow_duplicate=True),
-         Output('active-file', 'data', allow_duplicate=True),
-         Output('metadata-container', 'children', allow_duplicate=True),
-         Output('table-editor-container', 'children', allow_duplicate=True),
-         Output('pub-data-store', 'data', allow_duplicate=True),
-         Output('pub-selections', 'data', allow_duplicate=True)],
-        Input({'type': 'delete-btn', 'index': dash.dependencies.ALL}, 'n_clicks'),
-        [State('loaded-files', 'data'),
-         State('active-file', 'data'),
-         State('render-trigger', 'data')],
-        prevent_initial_call=True
-    )
-    def handle_file_deletion(n_clicks_list, current_files, active_file_id, render_counter):
-        if not any(n_clicks_list):
-            return (dash.no_update,) * 8
-
-        ctx = callback_context
-        if not ctx.triggered:
-            return (dash.no_update,) * 8
-
-        triggered_id = ctx.triggered[0]['prop_id']
         try:
             import json
-            component_id = json.loads(triggered_id.rsplit('.', 1)[0])
-            file_id = component_id['index']
-        except:
-            return (dash.no_update,) * 8
+            file_id = json.loads(callback_context.triggered[0]['prop_id'].rsplit('.', 1)[0])['index']
+            data_manager.collapse_state[file_id] = 'expanded' if new_display == 'block' else 'collapsed'
+        except (KeyError, ValueError, IndexError):
+            pass
+        
+        return new_icon, {**current_style, 'display': new_display}, str(new_display == 'block').lower()
 
-        log.debug(f"Deleting file/bundle: {file_id}")
+    removal_outputs = [
+        Output('loaded-files', 'data', allow_duplicate=True),
+        Output('file-tree', 'children', allow_duplicate=True),
+        Output('render-trigger', 'data', allow_duplicate=True),
+        Output('active-file', 'data', allow_duplicate=True),
+        Output('metadata-container', 'children', allow_duplicate=True),
+        Output('table-editor-container', 'children', allow_duplicate=True),
+        Output('pub-data-store', 'data', allow_duplicate=True),
+        Output('pub-selections', 'data', allow_duplicate=True),
+        Output('file-removal-feedback', 'style', allow_duplicate=True),
+        Output('file-removal-message', 'children', allow_duplicate=True),
+        Output('undo-file-removal-btn', 'disabled', allow_duplicate=True),
+        Output('hidden-files', 'data', allow_duplicate=True),
+    ]
 
-        files_to_remove = []
-
-        if '|' in file_id:
-            parent_file_id, well_name = file_id.split('|', 1)
-            log.debug(f"Deleting well: {well_name} from parent file: {parent_file_id}")
-
-            parent_file_data = data_manager.get_data_by_id(parent_file_id)
-            if _is_multi_well(parent_file_data):
-                filled_wells = parent_file_data.get('metadata', {}).get('filled_wells', [])
-                if well_name in filled_wells:
-                    filled_wells.remove(well_name)
-                    parent_file_data['metadata']['filled_wells'] = filled_wells
-                    log.debug(f"Removed well {well_name} from parent file metadata")
-
-                    if 'data' in parent_file_data and parent_file_data['data'] is not None:
-                        df = parent_file_data['data']
-                        if well_name in df.columns:
-                            df = df.drop(columns=[well_name])
-                            parent_file_data['data'] = df
-
-                    if not filled_wells:
-                        log.debug(f"No wells left, deleting entire parent file: {parent_file_id}")
-                        if parent_file_id in data_manager.loaded_data:
-                            del data_manager.loaded_data[parent_file_id]
-                        updated_files = [f for f in current_files if f.get('id') != parent_file_id]
-                    else:
-                        updated_files = current_files.copy()
-                else:
-                    log.warning(f"Well {well_name} not found in parent file")
-                    updated_files = current_files.copy()
-            else:
-                log.error(f"Parent file not found or not multi-well: {parent_file_id}")
-                updated_files = current_files.copy()
-
-        else:
-            bundle = data_manager.get_bundle(file_id)
-            if bundle is not None:
-                files_to_remove = [file_id] + [c.component_id for c in bundle.component_list]
-                data_manager.remove_bundle(file_id)
-            else:
-                bundle = data_manager.get_bundle_for_component(file_id)
-                if bundle is None:
-                    return (dash.no_update,) * 8
-                parent_to_expand = bundle.bundle_id
-                files_to_remove = [file_id]
-                data_manager.remove_component(file_id)
-                data_manager.collapse_state[parent_to_expand] = 'expanded'
-            for removed_id in files_to_remove:
-                data_manager.visibility_state.pop(removed_id, None)
-                data_manager.file_ui_state.pop(removed_id, None)
-                data_manager.lcms_eic_overlays.pop(removed_id, None)
-
-        # Clean up peaks for all deleted files/bundles
-        deleted_ids = set(files_to_remove) if files_to_remove else set()
-        deleted_ids.add(file_id)
-        for did in deleted_ids:
-            data_manager.peak_service.clear_peaks(did)
-
-        # Rebuild tree
-        parent_to_expand = None
-        if '|' in file_id:
-            parent_to_expand = file_id.split('|')[0]
-        elif 'is_lcms_component_deletion' in locals() and is_lcms_component_deletion and lcms_parent_id:
-            parent_to_expand = lcms_parent_id
-
-        if parent_to_expand:
-            if not hasattr(data_manager, 'collapse_state'):
-                data_manager.collapse_state = {}
-            data_manager.collapse_state[parent_to_expand] = 'expanded'
-
-        if hasattr(data_manager, '_last_processed_files'):
-            delattr(data_manager, '_last_processed_files')
-        if hasattr(data_manager, '_last_tree_items'):
-            delattr(data_manager, '_last_tree_items')
-
-        updated_files = data_manager.get_loaded_files_list()
-
+    def removal_response(record, active_file, render_counter, restored=False):
         from callbacks.upload_callbacks import render_file_tree_with_bundles
-        tree_items = render_file_tree_with_bundles(updated_files, data_manager)
-
-        log.debug(f"Delete complete. Remaining files: {len(updated_files)}")
-
         from components.data_table_editor import create_data_table_editor
         from components.axis_mapper import get_empty_selections
 
-        active_was_deleted = False
-        if active_file_id:
-            main_active = active_file_id.split('|')[0] if '|' in active_file_id else active_file_id
-            if main_active in (files_to_remove or []) or file_id == active_file_id or file_id == main_active:
-                active_was_deleted = True
+        files = data_manager.get_loaded_files_list()
+        active_parent = (active_file or '').split('|')[0]
+        active_exists = bool(active_file and data_manager.get_data_by_id(active_parent))
+        if not restored and active_file in record.removed_ids:
+            active_exists = False
+        if not active_exists:
+            remaining = data_manager.get_bundle(files[0]['id']) if files else None
+            active_file = remaining.primary.component_id if remaining and remaining.primary else None
+        for cache_name in ('_last_processed_files', '_last_tree_items'):
+            if hasattr(data_manager, cache_name):
+                delattr(data_manager, cache_name)
+        tree = render_file_tree_with_bundles(files, data_manager)
+        message = f'Restored {record.label}' if restored else f'Removed {record.label}'
+        return (files, tree, (render_counter or 0) + 1, active_file,
+                dash.no_update if active_exists else html.Div('Select a file to view data details'),
+                dash.no_update if active_exists else create_data_table_editor(None, table_id='pub-table'),
+                dash.no_update if active_exists else None,
+                dash.no_update if active_exists else get_empty_selections(),
+                {'display': 'flex'}, message, not data_manager.file_removal_service.can_undo,
+                [fid for fid, visible in data_manager.visibility_state.items() if not visible])
 
-        if active_was_deleted or not updated_files:
-            remaining = data_manager.get_bundle(updated_files[0]['id']) if updated_files else None
-            new_active = remaining.primary.component_id if remaining and remaining.primary else None
-            table_editor = create_data_table_editor(None, table_id='pub-table')
-            pub_data = None
-            pub_sel = get_empty_selections()
-        else:
-            new_active = active_file_id
-            table_editor = dash.no_update
-            pub_data = dash.no_update
-            pub_sel = dash.no_update
+    @app.callback(
+        removal_outputs,
+        Input({'type': 'delete-btn', 'index': dash.dependencies.ALL}, 'n_clicks'),
+        [State('loaded-files', 'data'), State('active-file', 'data'), State('render-trigger', 'data')],
+        prevent_initial_call=True,
+    )
+    def handle_file_deletion(n_clicks_list, current_files, active_file_id, render_counter):
+        if not any(n_clicks_list) or not callback_context.triggered:
+            raise PreventUpdate
+        try:
+            import json
+            trigger = callback_context.triggered[0]
+            if not trigger.get('value'):
+                raise PreventUpdate
+            file_id = json.loads(trigger['prop_id'].rsplit('.', 1)[0])['index']
+        except (KeyError, ValueError, TypeError):
+            raise PreventUpdate
+        record = data_manager.file_removal_service.remove(file_id, active_file=active_file_id)
+        if record is None:
+            raise PreventUpdate
+        return removal_response(record, active_file_id, render_counter)
 
-        return (updated_files, tree_items, (render_counter or 0) + 1, new_active,
-                html.Div("Select a file to view data details", style={'color': '#666', 'padding': '20px'}),
-                table_editor, pub_data, pub_sel)
+    @app.callback(removal_outputs, Input('undo-file-removal-btn', 'n_clicks'),
+                  State('render-trigger', 'data'), prevent_initial_call=True)
+    def undo_file_removal(n_clicks, render_counter):
+        if not n_clicks:
+            raise PreventUpdate
+        record = data_manager.file_removal_service.undo()
+        if record is None:
+            raise PreventUpdate
+        return removal_response(record, record.active_file, render_counter, restored=True)
 
     @app.callback(
         [Output('render-trigger', 'data', allow_duplicate=True),
@@ -250,8 +172,7 @@ def register_file_tree_callbacks(app: dash.Dash, data_manager: DataManager) -> N
     )
     def handle_visibility_toggles(n_clicks_list, button_ids, render_counter):
         """Toggle visibility state, bump render-trigger, publish hidden IDs.
-        The eye icon stays unchanged; CSS dimming via clientside callback
-        handles the visual feedback (no button style changes = no layout shift)."""
+        The clientside callback updates the eye state without rebuilding the tree."""
         if not any(n_clicks_list):
             raise PreventUpdate
 
@@ -276,23 +197,26 @@ def register_file_tree_callbacks(app: dash.Dash, data_manager: DataManager) -> N
 
         log.debug(f"Toggling visibility for {clicked_file_id}: {'visible' if new_visibility else 'hidden'}")
 
-        bundle = data_manager.bundle_manager.get_bundle_by_id(clicked_file_id)
+        bundle = data_manager.get_bundle(clicked_file_id)
         if bundle:
-            for aux_file in bundle.auxiliary_files:
-                aux_file_id = aux_file.get('id')
-                if aux_file_id:
-                    data_manager.visibility_state[aux_file_id] = new_visibility
+            for component in bundle.component_list:
+                data_manager.visibility_state[component.component_id] = new_visibility
+                for well in component.metadata.get('filled_wells', []):
+                    data_manager.visibility_state[f"{component.component_id}|{well}"] = new_visibility
         else:
-            lcms_bundle = data_manager.get_lcms_bundle_by_id(clicked_file_id)
-            if lcms_bundle:
-                for comp_id in lcms_bundle.get('files', []):
-                    data_manager.visibility_state[comp_id] = new_visibility
-            else:
-                file_data = data_manager.get_data_by_id(clicked_file_id)
-                if _is_multi_well(file_data):
-                    filled_wells = file_data.get('metadata', {}).get('filled_wells', [])
-                    for well in filled_wells:
-                        data_manager.visibility_state[f"{clicked_file_id}|{well}"] = new_visibility
+            file_data = data_manager.get_data_by_id(clicked_file_id)
+            if _is_multi_well(file_data):
+                for well in file_data.get('metadata', {}).get('filled_wells', []):
+                    data_manager.visibility_state[f"{clicked_file_id}|{well}"] = new_visibility
+
+
+        # The bundle eye reflects whether any component remains visible. A
+        # child can be shown after Hide bundle without leaving its parent dimmed.
+        parent_bundle = data_manager.get_bundle_for_component(clicked_file_id)
+        if parent_bundle is not None and parent_bundle.bundle_id != clicked_file_id:
+            data_manager.visibility_state[parent_bundle.bundle_id] = any(
+                data_manager.visibility_state.get(c.component_id, True)
+                for c in parent_bundle.component_list)
 
         hidden_ids = [fid for fid, vis in data_manager.visibility_state.items() if not vis]
 

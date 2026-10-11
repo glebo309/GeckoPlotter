@@ -1,4 +1,12 @@
 (function() {
+    document.addEventListener('keydown', function(event) {
+        if (event.key !== 'Enter' && event.key !== ' ') return;
+        var row = event.target.closest('.file-tree-item');
+        if (!row) return;
+        event.preventDefault();
+        row.click();
+    });
+
     // -----------------------------------------------------------------------
     // 1. File tree visual state — called by Dash clientside callback
     //    (MutationObservers on dcc.Store don't work in Dash 3.x)
@@ -22,6 +30,7 @@
     };
 
     window._geckoApplyHiddenFiles = function(hiddenIds) {
+        window.__geckoHiddenFiles = hiddenIds || [];
         var hiddenSet = new Set(hiddenIds || []);
         document.querySelectorAll('button[id*="visibility-btn"]').forEach(function(button) {
             var fileId;
@@ -77,6 +86,19 @@
             header._collapseInit = true;
             header.style.cursor = 'pointer';
             header.style.userSelect = 'none';
+            var existingContainer = header.nextElementSibling;
+            try {
+                var groupId = JSON.parse(existingContainer.id).index;
+                if (groupCollapseState[groupId]) existingContainer.style.display = 'none';
+            } catch (_) {}
+            header.setAttribute('role', 'button');
+            header.setAttribute('tabindex', '0');
+            header.setAttribute('aria-expanded', existingContainer && existingContainer.style.display === 'none' ? 'false' : 'true');
+            header.addEventListener('keydown', function (event) {
+                if (event.target !== header || (event.key !== 'Enter' && event.key !== ' ')) return;
+                event.preventDefault();
+                header.click();
+            });
 
             header.addEventListener('click', function(e) {
                 if (e.target.tagName === 'BUTTON' || e.target.closest('button')) return;
@@ -86,6 +108,7 @@
 
                 var isCollapsed = container.style.display === 'none';
                 container.style.display = isCollapsed ? '' : 'none';
+                header.setAttribute('aria-expanded', isCollapsed ? 'true' : 'false');
 
                 var indicator = header.querySelector('.collapse-indicator');
                 if (!indicator) {
@@ -106,7 +129,7 @@
                 var indicator = document.createElement('span');
                 indicator.className = 'collapse-indicator';
                 indicator.style.cssText = 'margin-right:4px;font-size:9px;display:inline-block;';
-                indicator.textContent = '▼';
+                indicator.textContent = existingContainer && existingContainer.style.display === 'none' ? '▶' : '▼';
                 header.insertBefore(indicator, header.firstChild);
             }
         });
@@ -223,6 +246,8 @@
     var observer = new MutationObserver(function() {
         initGroupCollapse();
         initCrossGroupDrop();
+        window._geckoApplyActiveFile(window.__geckoActiveFile);
+        window._geckoApplyHiddenFiles(window.__geckoHiddenFiles);
     });
     observer.observe(document.body, { childList: true, subtree: true });
     document.addEventListener('DOMContentLoaded', function() {

@@ -4,14 +4,27 @@
     var plots = new Map(), activeId = null;
     function resize(gd) {
         if (!gd || gd.style.display === 'none') return;
-        var rect = gd.getBoundingClientRect();
-        if (!rect.width || !rect.height) return;
-        Promise.resolve(window.Plotly.Plots.resize(gd)).catch(function () {});
+        var host = gd.parentElement;
+        if (!host) return;
+        var bounds = host.getBoundingClientRect();
+        if (!bounds.width || !bounds.height) return;
+        var availableWidth = host.clientWidth || bounds.width;
+        var availableHeight = host.clientHeight || bounds.height;
+        var meta = gd.layout && gd.layout.meta || {};
+        var width = (meta.gecko_width_mm || 84) > 90 ? 624 : 307;
+        var height = width * (meta.gecko_height_mm || 63) / (meta.gecko_width_mm || 84);
+        // Keep print typography and geometry constant; magnify the entire canvas.
+        var scale = Math.min(availableWidth / width, availableHeight / height);
+        Object.assign(gd.style, {width:width+'px',height:height+'px',inset:'auto',
+            left:(availableWidth-width*scale)/2+'px',top:(availableHeight-height*scale)/2+'px',
+            transform:'scale('+scale+')',transformOrigin:'top left',background:'white'});
+        // Do not call Plotly.resize here: it measures the transformed DOM bounds
+        // and would apply this magnification a second time to the SVG geometry.
     }
-    async function update(figure, tabId, tabs, preset) {
+    async function update(figure, tabId, tabs, preset, viewMode) {
         if (!window.Plotly) return window.dash_clientside.no_update;
         activeId = tabId;
-        var host = document.getElementById(preset === 'presentation' ? 'pub-slide-workspace' : 'pub-plot-workspace');
+        var host = document.getElementById(viewMode === 'figure' ? 'pub-figure-workspace' : (preset === 'presentation' ? 'pub-slide-workspace' : 'pub-plot-workspace'));
         if (!host) return window.dash_clientside.no_update;
         var allowed = new Set((tabs || []).filter(function(t){return t.type === 'publication';}).map(function(t){return t.id;}));
         plots.forEach(function(entry,id){
@@ -29,16 +42,23 @@
                 entry = {gd:gd}; plots.set(figureId,entry);
                 if (typeof ResizeObserver !== 'undefined') {
                     entry.observer = new ResizeObserver(function(){requestAnimationFrame(function(){resize(gd);});});
-                    entry.observer.observe(gd);
+                    ['pub-figure-workspace','pub-plot-workspace','pub-slide-workspace'].forEach(function(id){
+                        var node=document.getElementById(id); if(node) entry.observer.observe(node);
+                    });
                 }
             }
             var signature = JSON.stringify(figure);
             if (entry.signature !== signature) {
                 entry.signature = signature;
                 var copy = JSON.parse(signature);
+                var meta = copy.layout && copy.layout.meta || {};
+                var width = (meta.gecko_width_mm || 84) > 90 ? 624 : 307;
+                var height = width*(meta.gecko_height_mm || 63)/(meta.gecko_width_mm || 84);
+                copy.layout = Object.assign({},copy.layout,{width:width,height:height,autosize:false});
+                Object.assign(entry.gd.style, {width:width+'px',height:height+'px'});
                 entry.gd.style.display = figureId === activeId ? 'block' : 'none';
                 await window.Plotly.react(entry.gd,copy.data || [],copy.layout || {},
-                    {responsive:true,displayModeBar:false,displaylogo:false,scrollZoom:false,doubleClick:'reset+autosize'});
+                    {responsive:false,displayModeBar:false,displaylogo:false,scrollZoom:false,doubleClick:'reset+autosize'});
             }
         }
         var current = plots.get(activeId);

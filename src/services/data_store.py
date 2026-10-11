@@ -218,6 +218,8 @@ class DataStore:
         self.lcms_service = LCMSService()
         self.project = ProjectPersistence(self._STATE_FILE)
         self._restore_services()
+        from .file_removal_service import FileRemovalService
+        self.file_removal_service = FileRemovalService(self)
 
     def _restore_services(self) -> None:
         try:
@@ -289,6 +291,7 @@ class DataStore:
         return component
 
     def clear(self) -> None:
+        self.file_removal_service.clear()
         self._bundles.clear()
         self._component_index.clear()
         self._file_index.clear()

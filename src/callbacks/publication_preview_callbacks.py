@@ -19,10 +19,10 @@ MM_TO_PX_300DPI = 300 / 25.4  # ~11.81 px per mm
 
 # Paper mock layout constants (must match paper_mock.py)
 _PAGE_WIDTH = 680
-_PAGE_PAD_H = 28 * 2  # left + right padding
-_CONTENT_WIDTH = _PAGE_WIDTH - _PAGE_PAD_H  # 624
-_COL_GAP = 10
-_SINGLE_COL_WIDTH = (_CONTENT_WIDTH - _COL_GAP) / 2  # 307
+_PAGE_PAD_H = _PAGE_WIDTH * 36 / 210  # physical 18 mm left/right margins
+_CONTENT_WIDTH = _PAGE_WIDTH - _PAGE_PAD_H  # 174 mm full-width
+_COL_GAP = _PAGE_WIDTH * 6 / 210
+_SINGLE_COL_WIDTH = (_CONTENT_WIDTH - _COL_GAP) / 2  # 84 mm column
 
 
 def register_publication_preview_callbacks(app, data_manager):
@@ -209,10 +209,11 @@ def register_publication_preview_callbacks(app, data_manager):
     # ── Toggle journal paper vs PowerPoint slide mock ───────────────────
     @app.callback(
         [Output('pub-paper-container', 'style'),
-         Output('pub-slide-container', 'style')],
-        Input('pub-preset', 'value'),
+         Output('pub-slide-container', 'style'),
+         Output('pub-figure-container', 'style')],
+        Input('pub-preset', 'value'), Input('pub-view-mode', 'value'),
     )
-    def toggle_mock_layout(preset):
+    def toggle_mock_layout(preset, view_mode):
         paper_style = {
             'flex': '1', 'overflow': 'auto', 'background': '#e8e8e8',
             'display': 'flex', 'justifyContent': 'center',
@@ -223,9 +224,14 @@ def register_publication_preview_callbacks(app, data_manager):
             'display': 'none', 'justifyContent': 'center',
             'alignItems': 'center', 'padding': '20px',
         }
+        editor_style = {'flex':'1', 'minHeight':0, 'position':'relative', 'padding':'24px',
+                        'display':'flex', 'background':'#edf0ed'}
+        if view_mode == 'figure':
+            return {**paper_style, 'display':'none'}, {**slide_style, 'display':'none'}, editor_style
+        editor_style['display'] = 'none'
         if preset == 'presentation':
-            return {**paper_style, 'display': 'none'}, {**slide_style, 'display': 'flex'}
-        return paper_style, slide_style
+            return {**paper_style, 'display': 'none'}, {**slide_style, 'display': 'flex'}, editor_style
+        return paper_style, slide_style, editor_style
 
     @app.callback(
         Output('pt-layout-mode', 'value', allow_duplicate=True),
@@ -303,7 +309,9 @@ def register_publication_preview_callbacks(app, data_manager):
 
         fig_obj.update_layout(
             uirevision=active_tab_id,
-            meta={**(fig_obj.layout.meta or {}), 'gecko_tab_id': active_tab_id},
+            meta={**(fig_obj.layout.meta or {}), 'gecko_tab_id': active_tab_id,
+                  'gecko_width_mm': (plot_settings or {}).get('figure_width_mm',84),
+                  'gecko_height_mm': (plot_settings or {}).get('figure_height_mm',63)},
             hovermode=False,
             dragmode='zoom',
         )
@@ -332,7 +340,7 @@ def register_publication_preview_callbacks(app, data_manager):
         readout = f"{w_mm:g} × {h_mm:g} mm · {dpi} DPI"
         aspect = f"{w_mm:g} / {h_mm:g}"
 
-        is_full = w_mm > 90
+        is_full = w_mm > 84
 
         base_slot_style = {
             'margin': '4px 0',
@@ -341,78 +349,10 @@ def register_publication_preview_callbacks(app, data_manager):
         }
 
         if is_full:
-            slot_style = {**base_slot_style, 'width': '100%'}
+            slot_style = {**base_slot_style, 'width': f'{w_mm * _PAGE_WIDTH / 210}px'}
             right_style = {'display': 'none'}
         else:
-            slot_style = {**base_slot_style, 'width': '100%'}
+            slot_style = {**base_slot_style, 'width': f'{w_mm * _PAGE_WIDTH / 210}px'}
             right_style = {'flex': '1', 'minWidth': '0'}
 
         return slot_style, right_style, readout, {**base_slot_style, 'width':'100%'}
-
-    # ── Export from preview ─────────────────────────────────────────
-    @app.callback(
-        Output('pub-export-download', 'data'),
-        Input('pub-export-btn', 'n_clicks'),
-        [State('pub-export-format', 'value'),
-         State('pub-fig-width-mm', 'value'),
-         State('pub-fig-height-mm', 'value'),
-         State('pub-dpi', 'value'),
-         State('pub-preview-graph', 'data')],
-        prevent_initial_call=True,
-    )
-    def export_from_preview(n_clicks, fmt, w_mm, h_mm, dpi, fig_data):
-        if not n_clicks or not fig_data:
-            return dash.no_update
-
-        w_mm = max(1, float(w_mm or 84))
-        h_mm = max(1, float(h_mm or 63))
-        dpi = max(72, int(dpi or 300))
-
-        fig = go.Figure(fig_data)
-
-        is_full = w_mm > 90
-        preview_width = _CONTENT_WIDTH if is_full else _SINGLE_COL_WIDTH
-        preview_height = preview_width * h_mm / w_mm
-
-        width = int(round(preview_width))
-        height = int(round(preview_height))
-
-        mm_to_px = dpi / 25.4
-        target_px = w_mm * mm_to_px
-        scale = target_px / preview_width
-
-        export_svc = data_manager.export_service
-
-        try:
-            if fmt == 'svg':
-                svg_bytes = export_svc.export_figure_svg(fig, width=width, height=height)
-                return dict(
-                    content=base64.b64encode(svg_bytes).decode(),
-                    filename='figure.svg', base64=True)
-            elif fmt == 'pdf':
-                fig = export_svc.prepare_figure_for_static_export(fig, width, height)
-                pdf_bytes = fig.to_image(
-                    format='pdf', width=width, height=height, scale=scale)
-                return dict(
-                    content=base64.b64encode(pdf_bytes).decode(),
-                    filename='figure.pdf', base64=True)
-            elif fmt == 'tiff':
-                from PIL import Image
-                import io as _io
-                png_bytes = export_svc.export_figure_png(
-                    fig, width=width, height=height, scale=scale)
-                img = Image.open(_io.BytesIO(png_bytes))
-                buf = _io.BytesIO()
-                img.save(buf, format='TIFF', compression='tiff_lzw', dpi=(dpi, dpi))
-                return dict(
-                    content=base64.b64encode(buf.getvalue()).decode(),
-                    filename='figure.tiff', base64=True)
-            else:
-                png_bytes = export_svc.export_figure_png(
-                    fig, width=width, height=height, scale=scale)
-                return dict(
-                    content=base64.b64encode(png_bytes).decode(),
-                    filename='figure.png', base64=True)
-        except Exception as e:
-            log.exception(f"Publication export failed: {e}")
-            return dash.no_update

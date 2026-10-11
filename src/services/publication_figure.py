@@ -47,6 +47,8 @@ def editable_publication_figure(source, settings, source_settings=None):
         unit_axes = {}
         old_axis_targets = {}
         units = {}
+        identities = {}
+        source_identities = (old.get('meta') or {}).get('gecko_axis_identities', {})
         if mode == 'stacked':
             if rows * cols == 1:
                 rows = max(1, len(data_indices))
@@ -58,7 +60,10 @@ def editable_publication_figure(source, settings, source_settings=None):
         for panel, index in enumerate(data_indices):
             trace = traces[index]
             old_y = trace.yaxis or 'y'
-            label = old.get(old_y.replace('y', 'yaxis', 1), {}).get('title', {}).get('text', '')
+            old_key = old_y.replace('y', 'yaxis', 1)
+            label = (source_identities.get(old_key, {}).get('label')
+                     or old.get(old_key, {}).get('title', {}).get('text', '')
+                     or (old.get('meta') or {}).get('gecko_axis_units', {}).get(old_key, ''))
             if mode == 'stacked':
                 n = panel + 1
                 xref, yref = ('x' if n == 1 else f'x{n}'), ('y' if n == 1 else f'y{n}')
@@ -67,6 +72,9 @@ def editable_publication_figure(source, settings, source_settings=None):
                 xref, yref = 'x', ('y' if n == 1 else f'y{n}')
                 if n > 1:
                     result.update_layout(**{f'yaxis{n}':dict(overlaying='y', anchor='free', side='right', autoshift=True, tickmode='sync')})
+            previous_x = (trace.xaxis or 'x').replace('x', 'xaxis', 1)
+            if previous_x in source_identities:
+                identities[xref.replace('x', 'xaxis', 1)] = source_identities[previous_x]
             targets[index] = (xref, yref)
             old_axis_targets.setdefault(old_y, (xref, yref))
             unit_key = yref.replace('y', 'yaxis', 1)
@@ -84,7 +92,8 @@ def editable_publication_figure(source, settings, source_settings=None):
         retained = {k:v for k,v in old.items() if not re.fullmatch(r'[xy]axis\d*|legend\d*', k)
                     and k not in ('annotations', 'shapes', 'template')}
         result.update_layout(**retained)
-        result.update_layout(meta={**(old.get('meta') or {}), 'gecko_axis_units':units})
+        result.update_layout(meta={**(old.get('meta') or {}), 'gecko_axis_units':units,
+                                   'gecko_axis_identities':identities})
         for key in result.layout:
             if re.fullmatch(r'xaxis\d*', key):
                 result.layout[key].title.text = old.get('xaxis', {}).get('title', {}).get('text', '')
@@ -101,10 +110,12 @@ def editable_publication_figure(source, settings, source_settings=None):
         fig = result
     if s.get('smooth_window', 0) != original.get('smooth_window', 0):
         smooth_plotly_traces(fig.data, s.get('smooth_window', 0))
-    if s['x_label'] == DEFAULT_PLOT_SETTINGS['x_label'] and fig.layout.xaxis.title.text:
+    if (s.get('axis_label_modes', {}).get('x') != 'custom'
+            and s['x_label'] == DEFAULT_PLOT_SETTINGS['x_label'] and fig.layout.xaxis.title.text):
         s['x_label'] = fig.layout.xaxis.title.text
     # Explicit user labels must override source unit labels; default labels don't.
-    if s['y1_label'] != DEFAULT_PLOT_SETTINGS['y1_label']:
+    if (s.get('axis_label_modes', {}).get('y') != 'auto'
+            and (s['y1_label'] != DEFAULT_PLOT_SETTINGS['y1_label'] or s.get('axis_label_modes', {}).get('y') == 'custom')):
         fig.update_yaxes(title_text=s['y1_label'])
     # Captured Separate figures also need a legend anchored in every pane.
     if mode == 'stacked':
@@ -117,6 +128,8 @@ def editable_publication_figure(source, settings, source_settings=None):
         fig.update_xaxes(autorange=True)
         fig.update_yaxes(autorange=True)
     apply_axis_linking(fig, s.get('link_x', True), s.get('y_scope') == 'global')
+    from services.axis_inspector import apply_axis_overrides
+    apply_axis_overrides(fig, s.get('axis_overrides', {}))
     if mode == 'stacked' and s.get('link_x', True):
         for key in fig.layout:
             if re.fullmatch(r'xaxis\d*', key):
@@ -157,5 +170,10 @@ def editable_publication_figure(source, settings, source_settings=None):
     for key in fig.layout:
         if re.fullmatch(r'legend\d*', key):
             fig.layout[key].update(itemwidth=30, tracegroupgap=0)
-    fig.update_layout(autosize=True, margin=dict(l=(s['tick_font_size']*4+14) if shared_y else 12, r=12, t=24 if s.get('title') else 12, b=12))
+    # Publication labels sit close to their axes; desktop-size title gaps waste
+    # a large fraction of an 84 mm column, especially with two Y axes.
+    fig.update_xaxes(title_standoff=3)
+    fig.update_yaxes(title_standoff=3)
+    fig.update_layout(autosize=True, margin=dict(l=(s['tick_font_size']*4+8) if shared_y else 4,
+                                                r=4, t=20 if s.get('title') else 6, b=4, pad=0))
     return fig

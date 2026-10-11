@@ -179,6 +179,8 @@ DEFAULT_PLOT_SETTINGS: Dict[str, object] = {
     "link_x": True, "y_scope": "independent",
     # Per-trace overrides
     "trace_overrides": {},
+    "axis_overrides": {},
+    "axis_label_modes": {},
 }
 
 
@@ -262,6 +264,8 @@ class PlotSettings:
 
     # -- 12. Per-trace overrides --
     trace_overrides: Dict[str, dict] = field(default_factory=dict)
+    axis_overrides: Dict[str, dict] = field(default_factory=dict)
+    axis_label_modes: Dict[str, str] = field(default_factory=dict)
 
 
 # ---------------------------------------------------------------------------
@@ -322,6 +326,8 @@ class PlotSettingsService:
         publication-ready plot.
         """
         import re
+        from services.axis_inspector import remember_axis_identities, apply_axis_overrides
+        remember_axis_identities(fig)
         _DASH_MAP = {'solid': 'solid', 'dash': 'dash', 'dot': 'dot', 'dashdot': 'dashdot'}
 
         # -- Template / theme ------------------------------------------------
@@ -448,6 +454,11 @@ class PlotSettingsService:
             if _xaxis_re.match(key):
                 existing = layout_json.get(key, {})
                 merged = dict(axis_common_x)
+                if settings.axis_label_modes.get('x') == 'auto':
+                    identity = (fig.layout.meta or {}).get('gecko_axis_identities', {}).get(key, {})
+                    source_title = identity.get('label') or existing.get('title', {}).get('text')
+                    if source_title:
+                        merged['title'] = dict(axis_common_x['title'], text=source_title)
                 suffix = key[len('xaxis'):]
                 y_domain = layout_json.get('yaxis' + suffix, {}).get('domain', [0, 1])
                 if shared and y_domain[0] > 0:
@@ -465,9 +476,15 @@ class PlotSettingsService:
                 existing_y = layout_json.get(key, {})
                 existing_title = existing_y.get('title', {})
                 has_custom_label = isinstance(existing_title, dict) and existing_title.get('text', '')
-                if shared and not has_custom_label:
+                if settings.axis_label_modes.get('y') == 'auto':
+                    identity = (fig.layout.meta or {}).get('gecko_axis_identities', {}).get(key, {})
+                    source_title = identity.get('label') or existing_title.get('text')
+                    if source_title:
+                        merged['title'] = dict(axis_common_y['title'], text=source_title)
+                elif shared and not has_custom_label:
                     merged['title'] = dict(text='', standoff=20)
-                elif has_custom_label and settings.y_label == DEFAULT_PLOT_SETTINGS['y1_label']:
+                elif has_custom_label and (settings.axis_label_modes.get('y') == 'auto' or
+                        (settings.y_label == DEFAULT_PLOT_SETTINGS['y1_label'] and settings.axis_label_modes.get('y') != 'custom')):
                     merged['title'] = dict(axis_common_y['title'], text=existing_title['text'])
                 fig.update_layout(**{key: merged})
 
@@ -557,8 +574,12 @@ class PlotSettingsService:
                 trace.marker.color = color
                 trace.marker.symbol = settings.marker_symbol
 
-            # Per-trace overrides (keyed by trace name)
-            overrides = (settings.trace_overrides or {}).get(trace_name)
+            # Stable source identity distinguishes signals sharing a display name.
+            meta = trace.meta if isinstance(trace.meta, dict) else {}
+            identity = (f"id:{meta['file_id']}:{trace_name}" if meta.get('file_id') is not None
+                        else f'trace:{data_trace_idx}')
+            overrides = (settings.trace_overrides or {}).get(
+                identity, (settings.trace_overrides or {}).get(trace_name))
             if overrides:
                 if 'color' in overrides:
                     color = overrides['color']
@@ -598,6 +619,7 @@ class PlotSettingsService:
             margin=dict(l=20, r=20, t=30 if not title_text else 50, b=40, autoexpand=True),
         )
 
+        apply_axis_overrides(fig, settings.axis_overrides)
         return fig
 
 
