@@ -7,7 +7,9 @@ fitting, and applying calibration models to chromatographic peak data.
 """
 
 import uuid
-from dataclasses import dataclass, field
+import json
+from copy import deepcopy
+from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
 from typing import Dict, List, Optional
 
@@ -27,6 +29,8 @@ class CalibrationPoint:
     concentration: float
     area: float
     included: bool = True
+    source_id: str = ""
+    position: Optional[float] = None
 
 
 @dataclass
@@ -43,6 +47,16 @@ class CalibrationModel:
     r_squared: Optional[float] = None
     residuals: Optional[List[float]] = None
     created_at: str = ""
+    response_type: str = "area"
+    response_units: str = ""
+    match_position: Optional[float] = None
+    match_tolerance: float = 0.2
+    signal_key: str = ""
+    x_units: str = ""
+    auto_apply: bool = True
+    # Old exports contain assigned concentrations but no measured responses.
+    # Keep these references distinct from measured calibration standards.
+    reference_concentrations: Dict[str, float] = field(default_factory=dict)
 
 
 # =============================================================================
@@ -64,6 +78,9 @@ class CalibrationService:
         fit_type: str = "linear",
         force_zero: bool = False,
         units: str = "",
+        *, response_type: str = "area", response_units: str = "",
+        match_position: Optional[float] = None, match_tolerance: float = 0.2,
+        signal_key: str = "", x_units: str = "", auto_apply: bool = True,
     ) -> CalibrationModel:
         """Create a new, empty calibration model and register it."""
         model = CalibrationModel(
@@ -74,9 +91,27 @@ class CalibrationService:
             force_zero=force_zero,
             units=units,
             created_at=datetime.now(timezone.utc).isoformat(),
+            response_type=response_type, response_units=response_units,
+            match_position=match_position, match_tolerance=match_tolerance,
+            signal_key=signal_key, x_units=x_units, auto_apply=auto_apply,
         )
+        self._validate_configuration(model)
         self._models[model.model_id] = model
         return model
+
+    def replace_model(self, model: CalibrationModel) -> CalibrationModel:
+        """Atomically commit an editor model, keeping its ID and copying data.
+
+        Validate/refit in a temporary service before replacing the live entry;
+        invalid edits cannot change an existing calibration or create a copy.
+        Also accepts a newly fitted editor model whose ID is not registered yet.
+        """
+        if not isinstance(model, CalibrationModel) or not model.model_id:
+            raise ValueError('A calibration model with an ID is required.')
+        staged = CalibrationService()
+        validated = staged.import_calibrations(self._model_to_dict(model))[0]
+        self._models[validated.model_id] = validated
+        return validated
 
     def get_model(self, model_id: str) -> Optional[CalibrationModel]:
         """Return a model by ID, or None."""
@@ -110,6 +145,14 @@ class CalibrationService:
         # Invalidate any previous fit
         self._invalidate_fit(model)
 
+    def update_standards(self, model_id: str, standards: List[CalibrationPoint]) -> None:
+        """Replace measured standards and invalidate the previous fit."""
+        model = self._require_model(model_id)
+        if not all(isinstance(point, CalibrationPoint) for point in standards):
+            raise ValueError("Standards must be CalibrationPoint measurements.")
+        model.standards = deepcopy(standards)
+        self._invalidate_fit(model)
+
     def remove_standard(self, model_id: str, sample_name: str) -> None:
         """Remove all standards matching *sample_name*."""
         model = self._require_model(model_id)
@@ -131,6 +174,8 @@ class CalibrationService:
     def fit_model(self, model_id: str) -> CalibrationModel:
         """Perform regression on included standards and store coefficients."""
         model = self._require_model(model_id)
+        self._invalidate_fit(model)
+        self._validate_configuration(model)
         included = [s for s in model.standards if s.included]
 
         if len(included) < 2:
@@ -141,6 +186,25 @@ class CalibrationService:
         conc = np.array([s.concentration for s in included], dtype=np.float64)
         area = np.array([s.area for s in included], dtype=np.float64)
 
+        if not np.all(np.isfinite(conc)) or np.any(conc < 0):
+            raise ValueError("Concentrations must be finite and nonnegative.")
+        if not np.all(np.isfinite(area)):
+            raise ValueError("Measured responses must be finite.")
+        if np.ptp(area) == 0:
+            raise ValueError("Measured responses must vary across standards.")
+        required = 3 if model.fit_type == "quadratic" and not model.force_zero else 2
+        if np.unique(conc).size < required:
+            raise ValueError(f"At least {required} distinct concentration levels required.")
+        scaled = conc / max(float(np.max(conc)), 1.0)
+        if model.fit_type == "quadratic":
+            design = np.column_stack([scaled ** 2, scaled])
+        else:
+            design = scaled[:, None]
+        if not model.force_zero or model.fit_type == "power":
+            design = np.column_stack([design, np.ones(len(conc))])
+        if np.linalg.matrix_rank(design) < design.shape[1]:
+            raise ValueError("Concentration levels cannot uniquely determine this fit.")
+
         if model.fit_type == "linear":
             coeffs, predicted = self._fit_linear(conc, area, model.force_zero)
         elif model.fit_type == "quadratic":
@@ -150,6 +214,8 @@ class CalibrationService:
         else:
             raise ValueError(f"Unknown fit_type: {model.fit_type!r}")
 
+        if not np.all(np.isfinite(coeffs)) or not np.all(np.isfinite(predicted)):
+            raise ValueError("The fitted model is not finite.")
         model.coefficients = coeffs.tolist()
         model.r_squared = self._calc_r_squared(area, predicted)
         model.residuals = (area - predicted).tolist()
@@ -169,45 +235,50 @@ class CalibrationService:
         if model.coefficients is None:
             return None
 
+        try:
+            area = float(area)
+        except (TypeError, ValueError):
+            return None
+        if not np.isfinite(area):
+            return None
         coeffs = np.array(model.coefficients, dtype=np.float64)
 
+        def valid(value):
+            return float(value) if np.isfinite(value) and value >= 0 else None
+
         if model.fit_type == "linear":
-            # area = m*conc + b  =>  conc = (area - b) / m
-            m = coeffs[0]
-            b = coeffs[1] if len(coeffs) > 1 else 0.0
-            if m == 0:
-                return None
-            return float((area - b) / m)
-
+            m, b = coeffs[0], coeffs[1] if len(coeffs) > 1 else 0.0
+            return valid((area - b) / m) if m != 0 else None
         if model.fit_type == "quadratic":
-            # area = a*conc² + b*conc + c  =>  solve for conc
-            a, b, c_coeff = coeffs[0], coeffs[1], (coeffs[2] if len(coeffs) > 2 else 0.0)
+            a, b, c = coeffs[0], coeffs[1], coeffs[2] if len(coeffs) > 2 else 0.0
             if a == 0:
-                # Degenerate — linear
-                if b == 0:
-                    return None
-                return float((area - c_coeff) / b)
-            discriminant = b ** 2 - 4 * a * (c_coeff - area)
-            if discriminant < 0:
+                return valid((area - c) / b) if b != 0 else None
+            discriminant = b ** 2 - 4 * a * (c - area)
+            tolerance = np.finfo(float).eps * max(b*b, abs(4*a*(c-area)), 1.0) * 16
+            if discriminant < -tolerance:
                 return None
-            sqrt_d = np.sqrt(discriminant)
-            roots = [(-b + sqrt_d) / (2 * a), (-b - sqrt_d) / (2 * a)]
-            # Prefer the positive root
-            positive = [r for r in roots if r >= 0]
-            if not positive:
-                return None
-            return float(min(positive))
-
+            sqrt_d = np.sqrt(max(0.0, discriminant))
+            roots = [(-b + sqrt_d)/(2*a), (-b - sqrt_d)/(2*a)]
+            candidates = []
+            for root in roots:
+                if valid(root) is not None and not any(np.isclose(root, prior, rtol=1e-7, atol=1e-10) for prior in candidates):
+                    candidates.append(float(root))
+            if len(candidates) == 1:
+                return candidates[0]
+            levels = ([point.concentration for point in model.standards if point.included]
+                      or list(model.reference_concentrations.values()))
+            if levels and candidates:
+                lo, hi = min(levels), max(levels)
+                inside = [root for root in candidates if lo-1e-9 <= root <= hi+1e-9]
+                if len(inside) == 1:
+                    return inside[0]
+            return None
         if model.fit_type == "power":
-            # area = a * conc^b  =>  conc = (area / a)^(1/b)
-            a_coeff, b_exp = coeffs[0], coeffs[1]
-            if a_coeff <= 0 or b_exp == 0:
+            a, exponent = coeffs
+            if a <= 0 or exponent == 0 or area < 0 or (area == 0 and exponent < 0):
                 return None
-            ratio = area / a_coeff
-            if ratio < 0:
-                return None
-            return float(ratio ** (1.0 / b_exp))
-
+            with np.errstate(over='ignore', invalid='ignore'):
+                return valid(np.power(area/a, 1.0/exponent))
         return None
 
     def predict_area(self, model_id: str, concentration: float) -> Optional[float]:
@@ -238,7 +309,7 @@ class CalibrationService:
                 hovertemplate=(
                     "%{text}<br>"
                     "Conc: %{x:.4g}<br>"
-                    "Area: %{y:.4g}<extra></extra>"
+                    f"{model.response_type.capitalize()}: %{{y:.4g}}<extra></extra>"
                 ),
                 text=[s.sample_name for s in inc],
             ))
@@ -256,14 +327,16 @@ class CalibrationService:
                 hovertemplate=(
                     "%{text} (excluded)<br>"
                     "Conc: %{x:.4g}<br>"
-                    "Area: %{y:.4g}<extra></extra>"
+                    f"{model.response_type.capitalize()}: %{{y:.4g}}<extra></extra>"
                 ),
                 text=[s.sample_name for s in exc],
             ))
 
-        # Fitted curve
-        if model.coefficients is not None and inc:
-            conc_arr = np.array([s.concentration for s in inc])
+        # Legacy concentration references define a known fit domain, but do
+        # not become observed response markers.
+        levels = [s.concentration for s in inc] or list(model.reference_concentrations.values())
+        if model.coefficients is not None and levels:
+            conc_arr = np.array(levels)
             x_min, x_max = conc_arr.min(), conc_arr.max()
             margin = (x_max - x_min) * 0.05 if x_max != x_min else 1.0
             x_curve = np.linspace(max(0, x_min - margin), x_max + margin, 200)
@@ -286,7 +359,7 @@ class CalibrationService:
         fig.update_layout(
             title=f"Calibration — {model.analyte_name}",
             xaxis_title=f"Concentration ({model.units})" if model.units else "Concentration",
-            yaxis_title="Peak Area",
+            yaxis_title=f"Peak {model.response_type}" + (f" ({model.response_units})" if model.response_units else ""),
             template="plotly_white",
             annotations=[
                 dict(
@@ -322,7 +395,8 @@ class CalibrationService:
 
         fig.add_trace(go.Scatter(
             x=conc,
-            y=model.residuals,
+            y=[0.0 if abs(value) <= max(1.0, max(abs(s.area) for s in inc))*1e-12 else value
+               for value in model.residuals],
             mode="markers",
             name="Residuals",
             marker=dict(color="#007acc", size=9),
@@ -338,7 +412,7 @@ class CalibrationService:
         fig.update_layout(
             title=f"Residuals — {model.analyte_name}",
             xaxis_title=f"Concentration ({model.units})" if model.units else "Concentration",
-            yaxis_title="Residual (observed − predicted)",
+            yaxis_title="Response error",
             template="plotly_white",
         )
         return fig
@@ -352,9 +426,164 @@ class CalibrationService:
 
     def import_model(self, data: dict) -> str:
         """Import a model from a dict (e.g. loaded from JSON).  Returns model_id."""
-        model = self._model_from_dict(data)
-        self._models[model.model_id] = model
-        return model.model_id
+        return self.import_calibrations(data)[0].model_id
+
+    def export_calibrations(self, model_ids=None) -> dict:
+        """Return a portable, versioned object suitable for JSON download."""
+        ids = list(self._models) if model_ids is None else list(model_ids)
+        return {'format': 'geckoplotter-calibrations', 'version': 1,
+                'models': [self.export_model(model_id) for model_id in ids]}
+
+    def import_calibrations(self, payload) -> List[CalibrationModel]:
+        """Import portable, current or Streamlit JSON atomically.
+
+        Measured points are refitted. Coefficients-only legacy models retain
+        their validated fit, without inventing observations or residuals.
+        Existing live models are never overwritten by an imported ID.
+        """
+        if isinstance(payload, (str, bytes)):
+            try:
+                payload = json.loads(payload)
+            except (ValueError, TypeError) as exc:
+                raise ValueError('Invalid calibration JSON.') from exc
+        if not isinstance(payload, dict):
+            raise ValueError('Calibration file must contain an object.')
+        if 'format' in payload:
+            if payload.get('format') != 'geckoplotter-calibrations' or payload.get('version') != 1:
+                raise ValueError('Unsupported calibration format or version.')
+            records = payload.get('models')
+            if not isinstance(records, list):
+                raise ValueError('Calibration models must be a list.')
+        elif 'calibration_models' in payload or isinstance(payload.get('standards'), dict):
+            records = self._legacy_records(payload)
+        elif 'analyte_name' in payload or 'model_id' in payload:
+            records = [payload]
+        elif 'model_type' in payload:
+            records = self._legacy_records({'calibration_models': {'': payload}})
+        elif payload and all(isinstance(value, dict) and 'analyte_name' in value for value in payload.values()):
+            records = list(payload.values())
+        else:
+            raise ValueError('No calibration models found in the file.')
+        if not records:
+            raise ValueError('No calibration models found in the file.')
+
+        staged = CalibrationService()
+        used_ids = set(self._models)
+        for record in records:
+            try:
+                model = self._model_from_dict(record)
+                self._validate_configuration(model)
+                for point in model.standards:
+                    point.concentration = self._finite_number(point.concentration, 'Concentration', nonnegative=True)
+                    point.area = self._finite_number(point.area, 'Measured response')
+                    if point.position is not None:
+                        point.position = self._finite_number(point.position, 'Standard position')
+                model.reference_concentrations = {str(key): self._finite_number(value, 'Reference concentration', nonnegative=True)
+                                                  for key, value in model.reference_concentrations.items()}
+                if not model.model_id or model.model_id in used_ids:
+                    model.model_id = str(uuid.uuid4())
+                used_ids.add(model.model_id)
+                staged._models[model.model_id] = model
+                if model.standards:
+                    staged.fit_model(model.model_id)
+                elif model.coefficients is not None:
+                    self._validate_coefficients(model)
+                    model.residuals = None
+                else:
+                    self._invalidate_fit(model)
+            except (KeyError, TypeError, OverflowError) as exc:
+                raise ValueError(f'Invalid calibration model: {exc}') from exc
+        self._models.update(staged._models)
+        return list(staged._models.values())
+
+    @staticmethod
+    def _legacy_records(payload):
+        """Read the Streamlit exporter: concentration references are not areas."""
+        models = payload.get('calibration_models', {})
+        standards = payload.get('standards', {})
+        if not isinstance(models, dict) or not isinstance(standards, dict):
+            raise ValueError('Legacy calibration models and standards must be objects.')
+        records = []
+        for group in dict.fromkeys([*models, *standards]):
+            raw = models.get(group, {})
+            references = standards.get(group, {})
+            if not isinstance(raw, dict) or not isinstance(references, dict):
+                raise ValueError('Invalid legacy calibration group.')
+            fit_type = raw.get('model_type', references.get('model_type', payload.get('model_type', 'linear')))
+            fit_type = 'power' if fit_type == 'power law' else fit_type
+            zero = raw.get('force_zero', references.get('force_zero', payload.get('force_zero', False)))
+            points = raw.get('raw_data', references.get('raw_data', []))
+            if isinstance(raw.get('standards'), list):
+                points = raw['standards']
+            assigned = {}
+            for source in (references, raw.get('standards', {})):
+                if not isinstance(source, dict):
+                    continue
+                for key, value in source.items():
+                    if key not in ('name', 'rt', 'units', 'force_zero', 'model_type') and isinstance(value, (int, float)) and not isinstance(value, bool):
+                        assigned[str(key)] = value
+            coefficients = None
+            params = raw.get('parameters')
+            if raw and not points:
+                if not isinstance(params, dict):
+                    raise ValueError('Legacy model has no measured points or numeric parameters.')
+                if fit_type == 'linear':
+                    slope = params.get('slope', params.get('m'))
+                    coefficients = [slope, params.get('intercept', params.get('b', 0))]
+                elif fit_type == 'quadratic':
+                    coefficients = [params.get('a'), params.get('b'), params.get('c', 0)]
+                elif fit_type == 'power':
+                    coefficients = [params.get('a'), params.get('b')]
+            records.append({
+                'model_id': str(uuid.uuid4()), 'analyte_name': raw.get('name', references.get('name', f'Group {group}')),
+                'group_id': str(group), 'fit_type': fit_type, 'force_zero': zero,
+                'units': raw.get('units', references.get('units', payload.get('units', ''))),
+                'match_position': raw.get('rt', references.get('rt')), 'x_units': 'min',
+                'standards': points, 'reference_concentrations': assigned,
+                'coefficients': coefficients, 'r_squared': raw.get('r_squared'),
+            })
+        return records
+
+    @staticmethod
+    def _finite_number(value, name, nonnegative=False):
+        try:
+            number = float(value)
+        except (TypeError, ValueError, OverflowError) as exc:
+            raise ValueError(f'{name} must be a finite number.') from exc
+        if not np.isfinite(number) or (nonnegative and number < 0):
+            raise ValueError(f'{name} must be finite' + (' and nonnegative.' if nonnegative else '.'))
+        return number
+
+    @classmethod
+    def _validate_configuration(cls, model):
+        if model.fit_type not in ('linear', 'quadratic', 'power'):
+            raise ValueError(f'Unknown fit type: {model.fit_type!r}')
+        if model.response_type not in ('area', 'height'):
+            raise ValueError('Response must be area or height.')
+        model.match_tolerance = cls._finite_number(model.match_tolerance, 'Match tolerance', nonnegative=True)
+        if model.match_position is not None:
+            model.match_position = cls._finite_number(model.match_position, 'Match position')
+
+    @classmethod
+    def _validate_coefficients(cls, model):
+        if not isinstance(model.coefficients, (list, tuple, np.ndarray)):
+            raise ValueError('Calibration coefficients must be a numeric list.')
+        coefficients = list(model.coefficients)
+        expected = 3 if model.fit_type == 'quadratic' else 2
+        if model.force_zero and model.fit_type in ('linear', 'quadratic') and len(coefficients) == expected-1:
+            coefficients.append(0.0)
+        if len(coefficients) != expected:
+            raise ValueError('Wrong number of calibration coefficients.')
+        coefficients = [cls._finite_number(value, 'Coefficient') for value in coefficients]
+        if model.force_zero and model.fit_type != 'power' and coefficients[-1] != 0:
+            raise ValueError('A zero-intercept model cannot have a nonzero intercept.')
+        if (model.fit_type == 'linear' and coefficients[0] == 0 or
+            model.fit_type == 'quadratic' and coefficients[0] == coefficients[1] == 0 or
+            model.fit_type == 'power' and (coefficients[0] <= 0 or coefficients[1] == 0)):
+            raise ValueError('Calibration coefficients cannot define a constant or invalid response.')
+        model.coefficients = coefficients
+        if model.r_squared is not None:
+            model.r_squared = cls._finite_number(model.r_squared, 'R squared')
 
     def serialize(self) -> dict:
         """Serialize all models for persistence."""
@@ -481,48 +710,21 @@ class CalibrationService:
 
     @staticmethod
     def _model_to_dict(model: CalibrationModel) -> dict:
-        return {
-            "model_id": model.model_id,
-            "analyte_name": model.analyte_name,
-            "group_id": model.group_id,
-            "fit_type": model.fit_type,
-            "force_zero": model.force_zero,
-            "units": model.units,
-            "standards": [
-                {
-                    "sample_name": s.sample_name,
-                    "concentration": s.concentration,
-                    "area": s.area,
-                    "included": s.included,
-                }
-                for s in model.standards
-            ],
-            "coefficients": model.coefficients,
-            "r_squared": model.r_squared,
-            "residuals": model.residuals,
-            "created_at": model.created_at,
-        }
+        return asdict(model)
 
     @staticmethod
     def _model_from_dict(d: dict) -> CalibrationModel:
-        return CalibrationModel(
-            model_id=d["model_id"],
-            analyte_name=d["analyte_name"],
-            group_id=d["group_id"],
-            fit_type=d["fit_type"],
-            force_zero=d.get("force_zero", False),
-            units=d.get("units", ""),
-            standards=[
-                CalibrationPoint(
-                    sample_name=s["sample_name"],
-                    concentration=s["concentration"],
-                    area=s["area"],
-                    included=s.get("included", True),
-                )
-                for s in d.get("standards", [])
-            ],
-            coefficients=d.get("coefficients"),
-            r_squared=d.get("r_squared"),
-            residuals=d.get("residuals"),
-            created_at=d.get("created_at", ""),
-        )
+        values = {key: deepcopy(value) for key, value in d.items()
+                  if key in CalibrationModel.__dataclass_fields__ and key != 'standards'}
+        values.setdefault('model_id', str(uuid.uuid4()))
+        values.setdefault('analyte_name', 'Calibration')
+        values.setdefault('group_id', '')
+        values.setdefault('fit_type', 'linear')
+        values.setdefault('force_zero', False)
+        values.setdefault('units', '')
+        points = d.get('standards', [])
+        if not isinstance(points, list):
+            raise ValueError("Measured standards must be a list.")
+        values['standards'] = [CalibrationPoint(**{key: deepcopy(value) for key, value in point.items()
+                                if key in CalibrationPoint.__dataclass_fields__}) for point in points]
+        return CalibrationModel(**values)

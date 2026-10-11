@@ -1,0 +1,35 @@
+.calibration-workspace { display:block; height:100%; min-height:0; overflow:auto; padding:12px 14px; box-sizing:border-box; container-type:inline-size; }
+.cal-toolbar { display:flex; flex-wrap:wrap; gap:10px; align-items:flex-end; margin-bottom:8px; }
+.cal-model-select { flex:1 1 210px; min-width:160px; }
+.cal-actions { display:flex; flex-wrap:wrap; align-items:center; gap:6px; }
+.cal-actions .btn, .cal-fit-actions .btn { min-height:30px; padding:5px 10px; white-space:nowrap; }
+.cal-feedback { font-size:12px; line-height:1.4; color:#55555a; }
+.cal-feedback:not(:empty) { padding:6px 0 10px; }
+.cal-workspace-grid { display:grid; grid-template-columns:minmax(0,1fr); gap:16px; }
+.cal-editor, .cal-diagnostics { min-width:0; }
+.cal-section { min-width:0; margin:0 0 12px; }
+.cal-heading { font-size:12px; font-weight:600; color:#353538; margin:0 0 10px; padding-top:10px; border-top:1px solid #e2e2e5; }
+.cal-fields { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+.cal-fields > :first-child { grid-column:1 / -1; }
+.cal-response-row { display:flex; align-items:center; flex-wrap:wrap; gap:12px; margin:10px 0; }
+.cal-field-label { display:block; font-size:12px; font-weight:500; margin-bottom:4px; }
+.cal-add-actions { margin:8px 0; }
+.cal-note { font-size:11px; line-height:1.45; color:#747479; margin:5px 0 8px; }
+.cal-match-fields { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:10px; }
+.cal-fit-actions { display:flex; align-items:center; flex-wrap:wrap; gap:8px 12px; }
+.cal-fit-actions .cal-note { flex:1 1 180px; margin:0; }
+.cal-curve { width:100%; height:245px; min-height:180px; }
+.cal-residuals { width:100%; height:210px; min-height:180px; }
+.cal-results { font-size:12px; line-height:1.5; }
+@container (min-width:780px) {
+  .cal-workspace-grid { grid-template-columns:minmax(360px,1fr) minmax(320px,1fr); gap:20px; }
+}
+@container (min-width:1050px) {
+  .cal-fields { grid-template-columns:1.2fr 1fr 1fr; }
+  .cal-fields > :first-child { grid-column:auto; }
+}
+
+.cal-section > summary { cursor:pointer; list-style:revert; }
+.calibration-diagnostics { width:100%; border-collapse:collapse; font-size:11px; }
+.calibration-diagnostics th, .calibration-diagnostics td { padding:6px 8px; border-bottom:1px solid #e4e4e6; text-align:right; }
+.calibration-diagnostics th:first-child, .calibration-diagnostics td:first-child { text-align:left; }

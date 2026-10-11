@@ -14,6 +14,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 
 import dash
 from components.spectrum_polarity_control import create_spectrum_polarity_control
+from components.calibration_panel import create_calibration_panel
 from dash import dcc, html, dash_table, Input, Output, State, ClientsideFunction, clientside_callback
 import dash_mantine_components as dmc
 from dash_iconify import DashIconify
@@ -182,6 +183,7 @@ _layout_body = html.Div(
         dcc.Store(id='selected-peak-idx', data=None),  # Index of peak being edited
         html.Div(id='selected-peak-keyboard-state', children='', style={'display': 'none'}),
         dcc.Store(id='clear-shapes-trigger', data=0),  # Counter to trigger shape clearing
+        dcc.Store(id='cal-import-peaks', data=None),
         dcc.Store(id='peak-change-trigger', data=0),  # Counter to refresh tables/overlays after peak edits
         dcc.Store(id='peak-name-persist-trigger', data=None),
         dcc.Store(id='cross-sample-name-trigger', data=None),
@@ -1067,6 +1069,13 @@ _layout_body = html.Div(
                                                         'height': '100%',
                                                         'overflowY': 'auto'
                                                     }, children=[
+                                                        html.Div([
+                                                            dmc.Button('Use selected peaks for calibration',
+                                                                       id='cross-use-calibration-btn', size='xs', disabled=True),
+                                                            html.Span(id='cross-calibration-feedback', role='status',
+                                                                      style={'fontSize': '12px'}),
+                                                        ], style={'display': 'flex', 'alignItems': 'center',
+                                                                  'gap': '10px', 'marginBottom': '10px', 'flexWrap': 'wrap'}),
                                                         dash_table.DataTable(
                                                             id='cross-sample-table',
                                                             columns=[], data=[],
@@ -1151,116 +1160,8 @@ _layout_body = html.Div(
                                                     ]),
                                                     ]),
                                                     # Calibration Tab
-                                                    dmc.TabsPanel(value="calibration", style={'flex': '1', 'overflow': 'auto'}, children=[
-                                                    html.Div(id="calibration-content", className="tab-content", style={
-                                                        'display': 'block',
-                                                        'padding': '15px',
-                                                        'height': '100%',
-                                                        'overflowY': 'auto'
-                                                    }, children=[
-                                                        html.Div(id='calibration-container', children=[
-                                                            html.Div(
-                                                                'Calibration is still work in progress. Treat fitted values and exports as provisional.',
-                                                                style={
-                                                                    'fontSize': '12px',
-                                                                    'color': '#7a4b00',
-                                                                    'backgroundColor': '#fff4d8',
-                                                                    'border': '1px solid #f1d28a',
-                                                                    'borderRadius': '6px',
-                                                                    'padding': '8px 10px',
-                                                                    'marginBottom': '12px',
-                                                                },
-                                                            ),
-                                                            # Model setup
-                                                            html.Div([
-                                                                html.Div('Create Calibration Model', style={
-                                                                    'fontWeight': 'bold', 'fontSize': '14px', 'marginBottom': '10px'}),
-                                                                html.Div([
-                                                                    html.Div([html.Label('Analyte name', className='form-label'),
-                                                                              dmc.TextInput(id='cal-analyte-name',
-                                                                                            placeholder='e.g. Caffeine',
-                                                                                            size='xs', style={'width': '100%'})],
-                                                                             style={'flex': '2'}),
-                                                                    html.Div([html.Label('Units', className='form-label'),
-                                                                              dmc.TextInput(id='cal-units',
-                                                                                            placeholder='e.g. mg/mL',
-                                                                                            size='xs', style={'width': '100%'})],
-                                                                             style={'flex': '1'}),
-                                                                ], style={'display': 'flex', 'gap': '8px', 'marginBottom': '8px'}),
-                                                                html.Div([
-                                                                    html.Div([html.Label('Fit type', className='form-label'),
-                                                                              dmc.Select(id='cal-fit-type', value='linear', size='xs',
-                                                                                         data=[{'label': t.title(), 'value': t}
-                                                                                               for t in ['linear', 'quadratic', 'power']],
-                                                                                         clearable=False, allowDeselect=False)],
-                                                                             style={'flex': '1'}),
-                                                                    html.Div([html.Label('Peak group', className='form-label'),
-                                                                              dmc.Select(id='cal-peak-group', placeholder='Select peak group...',
-                                                                                         data=[], size='xs')],
-                                                                             style={'flex': '1'}),
-                                                                ], style={'display': 'flex', 'gap': '8px', 'marginBottom': '8px'}),
-                                                                dmc.Switch(id='cal-force-zero', label='Force through origin',
-                                                                           checked=False, size='sm', mb=8),
-                                                                html.Button('Create Model', id='cal-create-btn', className='btn btn-primary',
-                                                                            style={'width': '100%', 'marginBottom': '15px'}),
-                                                            ], style={'padding': '12px', 'backgroundColor': 'rgba(0,0,0,0.02)',
-                                                                      'borderRadius': '8px', 'marginBottom': '15px'}),
-
-                                                            # Standards table
-                                                            html.Div([
-                                                                html.Div('Standards', style={
-                                                                    'fontWeight': 'bold', 'fontSize': '14px', 'marginBottom': '10px'}),
-                                                                html.Div([
-                                                                    html.Label('Active model', className='form-label'),
-                                                                    dmc.Select(id='cal-active-model', placeholder='No models created yet',
-                                                                               data=[], size='xs', mb=8),
-                                                                ]),
-                                                                html.Div([
-                                                                    html.Div([html.Label('Sample', className='form-label'),
-                                                                              dmc.TextInput(id='cal-std-sample',
-                                                                                            placeholder='Sample name',
-                                                                                            size='xs', style={'width': '100%'})],
-                                                                             style={'flex': '2'}),
-                                                                    html.Div([html.Label('Conc.', className='form-label'),
-                                                                              dmc.NumberInput(id='cal-std-conc',
-                                                                                              placeholder='0.0',
-                                                                                              size='xs', style={'width': '100%'})],
-                                                                             style={'flex': '1'}),
-                                                                    html.Div([html.Label('Area', className='form-label'),
-                                                                              dmc.NumberInput(id='cal-std-area',
-                                                                                              placeholder='0.0',
-                                                                                              size='xs', style={'width': '100%'})],
-                                                                             style={'flex': '1'}),
-                                                                ], style={'display': 'flex', 'gap': '8px', 'marginBottom': '8px'}),
-                                                                html.Div([
-                                                                    html.Button('Add Standard', id='cal-add-std-btn',
-                                                                                className='btn btn-primary', style={'marginRight': '8px'}),
-                                                                    html.Button('Fit Model', id='cal-fit-btn',
-                                                                                className='btn btn-secondary', style={'marginRight': '8px'}),
-                                                                    html.Button('Predict All', id='cal-predict-btn',
-                                                                                className='btn btn-secondary'),
-                                                                ], style={'display': 'flex', 'marginBottom': '10px'}),
-                                                                html.Div(id='cal-standards-table', children=[]),
-                                                            ], style={'marginBottom': '15px'}),
-
-                                                            # Calibration curve display
-                                                            html.Div([
-                                                                html.Div('Calibration Curve', style={
-                                                                    'fontWeight': 'bold', 'fontSize': '14px', 'marginBottom': '10px'}),
-                                                                dcc.Graph(id='cal-curve-graph',
-                                                                          figure=go.Figure(layout=go.Layout(
-                                                                              template='plotly_white', autosize=True,
-                                                                              title='Create a model and add standards')),
-                                                                          responsive=True,
-                                                                          style={'width': '100%', 'height': '300px'}),
-                                                                html.Div(id='cal-results-info',
-                                                                         style={'fontSize': '12px', 'padding': '8px',
-                                                                                'backgroundColor': 'rgba(0,0,0,0.02)',
-                                                                                'borderRadius': '6px', 'marginTop': '8px'}),
-                                                            ]),
-                                                        ])
-                                                    ]),
-                                                    ]),
+                                                    dmc.TabsPanel(value="calibration", style={'flex':'1','minHeight':0,'overflow':'auto'},
+                                                                  children=create_calibration_panel()),
                                                     # ── MS Scan tab ──
                                                     dmc.TabsPanel(value="ms-scan", style={'flex': '1', 'minHeight': 0, 'overflow': 'auto'}, children=[
                                                     html.Div(className="tab-content analysis-graph-content", style={

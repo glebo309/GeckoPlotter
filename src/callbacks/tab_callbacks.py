@@ -53,11 +53,12 @@ def register_tab_callbacks(app: dash.Dash, data_manager) -> None:
          Input('peak-change-trigger', 'data'),
          Input('peak-name-persist-trigger', 'data'),
          Input('cross-sample-name-trigger', 'data'),
-         Input('active-tab', 'data')],
+         Input('active-tab', 'data'),
+         Input('cal-revision', 'data')],
         [State('loaded-files', 'data')],
         prevent_initial_call=True
     )
-    def update_peak_analysis_tab(active_file_id, peak_change, _name_trigger, _xname_trigger, active_tab, loaded_files):
+    def update_peak_analysis_tab(active_file_id, peak_change, _name_trigger, _xname_trigger, active_tab, cal_revision=0, loaded_files=None):
         """Update peak-table data in-place (preserves selections)."""
 
         HIDE = {'display': 'none'}
@@ -88,10 +89,17 @@ def register_tab_callbacks(app: dash.Dash, data_manager) -> None:
                                 data_manager.peak_service.group_peaks_across_samples(
                                     file_overlay_map=data_manager.build_file_overlay_map())
 
+            from services.calibration_workflow import apply_calibrations
+            calibration_results = apply_calibrations(data_manager)
             frames = []
             for fid, signal in peak_sources(active_file_id):
                 frame = data_manager.peak_service.peaks_to_table(fid)
                 if not frame.empty:
+                    predictions = {peak.peak_id: calibration_results.get(f'{peak.file_id}:{peak.peak_id}', {})
+                                   for peak in data_manager.peak_service.get_peaks(fid)}
+                    for label, key in [('Concentration', 'concentration'), ('Concentration units', 'units'),
+                                       ('Calibration', 'model'), ('Calibration status', 'status')]:
+                        frame[label] = [predictions.get(pid, {}).get(key) for pid in frame['peak_id']]
                     if signal is not None:
                         frame.insert(1, 'Signal', signal)
                     frames.append(frame)
@@ -102,12 +110,13 @@ def register_tab_callbacks(app: dash.Dash, data_manager) -> None:
             if '_row_id' not in df.columns:
                 df.insert(0, '_row_id', range(len(df)))
             hidden = {'_row_id', 'peak_id'}
+            calculated = {'Signal', 'Concentration', 'Concentration units', 'Calibration', 'Calibration status'}
             columns = [
                 {"name": col, "id": col,
-                 "editable": col not in hidden and col != 'Signal',
+                 "editable": col not in hidden and col not in calculated,
                  "selectable": col not in hidden,
-                 "deletable": col not in hidden and col != 'Signal',
-                 "renamable": col not in hidden and col != 'Signal'}
+                 "deletable": col not in hidden and col not in calculated,
+                 "renamable": col not in hidden and col not in calculated}
                 for col in df.columns if col not in hidden
             ]
             return df.to_dict('records'), columns, SHOW, df.to_json(orient='split')
@@ -238,6 +247,45 @@ def register_tab_callbacks(app: dash.Dash, data_manager) -> None:
         log.debug(f"[persist_cross_sample] changed={changed}")
         return {'ts': str(changed)} if changed else dash.no_update
 
+    def selected_comparison_ids(selected_ids, visible_selected_ids, selected_rows, visible_rows, rows):
+        # Dash's selected_rows indexes the original data; row IDs survive sorting.
+        chosen = visible_selected_ids if visible_selected_ids is not None else selected_ids
+        if chosen is None:
+            chosen = [(rows[index] or {}).get('id') for index in (selected_rows or [])
+                      if isinstance(index, int) and 0 <= index < len(rows or [])]
+        visible = {row.get('id') for row in (visible_rows if visible_rows is not None else rows or [])}
+        return list(dict.fromkeys(key for key in chosen if key and key in visible))
+
+    selection_inputs = [Input('cross-sample-table', 'selected_row_ids'),
+                        Input('cross-sample-table', 'derived_virtual_selected_row_ids'),
+                        Input('cross-sample-table', 'selected_rows'),
+                        Input('cross-sample-table', 'derived_virtual_data'),
+                        Input('cross-sample-table', 'data')]
+
+    @app.callback(Output('cross-use-calibration-btn', 'disabled'), selection_inputs)
+    def cross_calibration_disabled(selected_ids, visible_selected_ids, selected_rows, visible_rows, rows):
+        return not selected_comparison_ids(selected_ids, visible_selected_ids, selected_rows, visible_rows, rows)
+
+    @app.callback([Output('cal-import-peaks', 'data'),
+                   Output('active-tab', 'data', allow_duplicate=True),
+                   Output('cross-calibration-feedback', 'children')],
+                  Input('cross-use-calibration-btn', 'n_clicks'),
+                  [State(item.component_id, item.component_property) for item in selection_inputs],
+                  prevent_initial_call=True)
+    def use_cross_sample_peaks_for_calibration(clicks, selected_ids, visible_selected_ids,
+                                               selected_rows, visible_rows, rows):
+        if not clicks:
+            return dash.no_update, dash.no_update, dash.no_update
+        ids = selected_comparison_ids(selected_ids, visible_selected_ids, selected_rows, visible_rows, rows)
+        if not ids:
+            return dash.no_update, dash.no_update, 'Select peak rows to use as calibration standards.'
+        from services.calibration_workflow import peak_candidates
+        available = {peak['id'] for peak in peak_candidates(data_manager)}
+        if any(key not in available for key in ids):
+            return dash.no_update, dash.no_update, 'A selected peak is no longer available. Select the current peak rows.'
+        import uuid
+        return {'ids': ids, 'ts': str(uuid.uuid4())}, 'calibration', ''
+
     @app.callback(
         [Output('across-samples-container', 'children'),
          Output('cross-sample-table-store', 'data', allow_duplicate=True),
@@ -282,13 +330,13 @@ def register_tab_callbacks(app: dash.Dash, data_manager) -> None:
         if initial_json:
             import io as _io
             df = pd.read_json(_io.StringIO(initial_json), orient='split')
-            hidden = {'_row_id'}
+            hidden = {'_row_id', 'id', 'file_id', 'peak_id'}
             table_cols = [
                 {"name": col, "id": col,
                  "editable": col not in hidden,
                  "selectable": col not in hidden,
                  "deletable": False, "renamable": False}
-                for col in df.columns
+                for col in df.columns if col not in hidden
             ]
             table_data = df.to_dict('records')
             table_style = {'overflowX': 'auto'}
@@ -343,7 +391,7 @@ def register_tab_callbacks(app: dash.Dash, data_manager) -> None:
                 if old_groups:
                     df['Group'] = df['Sample'].map(old_groups).fillna('')
 
-            hidden = {'_row_id'}
+            hidden = {'_row_id', 'id', 'file_id', 'peak_id'}
             columns = [
                 {"name": col, "id": col,
                  "editable": True, "selectable": True,
@@ -828,6 +876,9 @@ def cross_sample_group_to_dataframe(group):
     for p in group:
         cross_pct = (p['area'] / total_area * 100) if total_area > 0 else 0
         rows.append({
+            'id': f"{p['file_id']}:{p['peak_id']}" if p.get('file_id') and p.get('peak_id') else None,
+            'file_id': p.get('file_id'),
+            'peak_id': p.get('peak_id'),
             'Sample': p.get('sample_name', ''),
             'Group': '',
             'Peak Name': p.get('peak_name', ''),
@@ -881,6 +932,8 @@ def _collect_bundles_with_peaks(data_manager, loaded_files):
             peak_dicts = []
             for i, p in enumerate(sorted(service_peaks, key=lambda pk: pk.rt), start=1):
                 peak_dicts.append({
+                    'file_id': p.file_id,
+                    'peak_id': p.peak_id,
                     'peak_number': i,
                     'peak_name': p.name,
                     'retention_time': p.rt,
@@ -901,6 +954,8 @@ def _collect_all_peaks(bundles_with_peaks):
         bundle = bd['bundle']
         for peak in bd['peaks']:
             all_peaks.append({
+                'file_id': peak.get('file_id'),
+                'peak_id': peak.get('peak_id'),
                 'sample_name': bundle.name,
                 'peak_number': peak.get('peak_number', 0),
                 'peak_name': peak.get('peak_name', ''),
