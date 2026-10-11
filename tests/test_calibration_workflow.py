@@ -208,3 +208,10 @@ def test_external_opaque_signal_keys_are_not_reinterpreted():
     assert _canonical_signal_key('uv280') == 'uv280'
     assert _canonical_signal_key('{invalid') == '{invalid'
     assert _canonical_signal_key('123') == '123'
+
+
+@pytest.mark.parametrize('header', ['Chromatogram', 'SST Results'])
+def test_candidate_uses_file_explorer_sample_name_instead_of_generic_instrument_header(header):
+    dm, add = fixture(); add('channel')
+    dm.get_data_by_id('channel')['metadata'].update(sample_name=header, parent_bundle_name='Control - 10 mM')
+    assert peak_candidates(dm)[0]['sample'] == 'Control - 10 mM'

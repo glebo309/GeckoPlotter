@@ -23,7 +23,7 @@ def render_fixture(monkeypatch):
     callbacks.register_viz_callbacks(app,dm)
     settings={**DEFAULT_PLOT_SETTINGS,'_context_key':'shared:raw:chrom','axis_label_modes':{'x':'auto','y':'auto'}}
     tab={'id':'chrom','type':'raw','group_key':['chromatogram','Time (min)']}
-    args=['chrom',None,'source',settings,0,{},[],[],[],0,True,'independent',[],[tab],None,None,None,{}, {},None,[],None,['peaks'],[]]
+    args=['chrom',None,'source',settings,0,{},[],[],[],0,True,'independent',[],[tab],None,None,None,{}, {},None,[],None,['peaks'],['chrom']]
     normalized=callbacks._raw_render_settings(settings)
     inputs={'settings':normalized,'render':0,'peaks':0,'order':{},'selected':None,'file':'source',
             'baseline':None,'markers':[],'deconvolution':None,'display':['peaks'],'visibility':{},'files':[],
@@ -124,3 +124,10 @@ def test_overlay_channel_selection_still_rebuilds_its_source_peak_context(monkey
     args[2]='another-channel-in-same-group'
     assert app.functions['master_render'](*args)[0] is not dash.no_update
     assert len(calls)==1
+
+
+def test_cold_browser_gets_cached_figure_when_settings_hydrate_before_tab_switch(monkeypatch):
+    app, cache, args = render_fixture(monkeypatch)
+    args[-1] = []
+    monkeypatch.setattr(dash, 'callback_context', SimpleNamespace(triggered=[{'prop_id':'current-plot-settings.data'}]))
+    assert isinstance(app.functions['master_render'](*args)[0], go.Figure)

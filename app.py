@@ -1070,12 +1070,11 @@ _layout_body = html.Div(
                                                         'overflowY': 'auto'
                                                     }, children=[
                                                         html.Div([
-                                                            dmc.Button('Use selected peaks for calibration',
+                                                            dmc.Button('Calibrate selected peaks',
                                                                        id='cross-use-calibration-btn', size='xs', disabled=True),
                                                             html.Span(id='cross-calibration-feedback', role='status',
                                                                       style={'fontSize': '12px'}),
-                                                        ], style={'display': 'flex', 'alignItems': 'center',
-                                                                  'gap': '10px', 'marginBottom': '10px', 'flexWrap': 'wrap'}),
+                                                        ], className='analysis-actions'),
                                                         dash_table.DataTable(
                                                             id='cross-sample-table',
                                                             columns=[], data=[],
@@ -1095,19 +1094,12 @@ _layout_body = html.Div(
                                                         ),
                                                         html.Div([
                                                             dcc.Input(id='group-label-input', type='text',
-                                                                      placeholder='Group label...',
-                                                                      style={'width': '120px', 'padding': '3px 6px',
-                                                                             'fontSize': '11px', 'border': '1px solid rgba(0, 0, 0, 0.12)',
-                                                                             'borderRadius': '5px'}),
-                                                            html.Button('Apply to selected', id='apply-group-btn',
-                                                                        style={'padding': '3px 8px', 'fontSize': '11px',
-                                                                               'marginLeft': '4px', 'cursor': 'pointer'}),
-                                                            html.Button('Clear groups', id='clear-groups-btn',
-                                                                        style={'padding': '3px 8px', 'fontSize': '11px',
-                                                                               'marginLeft': '4px', 'cursor': 'pointer',
-                                                                               'color': '#999'}),
-                                                        ], style={'display': 'flex', 'alignItems': 'center',
-                                                                  'gap': '2px', 'margin': '8px 0 6px 0', 'padding': '4px 0'}),
+                                                                      placeholder='Group label', className='form-control'),
+                                                            dmc.Button('Apply to selected', id='apply-group-btn',
+                                                                       size='xs', variant='default'),
+                                                            dmc.Button('Clear groups', id='clear-groups-btn',
+                                                                       size='xs', variant='default'),
+                                                        ], className='analysis-group-actions'),
                                                         # Static components that survive across-samples-container
                                                         # children replacement by update_across_samples_tab
                                                         html.Div(id='peak-group-selector-wrapper', style={'display': 'none'}, children=[

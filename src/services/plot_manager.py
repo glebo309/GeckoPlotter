@@ -217,6 +217,10 @@ class PlotManager:
             role = file_data.get('record', {}).get('type', '')
             sr = file_data.get('standardized')
             cat = sr.source_category.value if sr else ''
+            if sr and sr.x_columns:
+                # Capture the measurement identity on every pane before shared
+                # axis styling hides upper titles.
+                fig.update_xaxes(title_text=sr.x_columns[0], row=row, col=1)
             y_label = self._measurement_label(file_data)
             if y_label:
                 axis_key = 'yaxis' if row == 1 else f'yaxis{row}'

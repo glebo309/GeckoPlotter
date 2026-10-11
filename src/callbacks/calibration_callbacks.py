@@ -128,9 +128,9 @@ def register_calibration_callbacks(app: dash.Dash, data_manager) -> None:
     @app.callback(Output('cal-standards-table','columns'),Input('cal-response-type','value'),Input('cal-units','value'))
     def standard_columns(response_type,units):
         return [dict(name='Sample / peak',id='sample_name',type='text'),
-                dict(name='Peak position',id='position',type='numeric',editable=False),
-                dict(name='Concentration'+(f' ({units})' if units else ''),id='concentration',type='numeric'),
-                dict(name='Peak height' if response_type == 'height' else 'Peak area',id='area',type='numeric')]
+                dict(name='Peak position',id='position',type='numeric',editable=False,format=dict(specifier='.5~g')),
+                dict(name='Concentration'+(f' ({units})' if units else ''),id='concentration',type='numeric',format=dict(specifier='.5~g')),
+                dict(name='Peak height' if response_type == 'height' else 'Peak area',id='area',type='numeric',format=dict(specifier='.5~g'))]
 
     @app.callback(Output('cal-fit-summary','children'),Input('cal-revision','data'),Input('cal-active-model','value'))
     def fit_summary(_revision,model_id):
@@ -326,7 +326,7 @@ def register_calibration_callbacks(app: dash.Dash, data_manager) -> None:
             residual = service.create_residual_figure(model_id) if model.coefficients is not None else _empty_figure('Residuals appear after fitting')
             for fig in (figure,residual):
                 fig.update_layout(margin=dict(l=65,r=24,t=48,b=50),font=dict(size=12),
-                    legend=dict(orientation='h',y=-.22,x=0),autosize=True)
+                    legend=dict(orientation='h',y=1.02,yanchor='bottom',x=1,xanchor='right'),autosize=True)
                 fig.update_xaxes(showline=True,mirror=True,linecolor='#555')
                 fig.update_yaxes(showline=True,mirror=True,linecolor='#555')
             info = []
@@ -350,6 +350,9 @@ def register_calibration_callbacks(app: dash.Dash, data_manager) -> None:
                               'in other samples, using the same signal. Its response is converted to concentration using this curve.')
             result = [options,model_id,rows,included] + [values[n] for n in field_names]
             result += [figure,residual,info,feedback,match_text,(revision or 0)+1 if changed else dash.no_update,model.coefficients is None]
+            if not hydrate and trigger in {'cal-standards-table', *(cid for cid, _ in field_ids)} and trigger != 'cal-response-type':
+                # Preserve the browser's active cell and newer keystrokes while saving the draft.
+                result[2:12] = [dash.no_update] * 10
             return result
         except (ValueError,TypeError,KeyError,IndexError,UnicodeError) as exc:
             result[-4] = str(exc)

@@ -62,3 +62,16 @@ def test_no_peak_rows_show_actionable_empty_state():
     empty=app.functions['show_peak_table_empty_state']
     assert empty([]).get('display')!='none'
     assert empty([{'peak_id':'one'}])=={'display':'none'}
+
+
+def test_peaks_display_precision_does_not_round_underlying_measurements():
+    dm,app,table=fixture();peak=add(dm.peak_service,'component')
+    peak.area=12.34567890123;peak.height=.0000123456789;peak.rt=1.123456789
+    data,columns,style,store=table('component',1,0,0,'peak-analysis',[])
+    row=data[0]
+    assert row['Area']==peak.area and row['Height']==peak.height and row['RT (min)']==peak.rt
+    numeric={col['id']:col for col in columns}
+    assert numeric['Area']['type']=='numeric' and numeric['Area']['format']['specifier']=='.5~g'
+    assert numeric['RT (min)']['format']['specifier']=='.4~f'
+    assert [c['id'] for c in columns].index('Concentration') < [c['id'] for c in columns].index('Area')
+    assert style['overflowX']=='auto' and style['maxWidth']=='100%'

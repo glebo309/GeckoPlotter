@@ -23,6 +23,54 @@ if not log.handlers:
     log.setLevel(logging.DEBUG)
 
 
+CALIBRATION_COLUMNS = [('Concentration', 'concentration'), ('Concentration units', 'units'),
+                       ('Calibration', 'model'), ('Calibration status', 'status')]
+TABLE_OVERFLOW = {'overflowX': 'auto', 'overflowY': 'auto', 'width': '100%',
+                  'maxWidth': '100%', 'minWidth': 0, 'maxHeight': '500px'}
+
+
+def _result_columns(frame, hidden):
+    """Format numbers for display without rounding the measurement payload."""
+    readonly = {'Signal', *(name for name, _ in CALIBRATION_COLUMNS)}
+    numeric = {'No.', 'RT (min)', 'Area', 'Height', 'Width (min)', 'Concentration',
+               'Relative Area (%)', 'Relative Height (%)', 'Within Sample (%)', 'Cross-Sample (%)'}
+    result = []
+    for name in frame.columns:
+        if name in hidden:
+            continue
+        column = dict(name=name, id=name, editable=name not in readonly, selectable=True,
+                      deletable=name not in readonly, renamable=name not in readonly)
+        if name in numeric:
+            specifier = 'd' if name == 'No.' else '.4~f' if name in ('RT (min)', 'Width (min)') else '.2f' if '(%)' in name else '.5~g'
+            column.update(type='numeric', format={'specifier': specifier})
+        result.append(column)
+    return result
+
+
+def _promote_concentrations(frame):
+    leading = ['No.', 'Sample', 'Group', 'Signal', 'Peak Name', 'Concentration',
+               'Concentration units', 'Calibration status']
+    return frame[[name for name in leading if name in frame.columns] +
+                 [name for name in frame.columns if name not in leading]]
+
+
+def _comparison_calibrations(data_manager, frame):
+    from services.calibration_workflow import apply_calibrations
+    predictions = apply_calibrations(data_manager)
+    peaks = {f'{fid}:{peak.peak_id}': peak for fid, items in data_manager.peak_service.get_all_peaks().items()
+             for peak in items}
+    for label, key in CALIBRATION_COLUMNS:
+        frame[label] = [predictions.get(row_id, {}).get(key) for row_id in frame['id']]
+    # Older table stores may have rounded numbers. Recover source values by ID,
+    # never by sample label or an approximate retention-time match.
+    for index, row in frame.iterrows():
+        peak = peaks.get(row['id'])
+        if peak is not None:
+            for name, value in [('RT (min)', peak.rt), ('Area', peak.area), ('Height', peak.height)]:
+                frame.at[index, name] = value
+    return _promote_concentrations(frame)
+
+
 def register_tab_callbacks(app: dash.Dash, data_manager) -> None:
     """Register all tab-related callbacks."""
 
@@ -62,7 +110,7 @@ def register_tab_callbacks(app: dash.Dash, data_manager) -> None:
         """Update peak-table data in-place (preserves selections)."""
 
         HIDE = {'display': 'none'}
-        SHOW = {'overflowX': 'auto', 'overflowY': 'auto', 'maxHeight': '500px'}
+        SHOW = dict(TABLE_OVERFLOW)
 
         if not active_file_id:
             return [], [], HIDE, None
@@ -95,6 +143,16 @@ def register_tab_callbacks(app: dash.Dash, data_manager) -> None:
             for fid, signal in peak_sources(active_file_id):
                 frame = data_manager.peak_service.peaks_to_table(fid)
                 if not frame.empty:
+                    source_peaks = {peak.peak_id: peak for peak in data_manager.peak_service.get_peaks(fid)}
+                    total_area = sum(max(float(peak.area or 0), 0) for peak in source_peaks.values())
+                    total_height = sum(max(float(peak.height or 0), 0) for peak in source_peaks.values())
+                    for index, row in frame.iterrows():
+                        peak = source_peaks[row['peak_id']]
+                        for name, value in [('RT (min)', peak.rt), ('Area', peak.area), ('Height', peak.height),
+                                            ('Width (min)', peak.width),
+                                            ('Relative Area (%)', peak.area / total_area * 100 if total_area else 0),
+                                            ('Relative Height (%)', peak.height / total_height * 100 if total_height else 0)]:
+                            frame.at[index, name] = value
                     predictions = {peak.peak_id: calibration_results.get(f'{peak.file_id}:{peak.peak_id}', {})
                                    for peak in data_manager.peak_service.get_peaks(fid)}
                     for label, key in [('Concentration', 'concentration'), ('Concentration units', 'units'),
@@ -109,16 +167,8 @@ def register_tab_callbacks(app: dash.Dash, data_manager) -> None:
 
             if '_row_id' not in df.columns:
                 df.insert(0, '_row_id', range(len(df)))
-            hidden = {'_row_id', 'peak_id'}
-            calculated = {'Signal', 'Concentration', 'Concentration units', 'Calibration', 'Calibration status'}
-            columns = [
-                {"name": col, "id": col,
-                 "editable": col not in hidden and col not in calculated,
-                 "selectable": col not in hidden,
-                 "deletable": col not in hidden and col not in calculated,
-                 "renamable": col not in hidden and col not in calculated}
-                for col in df.columns if col not in hidden
-            ]
+            df = _promote_concentrations(df)
+            columns = _result_columns(df, {'_row_id', 'peak_id'})
             return df.to_dict('records'), columns, SHOW, df.to_json(orient='split')
 
         except Exception as e:
@@ -330,22 +380,30 @@ def register_tab_callbacks(app: dash.Dash, data_manager) -> None:
         if initial_json:
             import io as _io
             df = pd.read_json(_io.StringIO(initial_json), orient='split')
-            hidden = {'_row_id', 'id', 'file_id', 'peak_id'}
-            table_cols = [
-                {"name": col, "id": col,
-                 "editable": col not in hidden,
-                 "selectable": col not in hidden,
-                 "deletable": False, "renamable": False}
-                for col in df.columns if col not in hidden
-            ]
+            df = _comparison_calibrations(data_manager, df)
+            table_cols = _result_columns(df, {'_row_id', 'id', 'file_id', 'peak_id'})
+            initial_json = df.to_json(orient='split', double_precision=15)
             table_data = df.to_dict('records')
-            table_style = {'overflowX': 'auto'}
+            table_style = dict(TABLE_OVERFLOW)
 
         selector_style = {'display': 'block'} if group_options else HIDE
         slider_style = SHOW_BLOCK
 
         return (content, initial_json, table_data, table_cols, table_style,
                 group_options, 0, selector_style, slider_style)
+
+    @app.callback([Output('cross-sample-table', 'data', allow_duplicate=True),
+                   Output('cross-sample-table', 'columns', allow_duplicate=True),
+                   Output('cross-sample-table-store', 'data', allow_duplicate=True)],
+                  Input('cal-revision', 'data'), State('cross-sample-table', 'data'),
+                  prevent_initial_call=True)
+    def refresh_comparison_calibrations(revision, rows):
+        """Update the current comparison without resetting its group or ordering."""
+        if not rows:
+            return dash.no_update, dash.no_update, dash.no_update
+        frame = _comparison_calibrations(data_manager, pd.DataFrame(rows))
+        return (frame.to_dict('records'), _result_columns(frame, {'_row_id', 'id', 'file_id', 'peak_id'}),
+                frame.to_json(orient='split', double_precision=15))
 
     # Handle peak group selection dropdown — updates cross-sample-table DATA
     # in-place (not replacing the component) so selections are preserved.
@@ -391,13 +449,8 @@ def register_tab_callbacks(app: dash.Dash, data_manager) -> None:
                 if old_groups:
                     df['Group'] = df['Sample'].map(old_groups).fillna('')
 
-            hidden = {'_row_id', 'id', 'file_id', 'peak_id'}
-            columns = [
-                {"name": col, "id": col,
-                 "editable": True, "selectable": True,
-                 "deletable": True, "renamable": True}
-                for col in df.columns if col not in hidden
-            ]
+            df = _comparison_calibrations(data_manager, df)
+            columns = _result_columns(df, {'_row_id', 'id', 'file_id', 'peak_id'})
             return df.to_dict('records'), columns, df.to_json(orient='split')
         else:
             return dash.no_update, dash.no_update, dash.no_update
@@ -882,11 +935,11 @@ def cross_sample_group_to_dataframe(group):
             'Sample': p.get('sample_name', ''),
             'Group': '',
             'Peak Name': p.get('peak_name', ''),
-            'RT (min)': round(p.get('retention_time', 0), 3),
-            'Area': round(p.get('area', 0), 1),
-            'Height': round(p.get('height', 0), 1),
-            'Within Sample (%)': round(p.get('relative_area', 0), 2),
-            'Cross-Sample (%)': round(cross_pct, 2),
+            'RT (min)': p.get('retention_time', 0),
+            'Area': p.get('area', 0),
+            'Height': p.get('height', 0),
+            'Within Sample (%)': p.get('relative_area', 0),
+            'Cross-Sample (%)': cross_pct,
         })
     return pd.DataFrame(rows)
 

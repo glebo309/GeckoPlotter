@@ -121,3 +121,39 @@ test('a selected peak present in the visible graph remains editable',()=>{
     h.api.syncSelectedShape('main-plot','peak-one');
     assert.equal(h.first.__geckoManualIntegrationSelectedPeakId,'peak-one');
 });
+
+test('overlapping fill hit testing prioritizes the inspected sample owner',()=>{
+ const h=integrationHarness();
+ h.first.layout.meta={gecko_peak_geometry:{owned:{file_id:'control'},other:{file_id:'other'}}};
+ h.first.data.push(...['owned','other'].map(id=>({meta:'peak_overlay',fill:'toself',x:[1,3,3,1],y:[0,0,3,3],customdata:[id,id,id,id]})));
+ h.first.handlers.pointerdown(h.event);
+ assert.equal(h.props.find(item=>item[0]==='plot-peak-click-store')[1].data.peakId,'owned');
+});
+
+test('background click anywhere clears baseline handles immediately while retaining peak fills',()=>{
+ const h=integrationHarness();let emptyClicks=0;
+ h.first.__geckoManualIntegrationSelectedPeakId='owned';
+ h.first.layout.shapes=[{name:'baseline:owned',x0:1,y0:0,x1:3,y1:0}];
+ h.first.data.push({meta:'peak_overlay',fill:'toself',x:[1,3,3,1],y:[0,0,3,3],customdata:['owned']},
+    {meta:'peak_overlay',mode:'markers',customdata:[['owned','p-point']]});
+ const relayouts=[],restyles=[];
+ h.window.Plotly.relayout=(_,update)=>relayouts.push(update);
+ h.window.Plotly.restyle=(_,update,indices)=>restyles.push({update,indices});
+ h.docEvents.pointerdown({...h.event,clientX:500,clientY:500});
+ assert.equal(h.first.__geckoManualIntegrationSelectedPeakId,null);
+ assert.ok(relayouts.some(update=>Array.isArray(update.shapes)&&update.shapes.length===0));
+ assert.deepEqual(Array.from(restyles[0].indices),[2]);
+ assert.equal(restyles[0].update.visible,false);
+ assert.equal(h.first.data[1].fill,'toself');
+ assert.ok(h.props.some(item=>item[0]==='interaction-action-store'&&item[1].data.type==='deselect'));
+});
+
+test('clicking a signal outside its filled region dismisses handles',()=>{
+ const h=integrationHarness();
+ h.first.__geckoManualIntegrationSelectedPeakId='owned';
+ h.first.data.push({meta:'peak_overlay',fill:'toself',x:[1,3,3,1],y:[0,0,3,3],customdata:['owned']});
+ h.first.handlers.pointerdown({...h.event,clientX:70,clientY:60,
+    target:{closest:selector=>selector.includes('.scatterlayer')?{}:null}});
+ assert.equal(h.first.__geckoManualIntegrationSelectedPeakId,null);
+ assert.ok(h.props.some(item=>item[0]==='interaction-action-store'&&item[1].data.type==='deselect'));
+});

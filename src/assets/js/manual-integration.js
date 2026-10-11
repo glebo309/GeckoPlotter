@@ -196,6 +196,8 @@
         var y = axisPixelToData(sp.yaxis, event.clientY - sp.bounds.top, sp.bounds.height, true);
         if (x === null || y === null || !isFinite(Number(x)) || !isFinite(Number(y))) return null;
 
+        var geometry = (gd.layout && gd.layout.meta && gd.layout.meta.gecko_peak_geometry) || {};
+        var hits = [];
         for (var i = gd.data.length - 1; i >= 0; i--) {
             var trace = gd.data[i];
             if (!trace || trace.meta !== 'peak_overlay' || trace.fill !== 'toself' || !trace.x || !trace.y) continue;
@@ -205,9 +207,10 @@
                 peakId = Array.isArray(trace.customdata[0]) ? trace.customdata[0][0] : trace.customdata[0];
             }
             if (!peakId || peakId === '__deselect__') continue;
-            if (pointInPolygon(Number(x), Number(y), trace.x, trace.y)) return peakId;
+            if (trace.visible === false || trace.visible === 'legendonly') continue;
+            if (pointInPolygon(Number(x), Number(y), trace.x, trace.y)) hits.push(peakId);
         }
-        return null;
+        return hits.find(function(id) { return geometry[id] && geometry[id].file_id === window.__geckoActiveFile; }) || hits[0] || null;
     }
 
     function publishAction(type, payload) {
@@ -477,28 +480,49 @@
         gd.__geckoManualIntegrationSuspendReleaseTimer = window.setTimeout(release, 900);
     }
 
-    function consumeSelectedBlankClick(gd, event) {
-        if (
-            !gd.__geckoManualIntegrationSelectedPeakId ||
-            !isInsidePlotArea(gd, event) ||
-            isOverlayTarget(event)
-        ) {
-            return false;
+    function dismissSelectedPeak(gd) {
+        if (!gd || !gd.__geckoManualIntegrationSelectedPeakId) return false;
+        gd.__geckoManualIntegrationSelectedPeakId = null;
+        clearEmptyClickTimer(gd);
+        if (window.Plotly) {
+            var kept = ((gd.layout || {}).shapes || []).filter(function(shape) {
+                return !shape.name || shape.name.indexOf('baseline:') !== 0;
+            });
+            window.Plotly.relayout(gd, {shapes:kept});
+            var handles = [];
+            (gd.data || []).forEach(function(trace, index) {
+                if (trace.meta === 'peak_overlay' && Array.isArray(trace.customdata) &&
+                    trace.customdata.some(function(point) { return Array.isArray(point) && point[1] === 'p-point'; })) handles.push(index);
+            });
+            if (handles.length && window.Plotly.restyle) window.Plotly.restyle(gd, {visible:false}, handles);
         }
+        triggerEmptyClick();
+        return true;
+    }
 
+    function isBaselineHandleTarget(gd, event) {
+        if (event.target && event.target.closest('.shapelayer, .modebar')) return true;
+        var sp = subplotAtEvent(gd, event);
+        if (!sp) return false;
+        var px = event.clientX - sp.bounds.left, py = event.clientY - sp.bounds.top;
+        var xr = [-9,9].map(function(offset) { return axisPixelToData(sp.xaxis, px+offset, sp.bounds.width, false); }).sort(function(a,b) {return a-b;});
+        var yr = [-9,9].map(function(offset) { return axisPixelToData(sp.yaxis, py+offset, sp.bounds.height, true); }).sort(function(a,b) {return a-b;});
+        return (gd.data || []).some(function(trace) {
+            return trace.meta === 'peak_overlay' && trace.visible !== false && traceMatchesSubplot(trace,sp.key) &&
+                Array.isArray(trace.customdata) && trace.customdata.some(function(point,i) {
+                    return Array.isArray(point) && point[1] === 'p-point' && trace.x && trace.y &&
+                        trace.x[i] >= xr[0] && trace.x[i] <= xr[1] && trace.y[i] >= yr[0] && trace.y[i] <= yr[1];
+                });
+        });
+    }
+
+    function consumeSelectedBlankClick(gd, event) {
+        if (!gd.__geckoManualIntegrationSelectedPeakId || !isInsidePlotArea(gd, event) ||
+            isBaselineHandleTarget(gd, event) || peakIdAtEvent(gd, event)) return false;
         suspendDrawUntilMouseUp(gd);
         stopPlotlyGesture(event);
-        clearTransientShapes(graphIdOf(gd));
         gd.__geckoManualIntegrationLastPlotlyClickAt = Date.now();
-        clearEmptyClickTimer(gd);
-
-        var now = Date.now();
-        if (!gd.__geckoManualIntegrationLastBlankDeselectAt ||
-            now - gd.__geckoManualIntegrationLastBlankDeselectAt > 120) {
-            gd.__geckoManualIntegrationLastBlankDeselectAt = now;
-            triggerEmptyClick();
-        }
-        return true;
+        return dismissSelectedPeak(gd);
     }
 
     function previewLineElement() {
@@ -891,7 +915,8 @@
             var consumeBlankBeforePlotly = function (event) {
                 if (event.detail && event.detail > 1) return;
                 var eventGd = graphDivFromEvent(event);
-                if (!eventGd) return;
+                if (!eventGd) { dismissSelectedPeak(boundActiveGraph); return; }
+                if (!isInsidePlotArea(eventGd,event) && !isOverlayTarget(event)) dismissSelectedPeak(eventGd);
                 handleGraphPointerDown(eventGd, event);
             };
             var consumeMouseBeforePlotly = function (event) {

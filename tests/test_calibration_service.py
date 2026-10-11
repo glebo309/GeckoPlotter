@@ -196,3 +196,14 @@ def test_legacy_invalid_inverse_parameters_are_rejected(change):
 def test_legacy_negative_reference_concentrations_are_rejected():
     payload=legacy();payload['calibration_models']['g']['standards']['sample1']=-1
     with pytest.raises(ValueError):CalibrationService().import_calibrations(payload)
+
+
+@pytest.mark.parametrize('kind, coefficients, expected', [
+    ('linear', [1.04, -.1403], 'y = 1.04 x − 0.1403'),
+    ('quadratic', [2., -3., -4.], 'y = 2 x² − 3 x − 4'),
+])
+def test_equation_formats_negative_terms_with_a_single_sign(kind, coefficients, expected):
+    service = CalibrationService()
+    model = service.create_model('Analyte', '', fit_type=kind)
+    model.coefficients = coefficients
+    assert service._equation_text(model) == expected

@@ -694,14 +694,16 @@ class CalibrationService:
         if model.coefficients is None:
             return "No fit"
         c = model.coefficients
+        def term(value, suffix=""):
+            return f" {'−' if value < 0 else '+'} {abs(value):.4g}{suffix}"
         if model.fit_type == "linear":
             if model.force_zero:
                 return f"y = {c[0]:.4g} x"
-            return f"y = {c[0]:.4g} x + {c[1]:.4g}"
+            return f"y = {c[0]:.4g} x" + term(c[1])
         if model.fit_type == "quadratic":
             if model.force_zero:
-                return f"y = {c[0]:.4g} x² + {c[1]:.4g} x"
-            return f"y = {c[0]:.4g} x² + {c[1]:.4g} x + {c[2]:.4g}"
+                return f"y = {c[0]:.4g} x²" + term(c[1], " x")
+            return f"y = {c[0]:.4g} x²" + term(c[1], " x") + term(c[2])
         if model.fit_type == "power":
             return f"y = {c[0]:.4g} · x^{c[1]:.4g}"
         return ""

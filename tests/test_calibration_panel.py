@@ -60,3 +60,20 @@ def test_saved_calibration_can_link_a_measured_peak_without_refitting():
     assert 'without refitting' in ui['cal-link-peak-btn'].title
     assert ui['cal-save-btn'].disabled is True
     assert ui['cal-units'].label=='Concentration units'
+
+
+def test_diagnostics_are_hidden_but_callback_targets_stay_mounted():
+    from components.workspace_layout import walk
+    ui=nodes()
+    hidden=ui.get('cal-hidden-diagnostics')
+    assert hidden is not None and hidden.hidden is True
+    assert {'cal-residual-graph','cal-results-info'} <= {
+        getattr(node,'id',None) for node in walk(hidden)}
+
+
+def test_standards_scroll_region_is_keyboard_reachable_without_squeezing_columns():
+    ui=nodes()
+    region=ui.get('cal-standards-scroll')
+    assert region is not None and region.tabIndex==0 and region.role=='region'
+    assert ui['cal-standards-table'].style_table['minWidth']=='480px'
+    assert ui['cal-curve-graph'].style['minHeight']=='360px'

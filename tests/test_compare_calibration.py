@@ -95,3 +95,40 @@ def test_selected_comparison_payload_reaches_editor_with_exact_unrounded_measure
     assert result[2][0]['area'] == 123.456789
     assert result[2][0]['concentration'] is None
     assert result[3] == [0]
+
+
+def test_comparison_calculates_prominent_concentration_and_preserves_numeric_precision():
+    from services.calibration_workflow import peak_candidates
+    from test_calibration_workflow import model
+    dm, functions, rows, first, second = fixture()
+    dm.get_bundle('second').name = 'Second standard'
+    first.area = 12.34567890123; first.rt = 1.0123456789
+    model(dm, peak_candidates(dm)[0])
+    initial = functions['update_across_samples_tab']([{'id':'bundle'},{'id':'second'}], 1)
+    row = next(row for row in initial[2] if row['peak_id'] == first.peak_id)
+    assert row['Area'] == first.area and row['RT (min)'] == first.rt
+    assert row['Concentration'] == pytest.approx(first.area / 10.)
+    assert row['Concentration units'] == 'mM' and row['Calibration status'] == 'Calibrated'
+    ids = [col['id'] for col in initial[3]]
+    assert ids.index('Concentration') < ids.index('Area')
+    concentration = next(col for col in initial[3] if col['id'] == 'Concentration')
+    assert concentration['type'] == 'numeric' and concentration['format']['specifier'] == '.5~g'
+    assert concentration['editable'] is False
+    assert initial[4]['overflowX'] == 'auto' and initial[4]['maxWidth'] == '100%'
+
+
+def test_calibration_revision_refreshes_current_comparison_rows_without_resetting_group():
+    from services.calibration_workflow import peak_candidates
+    from test_calibration_workflow import model
+    dm, functions, rows, first, second = fixture(); cal = model(dm, peak_candidates(dm)[0])
+    rows = rows[::-1]; rows[0]['Group'] = 'keep this label'
+    updated, columns, store = functions['refresh_comparison_calibrations'](1, rows)
+    assert [r['id'] for r in updated] == [r['id'] for r in rows]
+    assert updated[0]['Group'] == 'keep this label'
+    assert updated[0]['Concentration'] == pytest.approx(.5)
+    cal.coefficients = None
+    updated, _, _ = functions['refresh_comparison_calibrations'](2, updated)
+    assert all(row['Concentration'] is None for row in updated)
+    app = App(); register_tab_callbacks(app, dm)
+    dependencies = app.registrations['refresh_comparison_calibrations']
+    assert any(getattr(dep,'component_id',None)=='cal-revision' for dep in dependencies)

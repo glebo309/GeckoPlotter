@@ -94,7 +94,7 @@ def peak_candidates(data_manager):
             continue
         key, x_units, height_units = _signal_identity(entry)
         metadata = entry.get('metadata') or {}
-        sample = metadata.get('sample_name') or metadata.get('parent_bundle_name') or (entry.get('record') or {}).get('name') or file_id
+        sample = metadata.get('parent_bundle_name') or metadata.get('sample_name') or (entry.get('record') or {}).get('name') or file_id
         for peak in peaks:
             position = _number(getattr(peak, 'apex_x', None))
             if position is None:

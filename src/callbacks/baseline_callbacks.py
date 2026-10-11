@@ -439,7 +439,7 @@ def register_baseline_callbacks(app: dash.Dash, data_manager) -> None:
                 file_overlay_map=data_manager.build_file_overlay_map())
             from services.plot_settings_service import DEFAULT_PLOT_SETTINGS
             _s = {**DEFAULT_PLOT_SETTINGS, **(plot_settings or {})}
-            if _s.get('layout_mode') == 'stacked' or draw_line.get('file_id'):
+            if _requires_group_render(plot_settings, current_figure) or draw_line.get('file_id'):
                 return dash.no_update, (peak_counter or 0) + 1, (clear_counter or 0) + 1, None, (render_counter or 0) + 1
             fig_patch = patch_figure_with_peaks(
                 data_manager.peak_service.get_peaks(target_file), current_figure, time_arr, signal_arr, None
@@ -497,15 +497,21 @@ def register_baseline_callbacks(app: dash.Dash, data_manager) -> None:
 
             # Determine which file owns this shape (subplot-aware)
             edit_file = active_file
-            if _is_stacked(plot_settings):
+            if _requires_group_render(plot_settings, current_figure):
                 import re
                 shape_yref = getattr(shape, 'yref', 'y') or 'y'
                 m = re.search(r'y(\d+)', shape_yref)
                 edit_row = int(m.group(1)) if m else 1
                 edit_file = _file_id_for_subplot_row(edit_row, active_file, plot_settings, loaded_files, plot_tabs, active_tab_id)
 
-            all_peaks = data_manager.peak_service.get_peaks(edit_file)
             shape_name = getattr(shape, 'name', None)
+            if isinstance(shape_name, str) and shape_name.startswith('baseline:'):
+                peak_id = shape_name.split(':', 1)[1]
+                geometry = (current_figure.get('layout', {}).get('meta') or {}).get('gecko_peak_geometry', {})
+                owner = geometry.get(peak_id, {}).get('file_id')
+                if owner and any(peak.peak_id == peak_id for peak in data_manager.peak_service.get_peaks(owner)):
+                    edit_file = owner
+            all_peaks = data_manager.peak_service.get_peaks(edit_file)
             p = None
             if isinstance(shape_name, str) and shape_name.startswith('baseline:'):
                 shape_peak_id = shape_name.split(':', 1)[1]
@@ -547,7 +553,7 @@ def register_baseline_callbacks(app: dash.Dash, data_manager) -> None:
                 p.source = 'manual'
             log.debug(f"Edit-dragged peak idx={shape_idx}: RT={res['apex_x']:.3f} file={edit_file}")
 
-            if _is_stacked(plot_settings):
+            if _requires_group_render(plot_settings, current_figure):
                 return dash.no_update, (peak_counter or 0) + 1, (clear_counter or 0) + 1, p.peak_id if mode != 'edit' else None, (render_counter or 0) + 1
 
             selected_for_rebuild = None if mode == 'edit' else p.peak_id
@@ -558,12 +564,30 @@ def register_baseline_callbacks(app: dash.Dash, data_manager) -> None:
 
         raise PreventUpdate
 
+    @app.callback(Output('active-file', 'data', allow_duplicate=True),
+                  Input('plot-peak-click-store', 'data'), State('main-plot', 'figure'),
+                  State('active-file', 'data'), State('active-plot-tab', 'data'),
+                  prevent_initial_call=True)
+    def sync_selected_peak_owner(peak_id, figure, active_file, active_tab):
+        if isinstance(peak_id, dict):
+            peak_id = peak_id.get('peakId')
+        meta = ((figure or {}).get('layout', {}).get('meta') or {})
+        if not peak_id or meta.get('gecko_tab_id') != active_tab:
+            raise PreventUpdate
+        owner = meta.get('gecko_peak_geometry', {}).get(peak_id, {}).get('file_id')
+        if not owner or owner == active_file or not any(
+                peak.peak_id == peak_id for peak in data_manager.peak_service.get_peaks(owner)):
+            raise PreventUpdate
+        return owner
+
     # ── Normal mode: click a filled peak to select/highlight it ───────
 
-    def _is_stacked(plot_settings):
+    def _requires_group_render(plot_settings, current_figure):
         from services.plot_settings_service import DEFAULT_PLOT_SETTINGS
         s = {**DEFAULT_PLOT_SETTINGS, **(plot_settings or {})}
-        return s.get('layout_mode') == 'stacked'
+        sources = {trace.get('meta', {}).get('file_id') for trace in (current_figure or {}).get('data', [])
+                   if isinstance(trace.get('meta'), dict) and trace.get('meta', {}).get('file_id')}
+        return s.get('layout_mode') == 'stacked' or len(sources) > 1
 
     @app.callback(
         [Output('selected-peak-idx', 'data', allow_duplicate=True),
@@ -587,8 +611,8 @@ def register_baseline_callbacks(app: dash.Dash, data_manager) -> None:
         if not peak_id:
             raise PreventUpdate
 
-        log.info(f"🎯 peak selected via hit-test: {peak_id}, stacked={_is_stacked(plot_settings)}")
-        if _is_stacked(plot_settings):
+        log.info(f"🎯 peak selected via hit-test: {peak_id}, stacked={_requires_group_render(plot_settings, current_figure)}")
+        if _requires_group_render(plot_settings, current_figure):
             return peak_id, dash.no_update, (render_counter or 0) + 1
 
         peak_fid = active_file
@@ -639,7 +663,7 @@ def register_baseline_callbacks(app: dash.Dash, data_manager) -> None:
 
         next_selected = None if peak_id == '__deselect__' else peak_id
 
-        if _is_stacked(plot_settings):
+        if _requires_group_render(plot_settings, current_figure):
             return next_selected, dash.no_update, (render_counter or 0) + 1
 
         peak_fid = active_file
@@ -672,7 +696,7 @@ def register_baseline_callbacks(app: dash.Dash, data_manager) -> None:
         if not n_clicks or not active_file or not selected_peak_id:
             raise PreventUpdate
 
-        if _is_stacked(plot_settings):
+        if _requires_group_render(plot_settings, current_figure):
             return None, dash.no_update, (render_counter or 0) + 1
 
         peak_fid = active_file
@@ -754,7 +778,7 @@ def register_baseline_callbacks(app: dash.Dash, data_manager) -> None:
                 data_manager.peak_service.clear_manual_peaks(peak_fid)
             data_manager.peak_service.group_peaks_across_samples(
                 file_overlay_map=data_manager.build_file_overlay_map())
-            if _is_stacked(plot_settings):
+            if _requires_group_render(plot_settings, current_figure):
                 return dash.no_update, None, (peak_counter or 0) + 1, (render_counter or 0) + 1
             time_arr, signal_arr = _get_chrom(active_file)
             if time_arr is not None:
@@ -808,7 +832,7 @@ def register_baseline_callbacks(app: dash.Dash, data_manager) -> None:
         data_manager.peak_service.group_peaks_across_samples(
             file_overlay_map=data_manager.build_file_overlay_map())
 
-        if _is_stacked(plot_settings):
+        if _requires_group_render(plot_settings, current_figure):
             return dash.no_update, None, (peak_counter or 0) + 1, (render_counter or 0) + 1
 
         time_arr, signal_arr = _get_chrom(active_file)
@@ -868,7 +892,7 @@ def register_baseline_callbacks(app: dash.Dash, data_manager) -> None:
                 else:
                     target_id = peak_ids[(cur_idx - 1) % len(peak_ids)]
 
-            if not _is_stacked(plot_settings):
+            if not _requires_group_render(plot_settings, current_figure):
                 time_arr, signal_arr = _get_chrom(active_file)
                 if time_arr is not None:
                     fig_patch = patch_figure_with_peaks(

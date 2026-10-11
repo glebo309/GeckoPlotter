@@ -1219,9 +1219,8 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
         render_inputs = {
             'settings': _raw_render_settings(s), 'render': render_trigger, 'peaks': peak_change_trigger,
             'order': file_order, 'selected': selected_peak_id,
-            # Separate renders every visible channel and its peaks. Changing
-            # the inspected component alone cannot alter that figure. Overlay
-            # still uses active-file to choose the source peak overlays.
+            # Overlay keeps the inspected source in its rendering context for
+            # overlapping selection. Separate panes retain their source identity.
             'file': active_file if layout_mode != 'stacked' else None,
             'baseline': baseline_mode, 'markers': deconv_markers,
             'deconvolution': deconv_result, 'display': display_opts,
@@ -1230,7 +1229,7 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
             'link_x': link_x, 'y_scope': y_scope,
         }
         if render_cache.matches(active_tab_id, render_inputs):
-            if not is_tab_switch or active_tab_id in (rendered_tabs or []):
+            if active_tab_id in (rendered_tabs or []):
                 return dash.no_update, set_zoom
             # A fresh browser still needs a figure even when another client has
             # already populated the server cache. Warm clients retain their DOM.
@@ -1270,41 +1269,28 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
 
         if show_peaks:
             fig_obj_for_peaks = go.Figure(figure) if isinstance(figure, dict) else figure
-            if layout_mode == 'stacked':
-                flat_files = []
-                for files in visible_files.values():
-                    flat_files.extend(files)
-                cleanup_peak_traces(fig_obj_for_peaks)
-                for row_idx, (fname, fdata) in enumerate(flat_files, start=1):
-                    fid = _find_file_id(data_manager, fdata)
-                    if not fid:
-                        continue
-                    peaks = data_manager.peak_service.get_peaks(fid)
-                    if not peaks:
-                        continue
-                    _ov_time, _ov_signal = get_xy_arrays(data_manager, fid)
-                    if _ov_time is not None:
-                        add_peak_traces(fig_obj_for_peaks, peaks, _ov_time, _ov_signal, selected_peak_id, row=row_idx)
-                figure = fig_obj_for_peaks
-            elif (active_file and _get_active_file_group(data_manager, active_file) == group_key
-                  and (s.get('ms_polarity', 'both') == 'both' or
-                       entry_polarity(data_manager.get_data_by_id(active_file) or {})
-                       in (None, s.get('ms_polarity')))):
-                _ov_time, _ov_signal = get_xy_arrays(data_manager, active_file)
-                if _ov_time is not None:
-                    all_peaks = data_manager.peak_service.get_peaks(active_file)
-                    if baseline_mode == 'deconvolve' and selected_peak_id:
-                        peaks_to_render = [p for p in all_peaks if p.peak_id != selected_peak_id]
-                    else:
-                        peaks_to_render = all_peaks
-                    figure = overlay_peaks_on_figure(
-                        peaks_to_render,
-                        figure, _ov_time, _ov_signal, selected_peak_id)
-                    if baseline_mode == 'deconvolve':
-                        from callbacks.peak_overlay import add_deconv_overlays
-                        add_deconv_overlays(
-                            figure, deconv_markers, deconv_result,
-                            _ov_time, _ov_signal)
+            cleanup_peak_traces(fig_obj_for_peaks)
+            flat_files = [entry for files in visible_files.values() for entry in files]
+            for row_idx, (_name, fdata) in enumerate(flat_files, start=1):
+                fid = _find_file_id(data_manager, fdata)
+                if not fid:
+                    continue
+                peaks = data_manager.peak_service.get_peaks(fid)
+                deconvolving = baseline_mode == 'deconvolve' and any(p.peak_id == selected_peak_id for p in peaks)
+                if deconvolving:
+                    peaks = [p for p in peaks if p.peak_id != selected_peak_id]
+                if not peaks and not deconvolving:
+                    continue
+                time_arr, signal_arr = get_xy_arrays(data_manager, fid)
+                if time_arr is None:
+                    continue
+                row = row_idx if layout_mode == 'stacked' else None
+                add_peak_traces(fig_obj_for_peaks, peaks, time_arr, signal_arr, selected_peak_id, row=row)
+                if deconvolving:
+                    from callbacks.peak_overlay import add_deconv_overlays
+                    add_deconv_overlays(fig_obj_for_peaks, deconv_markers, deconv_result,
+                                        time_arr, signal_arr, row=row)
+            figure = fig_obj_for_peaks
 
         # LC-MS scan cursor is rendered as a DOM overlay in app.py /
         # scan-line-constraint.js. Keep the Plotly figure free of old scan

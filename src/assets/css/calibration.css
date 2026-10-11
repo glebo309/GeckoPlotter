@@ -2,11 +2,17 @@
 .cal-toolbar { display:flex; flex-wrap:wrap; gap:10px; align-items:flex-end; margin-bottom:8px; }
 .cal-model-select { flex:1 1 210px; min-width:160px; }
 .cal-actions { display:flex; flex-wrap:wrap; align-items:center; gap:6px; }
-.cal-actions .btn, .cal-fit-actions .btn { min-height:30px; padding:5px 10px; white-space:nowrap; }
+.cal-actions .btn, .cal-fit-actions .btn { min-height:32px; padding:6px 12px; white-space:nowrap; font-size:12px; border-radius:6px; }
+.cal-actions .btn:disabled { opacity:.45; cursor:default; }
 .cal-feedback { font-size:12px; line-height:1.4; color:#55555a; }
 .cal-feedback:not(:empty) { padding:6px 0 10px; }
 .cal-workspace-grid { display:grid; grid-template-columns:minmax(0,1fr); gap:16px; }
 .cal-editor, .cal-diagnostics { min-width:0; }
+.cal-diagnostics { display:flex; flex-direction:column; grid-row:1; }
+.cal-curve-section { display:flex; flex-direction:column; flex:1; }
+.cal-standards-scroll { max-width:100%; min-width:0; overflow-x:auto; border-radius:6px; }
+.cal-standards-scroll:focus-visible { outline:2px solid #426c50; outline-offset:2px; }
+.cal-standards-scroll .dash-spreadsheet-container { min-width:0; }
 .cal-section { min-width:0; margin:0 0 12px; }
 .cal-heading { font-size:12px; font-weight:600; color:#353538; margin:0 0 10px; padding-top:10px; border-top:1px solid #e2e2e5; }
 .cal-fields { display:grid; grid-template-columns:1fr 1fr; gap:8px; }
@@ -18,18 +24,24 @@
 .cal-match-fields { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:10px; }
 .cal-fit-actions { display:flex; align-items:center; flex-wrap:wrap; gap:8px 12px; }
 .cal-fit-actions .cal-note { flex:1 1 180px; margin:0; }
-.cal-curve { width:100%; height:245px; min-height:180px; }
+.cal-curve { width:100%; height:clamp(360px,48vh,560px); min-height:360px; flex:none; }
 .cal-residuals { width:100%; height:210px; min-height:180px; }
 .cal-results { font-size:12px; line-height:1.5; }
-@container (min-width:780px) {
-  .cal-workspace-grid { grid-template-columns:minmax(360px,1fr) minmax(320px,1fr); gap:20px; }
+@container (min-width:860px) {
+  .cal-workspace-grid { grid-template-columns:minmax(480px,.9fr) minmax(340px,1.1fr); gap:20px; }
+  .cal-diagnostics { align-self:start; grid-row:auto; position:sticky; top:0; }
 }
 @container (min-width:1050px) {
   .cal-fields { grid-template-columns:1.2fr 1fr 1fr; }
   .cal-fields > :first-child { grid-column:auto; }
 }
 
-.cal-section > summary { cursor:pointer; list-style:revert; }
+.analysis-actions, .analysis-group-actions { display:flex; flex-wrap:wrap; align-items:center; gap:8px; }
+.analysis-actions { margin-bottom:12px; }
+.analysis-group-actions { margin:12px 0; }
+.analysis-actions button, .analysis-group-actions button { min-height:32px; font-size:12px; padding:6px 12px; border-radius:6px; margin:0; }
+.analysis-group-actions input { min-height:32px; font-size:12px; padding:6px 10px; border-radius:6px; box-sizing:border-box; flex:0 1 180px; min-width:120px; }
+#peak-table, #cross-sample-table { min-width:0; max-width:100%; }
 .calibration-diagnostics { width:100%; border-collapse:collapse; font-size:11px; }
 .calibration-diagnostics th, .calibration-diagnostics td { padding:6px 8px; border-bottom:1px solid #e4e4e6; text-align:right; }
 .calibration-diagnostics th:first-child, .calibration-diagnostics td:first-child { text-align:left; }

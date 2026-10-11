@@ -228,3 +228,27 @@ def test_compare_samples_selection_starts_new_calibration_with_measured_rows(mon
     assert editor.values['position']==5.
     assert editor.included==[0,1]
     assert '4.8' in result[-3] and '5.2' in result[-3]
+
+
+def test_cell_commit_does_not_echo_table_and_overwrite_next_cell_being_typed(monkeypatch):
+    editor = Editor(monkeypatch)
+    editor.fitted()
+    editor.rows[0]['concentration'] = 2.
+    result = editor.run('cal-standards-table')
+    assert result[2] is dash.no_update
+    assert all(value is dash.no_update for value in result[3:12])
+    # The edited draft still survives switching to another model and back.
+    original = editor.model_id
+    editor.run('cal-new-btn')
+    editor.model_id = original
+    editor.run('cal-active-model')
+    assert editor.rows[0]['concentration'] == 2.
+
+
+def test_field_edit_does_not_replace_uncommitted_table_input(monkeypatch):
+    editor = Editor(monkeypatch)
+    editor.fitted()
+    editor.values['name'] = 'Edited analyte'
+    result = editor.run('cal-analyte-name')
+    assert result[2] is dash.no_update
+    assert all(value is dash.no_update for value in result[3:12])
