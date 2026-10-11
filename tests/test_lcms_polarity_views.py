@@ -24,35 +24,37 @@ def fixture(modes=('positive', 'negative')):
     return app.functions, calls
 
 
-@pytest.mark.parametrize('negative,expected', [(False, 'positive'), (True, 'negative')])
+@pytest.mark.parametrize('negative,expected', [('positive', 'positive'), ('negative', 'negative')])
 def test_peak_mass_resolves_explicit_mode_even_when_source_is_negative(monkeypatch, negative, expected):
     functions, calls = fixture()
     monkeypatch.setattr('callbacks.lcms_callbacks._build_peak_mass_figure', lambda *args: ('figure', args[-1]))
     result = functions['show_peak_mass']('peak', negative, 'negative')
     assert calls == [(expected, .8, 1.2)]
-    assert result[1] == ('−' if negative else '+')
+    assert result[1] == ('−' if negative == 'negative' else '+')
 
 
 def test_peak_mass_keeps_valid_mode_when_selecting_another_signal():
     functions, _ = fixture()
-    result = functions['peak_mass_polarity_visibility']('uv', True)
-    assert result[0] is True
+    result = functions['peak_mass_polarity_visibility']('uv', 'negative')
+    assert result[0] == 'negative'
     assert result[1]['display'] == 'flex'
-    assert result[4] is False
+    assert not any(option['disabled'] for option in result[2])
 
 
 @pytest.mark.parametrize('mode,negative', [('positive', False), ('negative', True)])
 def test_single_mode_mass_controls_remain_visible_but_disable_unavailable_choice(mode, negative):
     functions, _ = fixture((mode,))
     result = functions['sync_polarity_toggle'](mode)
-    assert result[0] is negative
+    assert result[0] == mode
     assert result[1]['display'] == 'flex'
-    assert result[8:10] == (True, True)
-    result = functions['peak_mass_polarity_visibility']('uv', not negative)
-    assert result[0] is negative
+    assert {option['value']: option['disabled'] for option in result[2]} == {'positive': negative, 'negative': not negative}
+    assert result[4] == mode
+    assert result[6] == result[2]
+    result = functions['peak_mass_polarity_visibility']('uv', 'positive' if negative else 'negative')
+    assert result[0] == mode
     assert result[1]['display'] == 'flex'
-    assert result[4] is True
-    assert mode in result[5].lower()
+    assert {option['value']: option['disabled'] for option in result[2]} == {'positive': negative, 'negative': not negative}
+    assert mode in result[3].lower()
 
 
 def test_scan_and_eic_keep_negative_mode_when_selecting_uv():
@@ -63,7 +65,30 @@ def test_scan_and_eic_keep_negative_mode_when_selecting_uv():
     store = next(cell.cell_contents for cell in callback.__closure__ if isinstance(cell.cell_contents, DataStore))
     assert _resolve_lcms_spectral_entry(store, 'negative', store.lcms_service)[0] == 'negative'
     assert _resolve_lcms_spectral_entry(store, 'uv', store.lcms_service)[0] == 'negative'
-    assert callback('uv')[0] is True
+    assert callback('uv')[0] == 'negative'
     # Explicitly selecting positive is still respected.
     assert _resolve_lcms_spectral_entry(store, 'positive', store.lcms_service)[0] == 'positive'
     assert _resolve_lcms_spectral_entry(store, 'uv', store.lcms_service)[0] == 'positive'
+
+
+def test_lower_controls_use_same_segmented_style_as_main_toolbar():
+    from components.spectrum_polarity_control import create_spectrum_polarity_control
+    import dash_mantine_components as dmc
+    for prefix in ('ms', 'eic', 'peak-mass'):
+        wrapper = create_spectrum_polarity_control(prefix)
+        control = wrapper.children
+        assert isinstance(control, dmc.SegmentedControl)
+        assert control.id == prefix + '-polarity-toggle'
+        assert control.value == 'positive'
+        assert control.size == 'xs'
+        assert [(o['label'], o['value']) for o in control.data] == [('+', 'positive'), ('−', 'negative')]
+
+
+@pytest.mark.parametrize('control', ['ms', 'eic'])
+@pytest.mark.parametrize('mode,source', [('positive', 'negative'), ('negative', 'positive')])
+def test_segment_choice_selects_requested_source(monkeypatch, control, mode, source):
+    functions, _ = fixture()
+    monkeypatch.setattr('callbacks.lcms_callbacks.callback_context', SimpleNamespace(
+        triggered=[{'prop_id': control + '-polarity-toggle.value'}]))
+    args = (mode, source) if control == 'ms' else (source, mode)
+    assert functions['polarity_toggle_switch'](*args, source) == mode

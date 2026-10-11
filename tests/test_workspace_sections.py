@@ -64,12 +64,13 @@ print(json.dumps({
     return json.loads(result.stdout)
 
 
-def test_all_analysis_views_have_visible_tabs(analysis_navigation):
+def test_analysis_views_have_direct_tabs_and_keep_panels_mounted(analysis_navigation):
     expected = {'data-overview':'Data','peak-analysis':'Peaks','metadata':'Metadata',
                 'across-samples':'Compare samples','calibration':'Calibration',
                 'ms-scan':'MS scan','ms-eic':'EIC','ms-peak-mass':'Peak mass spectrum'}
     assert {tab['value']:tab['label'] for tab in analysis_navigation['tabs']} == expected
-    assert all(tab['style'].get('display') != 'none' for tab in analysis_navigation['tabs'])
+    for tab in analysis_navigation['tabs']:
+        assert (tab['style'].get('display') == 'none') == tab['value'].startswith('ms-')
     assert not analysis_navigation['dropdown']
     assert analysis_navigation['scroll']
     assert analysis_navigation['keepMounted']
@@ -79,3 +80,7 @@ def test_all_analysis_views_have_visible_tabs(analysis_navigation):
 def test_mass_polarity_and_peak_empty_state_are_reachable(analysis_navigation):
     assert {'ms-polarity-control','ms-polarity-toolbar','peak-analysis-empty'} <= set(analysis_navigation['ids'])
     assert {'ms-polarity-toggle','eic-polarity-toggle','peak-mass-polarity-toggle'} <= set(analysis_navigation['ids'])
+
+
+def test_analysis_position_control_is_reachable(analysis_navigation):
+    assert {'analysis-dock', 'analysis-dock-owner'} <= set(analysis_navigation['ids'])

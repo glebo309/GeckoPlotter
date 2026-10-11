@@ -103,10 +103,11 @@ def test_file_removal_feedback_reaches_shared_status_bar():
     assert report(None) is no_update
 
 
-def test_figure_inspector_never_resets_selected_analysis_tab_on_file_change():
+def test_only_capability_guard_can_change_selected_analysis_tab():
     app = dash.Dash(__name__)
     callbacks.register_workspace_callbacks(app, None)
     for callback in app.callback_map.values():
         outputs = callback['output']
         if not isinstance(outputs,list):outputs=[outputs]
-        assert not any(output.component_id=='analysis-tabs' for output in outputs)
+        if any(output.component_id=='analysis-tabs' for output in outputs):
+            assert callback['callback'].__wrapped__.__name__ == 'analysis_capabilities'

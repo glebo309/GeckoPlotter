@@ -13,6 +13,7 @@ import logging
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), 'src'))
 
 import dash
+from components.spectrum_polarity_control import create_spectrum_polarity_control
 from dash import dcc, html, dash_table, Input, Output, State, ClientsideFunction, clientside_callback
 import dash_mantine_components as dmc
 from dash_iconify import DashIconify
@@ -1269,18 +1270,7 @@ _layout_body = html.Div(
                                                         html.Div([
                                                             html.Div('Apex / Scan Spectrum', style={
                                                                 'fontWeight': 'bold', 'fontSize': '12px'}),
-                                                            html.Div([
-                                                                html.Span('+', id='ms-polarity-pos-label', style={
-                                                                    'fontSize': '12px', 'fontWeight': '600',
-                                                                    'color': '#333', 'cursor': 'default'}),
-                                                                dmc.Switch(id='ms-polarity-toggle',
-                                                                           checked=False, size='sm',
-                                                                           style={'margin': '0 4px'}),
-                                                                html.Span('−', id='ms-polarity-neg-label', style={
-                                                                    'fontSize': '12px', 'fontWeight': '400',
-                                                                    'color': '#999', 'cursor': 'default'}),
-                                                            ], id='ms-polarity-toggle-wrapper', style={
-                                                                'display': 'none', 'alignItems': 'center', 'gap': '2px'}),
+                                                            create_spectrum_polarity_control('ms'),
                                                         ], style={
                                                             'display': 'flex', 'justifyContent': 'space-between',
                                                             'alignItems': 'center', 'margin': '0 0 4px 2px'}),
@@ -1332,18 +1322,7 @@ _layout_body = html.Div(
                                                         html.Div([
                                                             html.Div('Extracted Ion Chromatogram', style={
                                                                 'fontWeight': 'bold', 'fontSize': '12px'}),
-                                                            html.Div([
-                                                                html.Span('+', id='eic-polarity-pos-label', style={
-                                                                    'fontSize': '12px', 'fontWeight': '600',
-                                                                    'color': '#333', 'cursor': 'default'}),
-                                                                dmc.Switch(id='eic-polarity-toggle',
-                                                                           checked=False, size='sm',
-                                                                           style={'margin': '0 4px'}),
-                                                                html.Span('−', id='eic-polarity-neg-label', style={
-                                                                    'fontSize': '12px', 'fontWeight': '400',
-                                                                    'color': '#999', 'cursor': 'default'}),
-                                                            ], id='eic-polarity-toggle-wrapper', style={
-                                                                'display': 'none', 'alignItems': 'center', 'gap': '2px'}),
+                                                            create_spectrum_polarity_control('eic'),
                                                         ], style={
                                                             'display': 'flex', 'justifyContent': 'space-between',
                                                             'alignItems': 'center', 'margin': '0 0 4px 2px'}),
@@ -1411,18 +1390,7 @@ _layout_body = html.Div(
                                                             html.Div([
                                                                 html.Div('Peak Mass Spectrum', style={
                                                                     'fontWeight': 'bold', 'fontSize': '12px'}),
-                                                                html.Div([
-                                                                    html.Span('+', id='peak-mass-polarity-pos-label', style={
-                                                                        'fontSize': '12px', 'fontWeight': '600',
-                                                                        'color': '#333', 'cursor': 'default'}),
-                                                                    dmc.Switch(id='peak-mass-polarity-toggle',
-                                                                               checked=False, size='sm',
-                                                                               style={'margin': '0 4px'}),
-                                                                    html.Span('−', id='peak-mass-polarity-neg-label', style={
-                                                                        'fontSize': '12px', 'fontWeight': '400',
-                                                                        'color': '#999', 'cursor': 'default'}),
-                                                                ], id='peak-mass-polarity-wrapper', style={
-                                                                    'display': 'none', 'alignItems': 'center', 'gap': '2px'}),
+                                                                create_spectrum_polarity_control('peak-mass'),
                                                             ], style={
                                                                 'display': 'flex', 'justifyContent': 'space-between',
                                                                 'alignItems': 'center', 'marginBottom': '6px'}),

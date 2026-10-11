@@ -1,9 +1,17 @@
 """Context and precise controls for the shared figure inspector."""
-from dash import Input, Output, State, no_update, ctx
+from dash import Input, Output, State, no_update, ctx, ClientsideFunction
 from services.workspace_inspector import active_figure, signal_choices, edit_signal
 
 
 def register_workspace_callbacks(app, data_manager):
+    app.clientside_callback(
+        ClientsideFunction(namespace='resize', function_name='syncAnalysisDock'),
+        [Output('analysis-dock', 'value'), Output('analysis-dock-owner', 'data')],
+        [Input('analysis-tabs', 'value'), Input('analysis-dock', 'value'),
+         Input('active-plot-tab', 'data'), Input('plot-tabs', 'data')],
+        State('analysis-dock-owner', 'data'),
+    )
+
     @app.callback(
         [Output('inspector-figure-name','children'),Output('inspector-figure-summary','children'),
          Output('inspector-separate-controls','style'),Output('signal-inspector-select','data'),
@@ -94,6 +102,22 @@ def register_workspace_callbacks(app, data_manager):
 
     @app.callback(Output('toolbox-tabs','value',allow_duplicate=True),Input('plot-tool-export','n_clicks'),prevent_initial_call=True)
     def show_export(clicks):return 'export' if clicks else no_update
+
+    @app.callback(
+        [Output('analysis-nav-ms-scan','style'), Output('analysis-nav-ms-eic','style'),
+         Output('analysis-nav-ms-peak-mass','style'),
+         Output('analysis-tabs','value',allow_duplicate=True)],
+        [Input('active-file','data'), Input('loaded-files','data'), Input('analysis-tabs','value')],
+        prevent_initial_call=True,
+    )
+    def analysis_capabilities(active_file, _loaded_files, selected):
+        from services.analysis_capabilities import has_lcms_scans, MS_ANALYSIS_TABS
+        available = has_lcms_scans(data_manager, active_file)
+        style = {'flexShrink':0, 'whiteSpace':'nowrap'}
+        if not available:
+            style['display'] = 'none'
+        fallback = 'data-overview' if not available and selected in MS_ANALYSIS_TABS else no_update
+        return dict(style), dict(style), dict(style), fallback
 
     @app.callback(Output('figure-action-status', 'children', allow_duplicate=True),
                   Input('file-removal-message', 'children'), prevent_initial_call=True)

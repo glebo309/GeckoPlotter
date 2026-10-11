@@ -91,7 +91,7 @@ def arrange_workspace(root):
                 if getattr(child,'children',None)=='File Explorer':child.children='Files'
     nodes['left-vertical-divider'].__setattr__('data-label-below','Inspector')
     nodes['left-vertical-divider'].__setattr__('data-label-above','Files')
-    # Every analysis view stays visible in one horizontally scrolling tab row.
+    # Available analysis views use one horizontally scrolling tab row.
     # Keep the mounted panels and tab values so switching figures retains context.
     tabs = nodes['analysis-tabs']
     nav = tabs.children[0]
@@ -101,10 +101,20 @@ def arrange_workspace(root):
     for tab in nav.children:
         tab.children = labels.get(getattr(tab, 'value', None), tab.children)
         tab.style = {'flexShrink':0, 'whiteSpace':'nowrap'}
+        if getattr(tab, 'value', None) in ('ms-scan','ms-eic','ms-peak-mass'):
+            tab.id = 'analysis-nav-' + tab.value
+            tab.style['display'] = 'none'
     nav.style = {'flexWrap':'nowrap', 'width':'max-content', 'minWidth':'100%'}
-    tabs.children[0] = html.Div(nav, className='results-navigation',
-        style={'overflowX':'auto', 'overflowY':'hidden', 'minWidth':0,
-               'justifyContent':'flex-start'})
+    tabs.children[0] = html.Div([
+        html.Div(nav, style={'overflowX':'auto', 'overflowY':'hidden', 'minWidth':0, 'flex':1}),
+        html.Div([
+            dmc.SegmentedControl(id='analysis-dock', value='below', size='xs',
+                data=[{'label':'Below', 'value':'below'}, {'label':'Right', 'value':'right'}],
+                **{'aria-label':'Analysis pane position'}),
+            dcc.Store(id='analysis-dock-owner'),
+        ], title='Position the analysis pane', style={'flexShrink':0, 'padding':'4px 8px'}),
+    ], className='results-navigation',
+       style={'display':'flex', 'alignItems':'center', 'minWidth':0})
     nodes['peak-analysis-container'].children.append(html.Div(
         'No peaks yet. Use Integrate or Shift-drag across a signal to add one.',
         id='peak-analysis-empty', className='inspector-empty', role='status'))

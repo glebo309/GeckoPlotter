@@ -97,85 +97,48 @@ def register_lcms_callbacks(app, data_manager):
     # Polarity toggle: sync both toggles from active-file selection
     # ------------------------------------------------------------------
     @app.callback(
-        [Output('ms-polarity-toggle', 'checked'),
-         Output('ms-polarity-toggle-wrapper', 'style'),
-         Output('ms-polarity-pos-label', 'style'),
-         Output('ms-polarity-neg-label', 'style'),
-         Output('eic-polarity-toggle', 'checked'),
-         Output('eic-polarity-toggle-wrapper', 'style'),
-         Output('eic-polarity-pos-label', 'style'),
-         Output('eic-polarity-neg-label', 'style'),
-         Output('ms-polarity-toggle', 'disabled'), Output('eic-polarity-toggle', 'disabled'),
-         Output('ms-polarity-toggle-wrapper', 'title'), Output('eic-polarity-toggle-wrapper', 'title')],
-        Input('active-file', 'data'),
-        prevent_initial_call=True,
+        [Output('ms-polarity-toggle', 'value'), Output('ms-polarity-toggle-wrapper', 'style'),
+         Output('ms-polarity-toggle', 'data'), Output('ms-polarity-toggle-wrapper', 'title'),
+         Output('eic-polarity-toggle', 'value'), Output('eic-polarity-toggle-wrapper', 'style'),
+         Output('eic-polarity-toggle', 'data'), Output('eic-polarity-toggle-wrapper', 'title')],
+        Input('active-file', 'data'), prevent_initial_call=True,
     )
     def sync_polarity_toggle(active_file):
-        """Update both toggle positions and visibility when active file changes."""
-        hidden = {'display': 'none', 'alignItems': 'center', 'gap': '2px'}
-        visible = {'display': 'flex', 'alignItems': 'center', 'gap': '2px'}
-        pos_active = {'fontSize': '12px', 'fontWeight': '600', 'color': '#333', 'cursor': 'default'}
-        pos_dim = {'fontSize': '12px', 'fontWeight': '400', 'color': '#999', 'cursor': 'default'}
-        neg_active = {'fontSize': '12px', 'fontWeight': '600', 'color': '#333', 'cursor': 'default'}
-        neg_dim = {'fontSize': '12px', 'fontWeight': '400', 'color': '#999', 'cursor': 'default'}
-
-        def _pack(checked, show, pos_s, neg_s, disabled=True, title='No mass spectral data available'):
-            wrapper = visible if show else hidden
-            return checked, wrapper, pos_s, neg_s, checked, wrapper, pos_s, neg_s, disabled, disabled, title, title
-
-        if not active_file:
-            return _pack(False, False, pos_active, neg_dim)
-
-        bundle = data_manager.get_bundle(active_file) if hasattr(data_manager, 'get_bundle') else None
-        if not bundle and hasattr(data_manager, 'get_bundle_for_component'):
-            bundle = data_manager.get_bundle_for_component(active_file)
-        if not bundle or bundle.bundle_type != BundleType.LCMS:
-            return _pack(False, False, pos_active, neg_dim)
-
-        has_pos = _polarity_spectral_entry(data_manager, active_file, False, lcms_svc) is not None
-        has_neg = _polarity_spectral_entry(data_manager, active_file, True, lcms_svc) is not None
-        title = _polarity_availability(has_pos, has_neg)
-        if not (has_pos and has_neg):
-            return _pack(has_neg, True, pos_dim if has_neg else pos_active,
-                         neg_active if has_neg else neg_dim, True, title)
-
-        _resolve_lcms_spectral_entry(data_manager, active_file, lcms_svc)
-        current = next(
-            (c for c in bundle.component_list if c.component_id == active_file), None)
-        is_negative = current and current.role == ComponentRole.MS_NEGATIVE
-        if not current or current.role not in (ComponentRole.MS_POSITIVE, ComponentRole.MS_NEGATIVE):
-            entry = data_manager.get_data_by_id(active_file)
-            if entry and lcms_svc.has_spectral_data(entry):
-                is_negative = False
-            else:
-                resolved = _resolve_lcms_spectral_entry(data_manager, active_file, lcms_svc)
-                if resolved:
-                    resolved_id = resolved[0]
-                    resolved_comp = next(
-                        (c for c in bundle.component_list if c.component_id == resolved_id), None)
-                    is_negative = resolved_comp and resolved_comp.role == ComponentRole.MS_NEGATIVE
-
-        if is_negative:
-            return _pack(True, True, pos_dim, neg_active, False, title)
-        return _pack(False, True, pos_active, neg_dim, False, title)
+        """Show the selected spectral mode and disable only unavailable modes."""
+        bundle = _lcms_bundle(data_manager, active_file)
+        style = {'display': 'flex' if bundle else 'none', 'alignItems': 'center', 'gap': '2px'}
+        positive = _polarity_spectral_entry(data_manager, active_file, False, lcms_svc) is not None if bundle else False
+        negative = _polarity_spectral_entry(data_manager, active_file, True, lcms_svc) is not None if bundle else False
+        value = 'negative' if negative and not positive else 'positive'
+        if positive and negative:
+            resolved = _resolve_lcms_spectral_entry(data_manager, active_file, lcms_svc)
+            if resolved:
+                selected = next((c for c in bundle.component_list if c.component_id == resolved[0]), None)
+                value = 'negative' if selected and selected.role == ComponentRole.MS_NEGATIVE else 'positive'
+        options = _spectrum_polarity_options(positive, negative)
+        result = (value, style, options, _polarity_availability(positive, negative))
+        return result + result
 
     # ------------------------------------------------------------------
     # Polarity toggle: switch active file when either toggle is clicked
     # ------------------------------------------------------------------
     @app.callback(
         Output('active-file', 'data', allow_duplicate=True),
-        [Input('ms-polarity-toggle', 'checked'),
-         Input('eic-polarity-toggle', 'checked')],
+        [Input('ms-polarity-toggle', 'value'),
+         Input('eic-polarity-toggle', 'value')],
         State('active-file', 'data'),
         prevent_initial_call=True,
     )
-    def polarity_toggle_switch(ms_checked, eic_checked, active_file):
+    def polarity_toggle_switch(ms_value, eic_value, active_file):
         """Switch active MS component when either polarity toggle is clicked."""
         if active_file is None:
             raise dash.exceptions.PreventUpdate
 
         trigger = callback_context.triggered[0]['prop_id'] if callback_context.triggered else ''
-        is_negative = eic_checked if 'eic-polarity' in trigger else ms_checked
+        value = eic_value if 'eic-polarity' in trigger else ms_value
+        if value not in ('positive', 'negative'):
+            raise dash.exceptions.PreventUpdate
+        is_negative = value == 'negative'
 
         bundle = data_manager.get_bundle(active_file) if hasattr(data_manager, 'get_bundle') else None
         if not bundle and hasattr(data_manager, 'get_bundle_for_component'):
@@ -475,38 +438,29 @@ def register_lcms_callbacks(app, data_manager):
         return options
 
     @app.callback(
-        [Output('peak-mass-polarity-toggle', 'checked'),
-         Output('peak-mass-polarity-wrapper', 'style'),
-         Output('peak-mass-polarity-pos-label', 'style'),
-         Output('peak-mass-polarity-neg-label', 'style'),
-         Output('peak-mass-polarity-toggle', 'disabled'),
-         Output('peak-mass-polarity-wrapper', 'title')],
-        [Input('active-file', 'data'), Input('peak-mass-polarity-toggle', 'checked')],
+        [Output('peak-mass-polarity-toggle', 'value'), Output('peak-mass-polarity-wrapper', 'style'),
+         Output('peak-mass-polarity-toggle', 'data'), Output('peak-mass-polarity-wrapper', 'title')],
+        [Input('active-file', 'data'), Input('peak-mass-polarity-toggle', 'value')],
         prevent_initial_call=True,
     )
-    def peak_mass_polarity_visibility(active_file, checked=False):
-        hidden = {'display': 'none', 'alignItems': 'center', 'gap': '2px'}
-        visible = {**hidden, 'display': 'flex'}
-        active = {'fontSize': '12px', 'fontWeight': '600', 'color': '#333', 'cursor': 'default'}
-        dim = {**active, 'fontWeight': '400', 'color': '#999'}
+    def peak_mass_polarity_visibility(active_file, value='positive'):
         bundle = _lcms_bundle(data_manager, active_file)
-        if not bundle:
-            return False, hidden, active, dim, True, 'No mass spectral data available'
-        positive = _polarity_spectral_entry(data_manager, active_file, False, lcms_svc) is not None
-        negative = _polarity_spectral_entry(data_manager, active_file, True, lcms_svc) is not None
-        selected = bool(checked) if positive and negative else negative
-        return (selected, visible, dim if selected else active, active if selected else dim,
-                not (positive and negative), _polarity_availability(positive, negative))
+        style = {'display': 'flex' if bundle else 'none', 'alignItems': 'center', 'gap': '2px'}
+        positive = _polarity_spectral_entry(data_manager, active_file, False, lcms_svc) is not None if bundle else False
+        negative = _polarity_spectral_entry(data_manager, active_file, True, lcms_svc) is not None if bundle else False
+        selected = value if positive and negative and value in ('positive', 'negative') else ('negative' if negative else 'positive')
+        return selected, style, _spectrum_polarity_options(positive, negative), _polarity_availability(positive, negative)
 
     @app.callback(
         [Output('peak-mass-graph', 'figure'),
          Output('peak-mass-info', 'children')],
         [Input('peak-mass-selector', 'value'),
-         Input('peak-mass-polarity-toggle', 'checked')],
+         Input('peak-mass-polarity-toggle', 'value')],
         State('active-file', 'data'),
         prevent_initial_call=True,
     )
-    def show_peak_mass(peak_id, use_negative, active_file):
+    def show_peak_mass(peak_id, polarity, active_file):
+        use_negative = polarity == 'negative'
         if not peak_id or not active_file:
             return _empty_peak_mass("Select a peak to view its mass spectrum"), ""
 
@@ -833,6 +787,11 @@ def _polarity_spectral_entry(data_manager, active_file, negative, lcms_svc):
             if entry and lcms_svc.has_spectral_data(entry):
                 return component.component_id, entry
     return None
+
+
+def _spectrum_polarity_options(positive, negative):
+    return [{'label': '+', 'value': 'positive', 'disabled': not positive},
+            {'label': '−', 'value': 'negative', 'disabled': not negative}]
 
 
 def _polarity_availability(positive, negative):

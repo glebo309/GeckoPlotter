@@ -42,6 +42,62 @@
         var activePlotTab = null, activePlotKind = null;
         var tabLayouts = {}, tabLayoutKinds = {};
         var applyingLayout = false;
+        var analysisDock = 'below', analysisDockOverride = null, analysisPanel = 'data-overview';
+        var rightSplits = {below: 60, right: 60};
+        var analysisNavFramePending = false;
+
+        function revealSelectedAnalysisTab() {
+            if (analysisNavFramePending) return;
+            analysisNavFramePending = true;
+            var schedule = window.requestAnimationFrame || function (fn) { setTimeout(fn, 0); };
+            schedule(function () {
+                analysisNavFramePending = false;
+                if (activePlotKind === 'publication') return;
+                var nav = document.querySelector('.results-navigation');
+                var scroller = nav && nav.firstElementChild;
+                var selected = scroller && scroller.querySelector('[role="tab"][aria-selected="true"]');
+                if (!selected) return;
+                var viewport = scroller.getBoundingClientRect();
+                var tab = selected.getBoundingClientRect();
+                if (!viewport.width || !tab.width) return;
+                // Move this tab row only; scrollIntoView would also move the
+                // analysis panel or document when the dock changes size.
+                if (tab.left < viewport.left) scroller.scrollLeft += tab.left - viewport.left;
+                else if (tab.right > viewport.right) scroller.scrollLeft += tab.right - viewport.right;
+            });
+        }
+
+        function desiredAnalysisDock() {
+            if (analysisDockOverride) return analysisDockOverride;
+            var mass = ['ms-scan', 'ms-eic', 'ms-peak-mass'].indexOf(analysisPanel) !== -1;
+            return mass && rightColumn.getBoundingClientRect().width >= 900 ? 'right' : 'below';
+        }
+
+        function orientAnalysis(dock) {
+            analysisDock = dock;
+            rightColumn.style.flexDirection = dock === 'right' ? 'row' : 'column';
+            rightColumn.dataset.analysisDock = dock;
+            rightVDivider.classList.remove('divider-horizontal', 'divider-vertical');
+            rightVDivider.classList.add(dock === 'right' ? 'divider-horizontal' : 'divider-vertical');
+            rightVDivider.dataset.labelLeft = rightVDivider.dataset.labelAbove || 'Plot';
+            rightVDivider.dataset.labelRight = rightVDivider.dataset.labelBelow || 'Analysis';
+            topRight.style[dock === 'right' ? 'height' : 'width'] = '100%';
+            bottomRight.style[dock === 'right' ? 'height' : 'width'] = '100%';
+            topRight.style.minWidth = bottomRight.style.minWidth = '0';
+            topRight.style.minHeight = bottomRight.style.minHeight = '0';
+            revealSelectedAnalysisTab();
+        }
+
+        function updateAnalysisDock() {
+            if (activePlotKind === 'publication') return;
+            revealSelectedAnalysisTab();
+            var wanted = desiredAnalysisDock();
+            if (wanted !== analysisDock) {
+                currentLayout();
+                orientAnalysis(wanted);
+                applyCollapse('right-vertical', rightSplits[wanted]);
+            }
+        }
 
         // Deterministic restore positions. Collapsed panels should reopen to the
         // familiar working layout, not to the last near-edge drag position.
@@ -105,8 +161,8 @@
                 dockHeight = dockThickness;
             } else if (collapseKey === 'rightVertical') {
                 rect = rightColumn.getBoundingClientRect();
-                dockWidth = rect.width;
-                dockHeight = dockThickness;
+                dockWidth = analysisDock === 'right' ? dockThickness : rect.width;
+                dockHeight = analysisDock === 'right' ? rect.height : dockThickness;
             }
 
             divider.style.setProperty('--dock-width', Math.max(1, Math.round(dockWidth)) + 'px');
@@ -179,6 +235,9 @@
         }
 
         function currentLayout() {
+            rightSplits[analysisDock] = collapsed.rightVertical === 'first' ? 0
+                : collapsed.rightVertical === 'second' ? 100
+                : ratioPercent(topRight, bottomRight, analysisDock === 'right' ? 'width' : 'height', defaults.topRight);
             return {
                 main: collapsed.main === 'first' ? 0
                     : collapsed.main === 'second' ? 100
@@ -186,9 +245,11 @@
                 leftVertical: collapsed.leftVertical === 'first' ? 0
                     : collapsed.leftVertical === 'second' ? 100
                     : ratioPercent(topLeft, bottomLeft, 'height', defaults.topLeft),
-                rightVertical: collapsed.rightVertical === 'first' ? 0
-                    : collapsed.rightVertical === 'second' ? 100
-                    : ratioPercent(topRight, bottomRight, 'height', defaults.topRight)
+                rightVertical: rightSplits.below,
+                rightHorizontal: rightSplits.right,
+                analysisDock: analysisDock,
+                analysisDockOverride: analysisDockOverride,
+                analysisPanel: analysisPanel
             };
         }
 
@@ -203,7 +264,12 @@
             applyingLayout = true;
             applyCollapse('main', typeof layout.main === 'number' ? layout.main : defaults.leftCol);
             applyCollapse('left-vertical', typeof layout.leftVertical === 'number' ? layout.leftVertical : defaults.topLeft);
-            applyCollapse('right-vertical', typeof layout.rightVertical === 'number' ? layout.rightVertical : defaults.topRight);
+            rightSplits = {below: typeof layout.rightVertical === 'number' ? layout.rightVertical : defaults.topRight,
+                right: typeof layout.rightHorizontal === 'number' ? layout.rightHorizontal : defaults.topRight};
+            analysisDockOverride = layout.analysisDockOverride || null;
+            analysisPanel = layout.analysisPanel || 'data-overview';
+            orientAnalysis(activePlotKind === 'publication' ? 'below' : desiredAnalysisDock());
+            applyCollapse('right-vertical', rightSplits[analysisDock]);
             applyingLayout = false;
             rememberActiveLayout();
         }
@@ -266,23 +332,24 @@
                 rememberActiveLayout();
 
             } else if (type === 'right-vertical') {
+                var axis = analysisDock === 'right' ? 'width' : 'height';
                 if (percent < 5) {
                     topRight.style.display = 'none';
                     bottomRight.style.display = 'flex';
-                    topRight.style.height = '0%';
-                    bottomRight.style.height = '100%';
+                    topRight.style[axis] = '0%';
+                    bottomRight.style[axis] = '100%';
                     collapsed.rightVertical = 'first';
                 } else if (percent > 95) {
                     bottomRight.style.display = 'none';
                     topRight.style.display = 'flex';
-                    topRight.style.height = '100%';
-                    bottomRight.style.height = '0%';
+                    topRight.style[axis] = '100%';
+                    bottomRight.style[axis] = '0%';
                     collapsed.rightVertical = 'second';
                 } else {
                     topRight.style.display = 'flex';
                     bottomRight.style.display = 'flex';
-                    topRight.style.height = percent + '%';
-                    bottomRight.style.height = (100 - percent) + '%';
+                    topRight.style[axis] = percent + '%';
+                    bottomRight.style[axis] = (100 - percent) + '%';
                     collapsed.rightVertical = null;
                 }
                 updateLabel(rightVDivider, 'rightVertical');
@@ -359,13 +426,16 @@
 
             start = {
                 left: leftRect.width,
-                top:  topRect ? topRect.height : 0,
+                top:  topRect ? (type === 'right-vertical'
+                    ? ratioPercent(topRight, bottomRight, analysisDock === 'right' ? 'width' : 'height', defaults.topRight)
+                      * (analysisDock === 'right' ? rightRect.width : rightRect.height) / 100 : topRect.height) : 0,
                 containerWidth:  containerRect.width || window.innerWidth,
-                containerHeight: (type === 'left-vertical' ? leftRect.height : rightRect.height) || window.innerHeight
+                containerHeight: (type === 'left-vertical' ? leftRect.height
+                    : analysisDock === 'right' ? rightRect.width : rightRect.height) || window.innerHeight
             };
 
             document.body.classList.add('dragging');
-            document.body.style.cursor = type === 'main' ? 'col-resize' : 'row-resize';
+            document.body.style.cursor = type === 'main' || (type === 'right-vertical' && analysisDock === 'right') ? 'col-resize' : 'row-resize';
         }
 
         document.addEventListener('mousemove', function (e) {
@@ -387,7 +457,7 @@
                 applyCollapse('left-vertical', percent);
 
             } else if (activeResize === 'right-vertical' && topRight && bottomRight) {
-                var deltaY = e.clientY - startY;
+                var deltaY = analysisDock === 'right' ? e.clientX - startX : e.clientY - startY;
                 var ch = start.containerHeight || rightColumn.getBoundingClientRect().height || window.innerHeight;
                 var newTop = start.top + deltaY;
                 var percent = (newTop / ch) * 100;
@@ -397,7 +467,12 @@
 
         document.addEventListener('mouseup', function () {
             if (!activeResize) return;
+            var changedWidth = activeResize === 'main';
             activeResize = null;
+            if (changedWidth) {
+                updateAnalysisDock();
+                if (window.dash_clientside.set_props) window.dash_clientside.set_props('analysis-dock', {value: analysisDock});
+            }
             document.body.classList.remove('dragging');
             document.body.style.cursor = '';
         });
@@ -431,6 +506,8 @@
         document.addEventListener('mouseleave', clearDockHover);
 
         window.addEventListener('resize', function () {
+            updateAnalysisDock();
+            if (window.dash_clientside.set_props) window.dash_clientside.set_props('analysis-dock', {value: analysisDock});
             updateLabel(leftVDivider, 'leftVertical');
             updateLabel(rightVDivider, 'rightVertical');
             updateLabel(mainVDivider, 'main');
@@ -455,6 +532,23 @@
             }
         };
 
+        window.__geckoSyncAnalysisDock = function (panel, requested, activeTab, plotTabs, owner) {
+            var kind = tabKind(activeTab, plotTabs);
+            if (!activeTab || !kind) return [window.dash_clientside.no_update, window.dash_clientside.no_update];
+            if (activePlotTab !== activeTab || activePlotKind !== kind) window.__geckoSyncPlotTabLayout(activeTab, plotTabs);
+            if (kind === 'publication') return ['below', activeTab];
+            var ctx = window.dash_clientside.callback_context;
+            var trigger = ctx && ctx.triggered && ctx.triggered.length ? ctx.triggered[0].prop_id.split('.')[0] : '';
+            // The control is shared; its previous owner's late value cannot
+            // override the newly activated figure's saved dock.
+            if (trigger === 'analysis-dock' && owner === activeTab && requested !== analysisDock &&
+                    (requested === 'below' || requested === 'right')) analysisDockOverride = requested;
+            if (panel && (owner === activeTab || trigger === 'analysis-tabs')) analysisPanel = panel;
+            updateAnalysisDock();
+            rememberActiveLayout();
+            return [analysisDock, activeTab];
+        };
+
         console.log('[GeckoPlotter] Resize handlers initialized (snap-to-edge hidden-panel labels)');
     }
 
@@ -469,6 +563,11 @@
     // Expose for Dash clientside callback fallback
     window.dash_clientside = Object.assign({}, window.dash_clientside, {
         resize: {
+            syncAnalysisDock: function (panel, requested, activeTab, plotTabs, owner) {
+                initResizeSystem();
+                return window.__geckoSyncAnalysisDock ? window.__geckoSyncAnalysisDock(panel, requested, activeTab, plotTabs, owner)
+                    : [window.dash_clientside.no_update, window.dash_clientside.no_update];
+            },
             initializeResizeHandlers: function () {
                 initResizeSystem();
                 return window.dash_clientside.no_update;
