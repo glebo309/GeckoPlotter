@@ -1042,11 +1042,11 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
         programmatic active-file changes (tab switches, initial load).
         """
         if not active_file:
-            return html.Div('Select source data to view its table.', className='inspector-empty'), None, html.Div()
+            return create_data_table_editor(None, table_id='pub-table'), None, html.Div()
 
         file_data = data_manager.get_data_by_id(active_file)
         if not file_data:
-            return html.Div('Source data is no longer available.', className='inspector-empty'), None, html.Div()
+            return create_data_table_editor(None, table_id='pub-table'), None, html.Div()
 
         on_shared_tab = active_tab in ('peak-analysis', 'across-samples')
 
@@ -1292,6 +1292,8 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
         visible_files = _collect_visible_files(
             data_manager, active_file, loaded_files, target_group_override=group_key,
             file_order=file_order)
+        from services.ms_polarity import filter_ms_polarity, entry_polarity
+        visible_files = filter_ms_polarity(visible_files, s.get('ms_polarity', 'both'))
         if not visible_files:
             figure = plot_manager.create_hidden_state_plot()
             figure.update_layout(meta={'gecko_tab_id': active_tab_id})
@@ -1337,7 +1339,10 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
                     if _ov_time is not None:
                         add_peak_traces(fig_obj_for_peaks, peaks, _ov_time, _ov_signal, selected_peak_id, row=row_idx)
                 figure = fig_obj_for_peaks
-            elif active_file and _get_active_file_group(data_manager, active_file) == group_key:
+            elif (active_file and _get_active_file_group(data_manager, active_file) == group_key
+                  and (s.get('ms_polarity', 'both') == 'both' or
+                       entry_polarity(data_manager.get_data_by_id(active_file) or {})
+                       in (None, s.get('ms_polarity')))):
                 _ov_time, _ov_signal = get_xy_arrays(data_manager, active_file)
                 if _ov_time is not None:
                     all_peaks = data_manager.peak_service.get_peaks(active_file)

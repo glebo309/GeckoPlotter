@@ -715,7 +715,7 @@ def render_individual_file_item_selected(item: dict, is_selected: bool = False, 
             role='button', tabIndex=0,
             id={'type': 'file-tree-item', 'index': file_id},
             n_clicks=0,
-            title=f"{(item.get('type') or 'unknown').capitalize()} · {item.get('size_display', '')}",
+            title=item.get('original_filename') or f"{(item.get('type') or 'unknown').capitalize()} · {item.get('size_display', '')}",
             style={
                 'gridArea': 'content',
                 'display': 'flex',

@@ -25,6 +25,24 @@ if not log.handlers:
 
 def register_tab_callbacks(app: dash.Dash, data_manager) -> None:
     """Register all tab-related callbacks."""
+
+    def peak_sources(active_file_id):
+        """LC-MS results cover the bundle while storage remains per channel."""
+        bundle = data_manager.get_bundle(active_file_id)
+        if bundle is None and hasattr(data_manager, 'get_bundle_for_component'):
+            bundle = data_manager.get_bundle_for_component(active_file_id)
+        if bundle is None or getattr(bundle.bundle_type, 'value', bundle.bundle_type) != 'lcms':
+            return [(active_file_id, None)]
+        from collections import Counter
+        signals = [(component.component_id, bundle.component_display_name(component))
+                   for component in bundle.component_list if component.dataframe is not None]
+        counts = Counter(label for _, label in signals)
+        seen = Counter()
+        result = []
+        for fid, label in signals:
+            seen[label] += 1
+            result.append((fid, f'{label} ({seen[label]})' if counts[label] > 1 else label))
+        return result
     
     @app.callback(
         [Output('peak-table', 'data', allow_duplicate=True),
@@ -34,11 +52,12 @@ def register_tab_callbacks(app: dash.Dash, data_manager) -> None:
         [Input('active-file', 'data'),
          Input('peak-change-trigger', 'data'),
          Input('peak-name-persist-trigger', 'data'),
-         Input('cross-sample-name-trigger', 'data')],
+         Input('cross-sample-name-trigger', 'data'),
+         Input('active-tab', 'data')],
         [State('loaded-files', 'data')],
         prevent_initial_call=True
     )
-    def update_peak_analysis_tab(active_file_id, peak_change, _name_trigger, _xname_trigger, loaded_files):
+    def update_peak_analysis_tab(active_file_id, peak_change, _name_trigger, _xname_trigger, active_tab, loaded_files):
         """Update peak-table data in-place (preserves selections)."""
 
         HIDE = {'display': 'none'}
@@ -69,7 +88,14 @@ def register_tab_callbacks(app: dash.Dash, data_manager) -> None:
                                 data_manager.peak_service.group_peaks_across_samples(
                                     file_overlay_map=data_manager.build_file_overlay_map())
 
-            df = data_manager.peak_service.peaks_to_table(active_file_id)
+            frames = []
+            for fid, signal in peak_sources(active_file_id):
+                frame = data_manager.peak_service.peaks_to_table(fid)
+                if not frame.empty:
+                    if signal is not None:
+                        frame.insert(1, 'Signal', signal)
+                    frames.append(frame)
+            df = pd.concat(frames, ignore_index=True) if frames else pd.DataFrame()
             if df.empty:
                 return [], [], HIDE, None
 
@@ -78,10 +104,10 @@ def register_tab_callbacks(app: dash.Dash, data_manager) -> None:
             hidden = {'_row_id', 'peak_id'}
             columns = [
                 {"name": col, "id": col,
-                 "editable": col not in hidden,
+                 "editable": col not in hidden and col != 'Signal',
                  "selectable": col not in hidden,
-                 "deletable": col not in hidden,
-                 "renamable": col not in hidden}
+                 "deletable": col not in hidden and col != 'Signal',
+                 "renamable": col not in hidden and col != 'Signal'}
                 for col in df.columns if col not in hidden
             ]
             return df.to_dict('records'), columns, SHOW, df.to_json(orient='split')
@@ -89,6 +115,34 @@ def register_tab_callbacks(app: dash.Dash, data_manager) -> None:
         except Exception as e:
             log.exception(f"Error updating peak analysis tab: {e}")
             return [], [], HIDE, None
+
+    @app.callback(Output('peak-analysis-empty', 'style'), Input('peak-table', 'data'))
+    def show_peak_table_empty_state(rows):
+        return {'display': 'none'} if rows else {'display': 'block'}
+
+    @app.callback(
+        [Output('selected-peak-idx', 'data', allow_duplicate=True),
+         Output('active-file', 'data', allow_duplicate=True),
+         Output('render-trigger', 'data', allow_duplicate=True)],
+        Input('peak-table', 'active_cell'),
+        [State('peak-table', 'derived_viewport_data'), State('peak-table', 'data'),
+         State('active-file', 'data'), State('render-trigger', 'data'), State('view-mode', 'data')],
+        prevent_initial_call=True,
+    )
+    def select_peak_table_row(cell, visible_rows, rows, active_file_id, render_counter, view_mode):
+        if not cell or not active_file_id or (view_mode or 'raw') != 'raw':
+            raise dash.exceptions.PreventUpdate
+        displayed = visible_rows if visible_rows is not None else (rows or [])
+        index = cell.get('row')
+        if not isinstance(index, int) or not 0 <= index < len(displayed):
+            raise dash.exceptions.PreventUpdate
+        peak_id = displayed[index].get('peak_id')
+        peak = next((peak for fid, _ in peak_sources(active_file_id)
+                     for peak in data_manager.peak_service.get_peaks(fid) if peak.peak_id == peak_id), None)
+        if peak is None:
+            raise dash.exceptions.PreventUpdate
+        owner = peak.file_id if peak.file_id != active_file_id else dash.no_update
+        return peak.peak_id, owner, (render_counter or 0) + 1
 
     @app.callback(
         Output('peak-name-persist-trigger', 'data', allow_duplicate=True),
@@ -102,7 +156,7 @@ def register_tab_callbacks(app: dash.Dash, data_manager) -> None:
         if not table_data or not active_file_id:
             return dash.no_update
         ps = data_manager.peak_service
-        peaks = ps.get_peaks(active_file_id)
+        peaks = [peak for fid, _ in peak_sources(active_file_id) for peak in ps.get_peaks(fid)]
         if not peaks:
             log.debug("[persist_peak_names] no peaks in service")
             return dash.no_update
@@ -117,11 +171,11 @@ def register_tab_callbacks(app: dash.Dash, data_manager) -> None:
             matched = None
             if pid:
                 matched = next((p for p in peaks if p.peak_id == pid), None)
-            if matched is None and rt is not None:
+            if matched is None and not pid and rt is not None:
                 matched = next((p for p in peaks if abs(p.rt - float(rt)) < 0.01), None)
             if matched and matched.name != new_name:
                 log.debug(f"[persist_peak_names] RENAME {matched.name!r} -> {new_name!r} (pid={matched.peak_id})")
-                ps.rename_peak(active_file_id, matched.peak_id, new_name)
+                ps.rename_peak(matched.file_id, matched.peak_id, new_name)
                 changed = True
         if changed:
             ps.group_peaks_across_samples(

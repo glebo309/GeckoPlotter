@@ -160,6 +160,12 @@ def _component_role(filename: str, standardized: StandardizedResult) -> Componen
         if re.match(pattern, clean_name):
             return role
 
+    # Explicit detector metadata is authoritative when an MS export was renamed.
+    # UV channels keep their own role even if instrument-wide metadata has polarity.
+    mode = str(standardized.metadata.get("ionization_mode", "")).lower()
+    if standardized.source_category == SourceCategory.LCMS_MS and mode in ("positive", "negative"):
+        return ComponentRole.MS_NEGATIVE if mode == "negative" else ComponentRole.MS_POSITIVE
+
     lcms_roles = [
         (ComponentRole.VWD_A, r"(_VWD_A\.(?:cdf|csv)$|_VWD1A\.(?:cdf|csv)$)"),
         (ComponentRole.VWD_B, r"(_VWD_B\.(?:cdf|csv)$|_VWD1B\.(?:cdf|csv)$)"),
@@ -171,7 +177,10 @@ def _component_role(filename: str, standardized: StandardizedResult) -> Componen
             return role
 
     if standardized.source_category in (SourceCategory.LCMS_MS, SourceCategory.LCMS_UV):
-        return ComponentRole.MS_POSITIVE if standardized.source_category == SourceCategory.LCMS_MS else ComponentRole.VWD_A
+        if standardized.source_category == SourceCategory.LCMS_UV:
+            return ComponentRole.VWD_A
+        mode = str(standardized.metadata.get("ionization_mode", "")).lower()
+        return ComponentRole.MS_NEGATIVE if mode == "negative" else ComponentRole.MS_POSITIVE
 
     return ComponentRole.PRIMARY if standardized.source_category != SourceCategory.GENERIC else ComponentRole.GENERIC
 
@@ -212,3 +221,44 @@ def _display_name(filename: str) -> str:
     base = os.path.basename(filename)
     stem, _extension = os.path.splitext(base)
     return stem or base
+
+
+def paired_tic_exports(bundle):
+    """Match explicit ``name.cdf`` / ``name_spectra.cdf`` export pairs.
+
+    Matching roles, full source stems (including detector settings), and scan
+    times are required. Similar-looking curves alone never hide a signal.
+    Returns (chromatogram, spectral) component pairs; loaded data is untouched.
+    """
+    if bundle.bundle_type != BundleType.LCMS:
+        return []
+    import numpy as np
+    pairs = []
+    ms_roles = (ComponentRole.MS_POSITIVE, ComponentRole.MS_NEGATIVE)
+    for spectral in bundle.component_list:
+        if spectral.role not in ms_roles or not spectral.metadata.get('mass_spectral_data'):
+            continue
+        stem = os.path.splitext(os.path.basename(spectral.original_filename))[0]
+        if not stem.lower().endswith('_spectra'):
+            continue
+        source_stem = stem[:-len('_spectra')].casefold()
+        for trace in bundle.component_list:
+            if trace.role != spectral.role or not trace.metadata.get('is_tic_only'):
+                continue
+            trace_stem = os.path.splitext(os.path.basename(trace.original_filename))[0].casefold()
+            if trace_stem != source_stem:
+                continue
+            def times(component):
+                columns = component.standardized.x_columns if component.standardized else []
+                if component.dataframe is None or not columns:
+                    return None
+                try:
+                    return np.asarray(component.dataframe[columns[0]], dtype=float)
+                except (KeyError, ValueError, TypeError):
+                    return None
+            tx, sx = times(trace), times(spectral)
+            if (tx is not None and sx is not None and tx.size >= 2 and tx.shape == sx.shape
+                    and np.all(np.isfinite(tx)) and np.all(np.isfinite(sx))
+                    and np.allclose(tx, sx, rtol=0, atol=1e-6)):
+                pairs.append((trace, spectral))
+    return pairs

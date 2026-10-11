@@ -113,6 +113,9 @@ class LCMSCDFPreset(FormatPreset):
             )
             metadata["ionization_mode"] = _infer_ionization_mode(detector_text)
             metadata["is_tic_only"] = True
+            # The shared AIA reader names its ordinate for UV by default, but
+            # an MS detector exports ion counts, not absorbance. Values stay raw.
+            data = data.rename(columns={"Intensity (mAU)": "Ion Count"})
 
         column_roles: Dict[str, ColumnRole] = {}
         cols = list(data.columns)

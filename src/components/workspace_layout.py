@@ -2,6 +2,7 @@
 from dash import html, dcc
 import dash_mantine_components as dmc
 from components.axis_inspector import axis_inspector
+from components.ms_polarity_control import create_ms_polarity_control
 from components.file_removal_feedback import create_file_removal_feedback
 
 
@@ -90,17 +91,26 @@ def arrange_workspace(root):
                 if getattr(child,'children',None)=='File Explorer':child.children='Files'
     nodes['left-vertical-divider'].__setattr__('data-label-below','Inspector')
     nodes['left-vertical-divider'].__setattr__('data-label-above','Files')
-    # Results retain their mounted panels; specialist navigation uses one menu.
-    tabs=nodes['analysis-tabs']; nav=tabs.children[0]
+    # Every analysis view stays visible in one horizontally scrolling tab row.
+    # Keep the mounted panels and tab values so switching figures retains context.
+    tabs = nodes['analysis-tabs']
+    nav = tabs.children[0]
+    labels = {'data-overview':'Data', 'peak-analysis':'Peaks', 'metadata':'Metadata',
+              'across-samples':'Compare samples', 'calibration':'Calibration',
+              'ms-scan':'MS scan', 'ms-eic':'EIC', 'ms-peak-mass':'Peak mass spectrum'}
     for tab in nav.children:
-        value=getattr(tab,'value',None)
-        if value in ('data-overview','peak-analysis','metadata'):
-            tab.children={'data-overview':'Data','peak-analysis':'Peaks','metadata':'Metadata'}[value]
-        else:tab.style={'display':'none'}
-    tabs.children[0]=html.Div([nav,dmc.Select(id='results-more',placeholder='More analysis',data=[],size='xs',
-        clearable=False,allowDeselect=False,style={'width':'190px'},**{'aria-label':'Additional analysis views'})],className='results-navigation')
+        tab.children = labels.get(getattr(tab, 'value', None), tab.children)
+        tab.style = {'flexShrink':0, 'whiteSpace':'nowrap'}
+    nav.style = {'flexWrap':'nowrap', 'width':'max-content', 'minWidth':'100%'}
+    tabs.children[0] = html.Div(nav, className='results-navigation',
+        style={'overflowX':'auto', 'overflowY':'hidden', 'minWidth':0,
+               'justifyContent':'flex-start'})
+    nodes['peak-analysis-container'].children.append(html.Div(
+        'No peaks yet. Use Integrate or Shift-drag across a signal to add one.',
+        id='peak-analysis-empty', className='inspector-empty', role='status'))
     # A single, discoverable primary figure action pair.
     toolbar=nodes['plot-toolbar']
+    toolbar.children.append(create_ms_polarity_control())
     toolbar.children += [html.Div(className='toolbar-spacer'),
         html.Button('Publication',id='plot-tool-publication',className='plot-tool',title='Create an editable publication copy of this figure',
                     **{'data-current-figure-action':'publication'}),

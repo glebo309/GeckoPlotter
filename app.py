@@ -2018,6 +2018,8 @@ from callbacks.axis_inspector_callbacks import register_axis_inspector_callbacks
 register_axis_inspector_callbacks(app)
 from callbacks.workspace_callbacks import register_workspace_callbacks
 register_workspace_callbacks(app, data_manager)
+from callbacks.ms_polarity_callbacks import register_ms_polarity_callbacks
+register_ms_polarity_callbacks(app, data_manager)
 
 # Toolbox tabs (DMC) <-> toolbox-tab store, kept in sync both ways.
 # dmc.Tabs owns the visible panel; the store stays the source of truth for

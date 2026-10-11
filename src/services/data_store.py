@@ -137,10 +137,13 @@ class Bundle:
         """Short display name for a bundle component."""
         role = component.role
         meta = component.metadata or {}
-        if role == ComponentRole.MS_POSITIVE:
-            return "+TIC"
-        if role == ComponentRole.MS_NEGATIVE:
-            return "-TIC"
+        if role in (ComponentRole.MS_POSITIVE, ComponentRole.MS_NEGATIVE):
+            label = "+TIC" if role == ComponentRole.MS_POSITIVE else "-TIC"
+            if meta.get('mass_spectral_data'):
+                return label
+            if meta.get('is_tic_only'):
+                return label + ' (export)'
+            return label
         if role in (ComponentRole.VWD_A, ComponentRole.VWD_B):
             wl = meta.get('wavelength')
             ch = meta.get('detector_channel', role.value[-1].upper())
@@ -213,7 +216,7 @@ class DataStore:
         from .lcms_service import LCMSService
         from .persistence import ProjectPersistence
 
-        self.peak_service = PeakService()
+        self.peak_service = PeakService(file_id_resolver=self.peak_owner_id)
         self.calibration_service = CalibrationService()
         self.integration_service = IntegrationService()
         self.plot_settings_service = PlotSettingsService()
@@ -281,9 +284,31 @@ class DataStore:
         bundle_id = self._file_index.get(original_filename)
         return self.get_bundle(bundle_id) if bundle_id else None
 
+    def peak_owner_id(self, file_id: str) -> str:
+        """Match the source IDs emitted by loaded_data and PlotManager.
+
+        Ordinary bundles expose their primary signal under the bundle ID;
+        LC-MS bundles expose each detector channel independently.
+        """
+        bundle = self.get_bundle(file_id) or self.get_bundle_for_component(file_id)
+        if bundle is None or bundle.primary is None:
+            return file_id
+        if bundle.bundle_type == BundleType.LCMS and len(bundle.component_list) > 1:
+            return bundle.primary.component_id if file_id == bundle.bundle_id else file_id
+        if file_id == bundle.primary.component_id:
+            return bundle.bundle_id
+        return file_id
+
     def add_bundle(self, bundle: Bundle) -> None:
         if bundle.bundle_id in self._bundles:
             self.remove_bundle(bundle.bundle_id)
+
+        from .bundling_service import paired_tic_exports
+        for trace, spectral in paired_tic_exports(bundle):
+            # Prefer the spectral source as in the former StorageManager. Keep
+            # the original export available and respect an explicit eye toggle.
+            self.visibility_state.setdefault(trace.component_id, False)
+            bundle.components[spectral.role] = spectral
 
         self._bundles[bundle.bundle_id] = bundle
         for component in bundle.component_list:
@@ -688,7 +713,7 @@ class DataStore:
             if is_bundle:
                 item['children'] = [
                     {'id': c.component_id, 'name': Bundle.component_display_name(c),
-                     'type': c.role.value, 'is_child': True}
+                     'type': c.role.value, 'is_child': True, 'original_filename': c.original_filename}
                     for c in bundle.component_list
                 ]
             elif well_columns:

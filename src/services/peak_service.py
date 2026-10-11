@@ -64,7 +64,8 @@ class PeakService:
 
     MAX_UNDO = 50
 
-    def __init__(self) -> None:
+    def __init__(self, file_id_resolver=None) -> None:
+        self._file_id_resolver = file_id_resolver
         self._peaks: Dict[str, List[Peak]] = {}
         self._color_index: int = 0
         self._file_color_index: Dict[str, int] = {}
@@ -75,6 +76,30 @@ class PeakService:
         self._redo_stack: List[Dict[str, List[Peak]]] = []
         self._palette: List[str] = list(OKABE_ITO_PALETTE)
         self._palette_name: str = 'okabe_ito'
+
+    def _resolve_file_id(self, file_id):
+        """Use one peak owner for equivalent bundle/primary-component selections."""
+        if self._file_id_resolver is None:
+            return file_id
+        owner = self._file_id_resolver(file_id)
+        # Older workspaces may contain peaks under either spelling. Migrate on
+        # access so undo/restore also stays compatible without losing peak IDs.
+        for old_id in list(self._peaks):
+            if old_id == owner or self._file_id_resolver(old_id) != owner:
+                continue
+            existing = self._peaks.setdefault(owner, [])
+            ids = {peak.peak_id for peak in existing}
+            for peak in self._peaks.pop(old_id):
+                peak.file_id = owner
+                if peak.peak_id not in ids:
+                    existing.append(peak)
+                    ids.add(peak.peak_id)
+            if old_id in self._imported_files:
+                self._imported_files.discard(old_id)
+                self._imported_files.add(owner)
+            if old_id in self._file_color_index:
+                self._file_color_index[owner] = max(self._file_color_index.get(owner, 0), self._file_color_index.pop(old_id))
+        return owner
 
     def set_palette(self, name: str, colors: List[str]) -> None:
         """Update the color palette used for peak groups.
@@ -188,6 +213,7 @@ class PeakService:
         List[Peak]
             Detected peaks, stored internally and returned.
         """
+        file_id = self._resolve_file_id(file_id)
         signal = np.asarray(signal, dtype=float)
         time_axis = np.asarray(time_axis, dtype=float)
 
@@ -388,6 +414,7 @@ class PeakService:
         time_axis, signal : ndarray, optional
             Chromatogram arrays for boundary estimation.
         """
+        file_id = self._resolve_file_id(file_id)
         fid = file_id
 
         if fid in self._imported_files:
@@ -475,6 +502,7 @@ class PeakService:
             If the retention time is outside the time axis range or no local
             maximum can be found.
         """
+        file_id = self._resolve_file_id(file_id)
         signal = np.asarray(signal, dtype=float)
         time_axis = np.asarray(time_axis, dtype=float)
 
@@ -579,6 +607,7 @@ class PeakService:
         never clobber one another. Clearing pre-existing peaks in the region is
         the caller's responsibility for deconvolution.
         """
+        file_id = self._resolve_file_id(file_id)
         existing = self._peaks.get(file_id, [])
 
         if source == 'deconvolved':
@@ -761,6 +790,7 @@ class PeakService:
         Used by deconvolution accept to clear pre-existing peaks in a region
         before dropping in the fitted components.
         """
+        file_id = self._resolve_file_id(file_id)
         peaks = self._peaks.get(file_id)
         if not peaks:
             return 0
@@ -778,6 +808,7 @@ class PeakService:
 
     def clear_peaks(self, file_id: str) -> None:
         """Remove all peaks for a bundle."""
+        file_id = self._resolve_file_id(file_id)
         self._peaks.pop(file_id, None)
         self._imported_files.discard(file_id)
         self._file_color_index.pop(file_id, None)
@@ -792,12 +823,14 @@ class PeakService:
 
     def clear_manual_peaks(self, file_id: str) -> None:
         """Remove all manual baseline peaks for a file."""
+        file_id = self._resolve_file_id(file_id)
         fid = file_id
         if fid in self._peaks:
             self._peaks[fid] = [p for p in self._peaks[fid] if p.source != 'manual']
 
     def clear_detected_peaks(self, file_id: str) -> None:
         """Remove all auto-detected peaks for a file."""
+        file_id = self._resolve_file_id(file_id)
         fid = file_id
         if fid in self._peaks:
             self._peaks[fid] = [p for p in self._peaks[fid] if p.source != 'detected']
@@ -808,6 +841,7 @@ class PeakService:
 
     def remove_peak(self, file_id: str, peak_id: str) -> bool:
         """Remove a peak by ID. Returns True if found and removed."""
+        file_id = self._resolve_file_id(file_id)
         fid = file_id
         peaks = self._peaks.get(fid)
         if peaks is None:
@@ -818,6 +852,7 @@ class PeakService:
 
     def rename_peak(self, file_id: str, peak_id: str, new_name: str) -> bool:
         """Rename a peak and propagate to all peaks in the same group."""
+        file_id = self._resolve_file_id(file_id)
         fid = file_id
         target = None
         for p in self._peaks.get(fid, []):
@@ -842,6 +877,7 @@ class PeakService:
         opacity: Optional[float] = None,
     ) -> bool:
         """Update the display color (and optionally opacity) of a peak."""
+        file_id = self._resolve_file_id(file_id)
         fid = file_id
         for p in self._peaks.get(fid, []):
             if p.peak_id == peak_id:
@@ -853,10 +889,13 @@ class PeakService:
 
     def get_peaks(self, file_id: str) -> List[Peak]:
         """Return all peaks for a given file."""
+        file_id = self._resolve_file_id(file_id)
         return list(self._peaks.get(file_id, []))
 
     def get_all_peaks(self) -> Dict[str, List[Peak]]:
         """Return all peaks keyed by file_id."""
+        for fid in list(self._peaks):
+            self._resolve_file_id(fid)
         return {fid: list(pks) for fid, pks in self._peaks.items()}
 
     # ------------------------------------------------------------------
@@ -1103,6 +1142,7 @@ class PeakService:
 
     def peaks_to_table(self, file_id: str) -> pd.DataFrame:
         """Return a user-facing peak table for a file (combined sources)."""
+        file_id = self._resolve_file_id(file_id)
         peaks = self._peaks.get(file_id, [])
         if not peaks:
             return pd.DataFrame()
@@ -1126,6 +1166,7 @@ class PeakService:
 
     def to_dataframe(self, file_id: str) -> pd.DataFrame:
         """Return peaks for a single file as a DataFrame."""
+        file_id = self._resolve_file_id(file_id)
         peaks = self._peaks.get(file_id, [])
         if not peaks:
             return pd.DataFrame(columns=[

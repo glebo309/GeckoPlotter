@@ -104,7 +104,9 @@ def register_lcms_callbacks(app, data_manager):
          Output('eic-polarity-toggle', 'checked'),
          Output('eic-polarity-toggle-wrapper', 'style'),
          Output('eic-polarity-pos-label', 'style'),
-         Output('eic-polarity-neg-label', 'style')],
+         Output('eic-polarity-neg-label', 'style'),
+         Output('ms-polarity-toggle', 'disabled'), Output('eic-polarity-toggle', 'disabled'),
+         Output('ms-polarity-toggle-wrapper', 'title'), Output('eic-polarity-toggle-wrapper', 'title')],
         Input('active-file', 'data'),
         prevent_initial_call=True,
     )
@@ -117,9 +119,9 @@ def register_lcms_callbacks(app, data_manager):
         neg_active = {'fontSize': '12px', 'fontWeight': '600', 'color': '#333', 'cursor': 'default'}
         neg_dim = {'fontSize': '12px', 'fontWeight': '400', 'color': '#999', 'cursor': 'default'}
 
-        def _pack(checked, show, pos_s, neg_s):
+        def _pack(checked, show, pos_s, neg_s, disabled=True, title='No mass spectral data available'):
             wrapper = visible if show else hidden
-            return checked, wrapper, pos_s, neg_s, checked, wrapper, pos_s, neg_s
+            return checked, wrapper, pos_s, neg_s, checked, wrapper, pos_s, neg_s, disabled, disabled, title, title
 
         if not active_file:
             return _pack(False, False, pos_active, neg_dim)
@@ -130,11 +132,14 @@ def register_lcms_callbacks(app, data_manager):
         if not bundle or bundle.bundle_type != BundleType.LCMS:
             return _pack(False, False, pos_active, neg_dim)
 
-        has_pos = bundle.get_component(ComponentRole.MS_POSITIVE) is not None
-        has_neg = bundle.get_component(ComponentRole.MS_NEGATIVE) is not None
+        has_pos = _polarity_spectral_entry(data_manager, active_file, False, lcms_svc) is not None
+        has_neg = _polarity_spectral_entry(data_manager, active_file, True, lcms_svc) is not None
+        title = _polarity_availability(has_pos, has_neg)
         if not (has_pos and has_neg):
-            return _pack(False, False, pos_active, neg_dim)
+            return _pack(has_neg, True, pos_dim if has_neg else pos_active,
+                         neg_active if has_neg else neg_dim, True, title)
 
+        _resolve_lcms_spectral_entry(data_manager, active_file, lcms_svc)
         current = next(
             (c for c in bundle.component_list if c.component_id == active_file), None)
         is_negative = current and current.role == ComponentRole.MS_NEGATIVE
@@ -151,8 +156,8 @@ def register_lcms_callbacks(app, data_manager):
                     is_negative = resolved_comp and resolved_comp.role == ComponentRole.MS_NEGATIVE
 
         if is_negative:
-            return _pack(True, True, pos_dim, neg_active)
-        return _pack(False, True, pos_active, neg_dim)
+            return _pack(True, True, pos_dim, neg_active, False, title)
+        return _pack(False, True, pos_active, neg_dim, False, title)
 
     # ------------------------------------------------------------------
     # Polarity toggle: switch active file when either toggle is clicked
@@ -178,11 +183,10 @@ def register_lcms_callbacks(app, data_manager):
         if not bundle or bundle.bundle_type != BundleType.LCMS:
             raise dash.exceptions.PreventUpdate
 
-        target_role = ComponentRole.MS_NEGATIVE if is_negative else ComponentRole.MS_POSITIVE
-        target = bundle.get_component(target_role)
-        if not target or target.component_id == active_file:
+        target = _polarity_spectral_entry(data_manager, active_file, is_negative, lcms_svc)
+        if not target or target[0] == active_file:
             raise dash.exceptions.PreventUpdate
-        return target.component_id
+        return target[0]
 
     @app.callback(
         [Output('ms-spectrum-graph', 'figure', allow_duplicate=True),
@@ -474,30 +478,25 @@ def register_lcms_callbacks(app, data_manager):
         [Output('peak-mass-polarity-toggle', 'checked'),
          Output('peak-mass-polarity-wrapper', 'style'),
          Output('peak-mass-polarity-pos-label', 'style'),
-         Output('peak-mass-polarity-neg-label', 'style')],
-        Input('active-file', 'data'),
+         Output('peak-mass-polarity-neg-label', 'style'),
+         Output('peak-mass-polarity-toggle', 'disabled'),
+         Output('peak-mass-polarity-wrapper', 'title')],
+        [Input('active-file', 'data'), Input('peak-mass-polarity-toggle', 'checked')],
         prevent_initial_call=True,
     )
-    def peak_mass_polarity_visibility(active_file):
+    def peak_mass_polarity_visibility(active_file, checked=False):
         hidden = {'display': 'none', 'alignItems': 'center', 'gap': '2px'}
-        visible = {'display': 'flex', 'alignItems': 'center', 'gap': '2px'}
-        pos_active = {'fontSize': '12px', 'fontWeight': '600', 'color': '#333', 'cursor': 'default'}
-        pos_dim = {'fontSize': '12px', 'fontWeight': '400', 'color': '#999', 'cursor': 'default'}
-
-        if not active_file:
-            return False, hidden, pos_active, pos_dim
-
-        bundle = data_manager.get_bundle(active_file) if hasattr(data_manager, 'get_bundle') else None
-        if not bundle and hasattr(data_manager, 'get_bundle_for_component'):
-            bundle = data_manager.get_bundle_for_component(active_file)
-        if not bundle or bundle.bundle_type != BundleType.LCMS:
-            return False, hidden, pos_active, pos_dim
-
-        has_pos = bundle.get_component(ComponentRole.MS_POSITIVE) is not None
-        has_neg = bundle.get_component(ComponentRole.MS_NEGATIVE) is not None
-        if has_pos and has_neg:
-            return False, visible, pos_active, pos_dim
-        return False, hidden, pos_active, pos_dim
+        visible = {**hidden, 'display': 'flex'}
+        active = {'fontSize': '12px', 'fontWeight': '600', 'color': '#333', 'cursor': 'default'}
+        dim = {**active, 'fontWeight': '400', 'color': '#999'}
+        bundle = _lcms_bundle(data_manager, active_file)
+        if not bundle:
+            return False, hidden, active, dim, True, 'No mass spectral data available'
+        positive = _polarity_spectral_entry(data_manager, active_file, False, lcms_svc) is not None
+        negative = _polarity_spectral_entry(data_manager, active_file, True, lcms_svc) is not None
+        selected = bool(checked) if positive and negative else negative
+        return (selected, visible, dim if selected else active, active if selected else dim,
+                not (positive and negative), _polarity_availability(positive, negative))
 
     @app.callback(
         [Output('peak-mass-graph', 'figure'),
@@ -533,34 +532,14 @@ def register_lcms_callbacks(app, data_manager):
         if not peak:
             return _empty_peak_mass("Peak not found"), ""
 
-        resolved = _resolve_lcms_spectral_entry(data_manager, active_file, lcms_svc)
-        resolved_id, file_data = resolved if resolved else (None, None)
-        if not file_data or not lcms_svc.has_spectral_data(file_data):
-            return _empty_peak_mass("No mass spectral data for this file"), ""
-
-        polarity_label = "+"
-        if use_negative:
-            other_id, other_data = _opposite_polarity_component(
-                data_manager, active_file, resolved_id)
-            if not other_data or not lcms_svc.has_spectral_data(other_data):
-                return _empty_peak_mass("No negative-mode data available"), ""
-
-            other_peaks = ps.get_peaks(other_id) or []
-            tol = 0.3
-            match = next(
-                (p for p in other_peaks
-                 if abs(p.rt - peak.rt) <= tol),
-                None,
-            )
-            if not match:
-                return (
-                    _empty_peak_mass(f"No peak integrated in negative mode near RT {peak.rt:.2f} min"),
-                    f"Integrate a peak on the negative TIC at RT ~{peak.rt:.2f} min first",
-                )
-
-            file_data = other_data
-            peak = match
-            polarity_label = "−"
+        resolved = _polarity_spectral_entry(data_manager, active_file, bool(use_negative), lcms_svc)
+        if not resolved:
+            mode = 'negative' if use_negative else 'positive'
+            return _empty_peak_mass(f"No {mode}-mode mass spectral data available"), ""
+        _, file_data = resolved
+        polarity_label = "−" if use_negative else "+"
+        # Compare exactly the selected retention-time window in either mode.
+        # A second integration is not needed to inspect its mass spectrum.
 
         mz, intensity = lcms_svc.get_averaged_spectrum(file_data, peak.rt_start, peak.rt_end)
         if mz.size == 0:
@@ -834,6 +813,36 @@ def _get_eic_list(data_manager, file_id, file_data):
     return file_data.get('eic_overlays', [])
 
 
+def _lcms_bundle(data_manager, active_file):
+    from services.data_store import BundleType
+    bundle = data_manager.get_bundle(active_file) if active_file else None
+    if not bundle and active_file:
+        bundle = data_manager.get_bundle_for_component(active_file)
+    return bundle if bundle and bundle.bundle_type == BundleType.LCMS else None
+
+
+def _polarity_spectral_entry(data_manager, active_file, negative, lcms_svc):
+    from services.data_store import ComponentRole
+    bundle = _lcms_bundle(data_manager, active_file)
+    if not bundle:
+        return None
+    role = ComponentRole.MS_NEGATIVE if negative else ComponentRole.MS_POSITIVE
+    for component in bundle.component_list:
+        if component.role == role:
+            entry = data_manager.get_data_by_id(component.component_id)
+            if entry and lcms_svc.has_spectral_data(entry):
+                return component.component_id, entry
+    return None
+
+
+def _polarity_availability(positive, negative):
+    if positive and negative:
+        return 'Switch between positive and negative mass spectra'
+    if positive or negative:
+        return 'Only ' + ('positive' if positive else 'negative') + '-mode mass spectral data available'
+    return 'No mass spectral data available'
+
+
 def _opposite_polarity_component(data_manager, active_file, current_file_id):
     """Return (component_id, file_data) for the opposite polarity, or (None, None)."""
     from services.data_store import BundleType, ComponentRole
@@ -974,18 +983,28 @@ def _build_eic_figure(eic_list):
 
 
 def _resolve_lcms_spectral_entry(data_manager, active_file, lcms_svc):
-    """Resolve bundle or component selection to a spectral LC-MS component."""
+    """Resolve a signal while retaining the bundle's chosen MS analysis mode."""
+    bundle = None
     if active_file:
-        entry = data_manager.get_data_by_id(active_file)
-        if entry and lcms_svc.has_spectral_data(entry):
-            record = entry.get('record') or {}
-            return record.get('id', active_file), entry
-
         bundle = data_manager.get_bundle(active_file) if hasattr(data_manager, 'get_bundle') else None
         if not bundle and hasattr(data_manager, 'get_bundle_for_component'):
             bundle = data_manager.get_bundle_for_component(active_file)
-
+        state = None
+        if bundle and hasattr(data_manager, 'file_ui_state'):
+            state = data_manager.file_ui_state.setdefault(bundle.bundle_id, {})
+        entry = data_manager.get_data_by_id(active_file)
+        role = (entry or {}).get('metadata', {}).get('component_role') or (entry or {}).get('record', {}).get('type')
+        if state is not None and role in ('ms_positive', 'ms_negative'):
+            state['ms_analysis_polarity'] = role
+        if entry and lcms_svc.has_spectral_data(entry):
+            record = entry.get('record') or {}
+            return record.get('id', active_file), entry
         if bundle:
+            preferred = (state or {}).get('ms_analysis_polarity')
+            if preferred:
+                selected = _polarity_spectral_entry(data_manager, active_file, preferred == 'ms_negative', lcms_svc)
+                if selected:
+                    return selected
             for component in bundle.component_list:
                 entry = data_manager.get_data_by_id(component.component_id)
                 if entry and lcms_svc.has_spectral_data(entry):
@@ -995,5 +1014,4 @@ def _resolve_lcms_spectral_entry(data_manager, active_file, lcms_svc):
         if candidate and lcms_svc.has_spectral_data(candidate):
             record = candidate.get('record') or {}
             return record.get('id', candidate_id), candidate
-
     return None

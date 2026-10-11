@@ -77,3 +77,13 @@ def test_cleared_selection_cannot_leave_previous_data_table_visible(monkeypatch)
     assert table is not no_update
     assert data is None
     assert metadata is not no_update
+
+
+def test_empty_source_keeps_callback_table_mounted(monkeypatch):
+    from components.workspace_layout import walk
+    dm, functions, _ = setup(monkeypatch)
+    for active in (None, 'deleted-source'):
+        table, data, _ = functions['sync_table_to_active_file'](active, 'data-overview')
+        ids = [getattr(node, 'id', None) for node in walk(table)]
+        assert 'pub-table' in ids
+        assert data is None

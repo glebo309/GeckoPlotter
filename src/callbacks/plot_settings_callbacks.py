@@ -59,10 +59,10 @@ def register_plot_settings_callbacks(app, data_manager):
         Plot tab is included so each plot tab keeps independent settings.
         """
         suffix = f':{plot_tab}' if plot_tab else ''
-        if active_tab in ('peak-analysis', 'across-samples'):
-            context_key = f'shared:{active_tab}{suffix}'
-        elif (view_mode or 'raw') == 'raw':
+        if (view_mode or 'raw') == 'raw':
             context_key = f'shared:raw{suffix}'
+        elif active_tab in ('peak-analysis', 'across-samples'):
+            context_key = f'shared:{active_tab}{suffix}'
         elif active_file:
             context_key = f'file:{active_file}{suffix}'
         else:

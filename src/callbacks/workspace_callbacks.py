@@ -1,6 +1,6 @@
 """Context and precise controls for the shared figure inspector."""
 from dash import Input, Output, State, no_update, ctx
-from services.workspace_inspector import active_figure, signal_choices, edit_signal, result_options
+from services.workspace_inspector import active_figure, signal_choices, edit_signal
 
 
 def register_workspace_callbacks(app, data_manager):
@@ -94,24 +94,6 @@ def register_workspace_callbacks(app, data_manager):
 
     @app.callback(Output('toolbox-tabs','value',allow_duplicate=True),Input('plot-tool-export','n_clicks'),prevent_initial_call=True)
     def show_export(clicks):return 'export' if clicks else no_update
-
-    @app.callback([Output('results-more','data'),Output('results-more','value'),
-                   Output('analysis-tabs','value',allow_duplicate=True)],
-                  [Input('active-file','data'),Input('loaded-files','data'),Input('analysis-tabs','value'),Input('results-more','value')],
-                  prevent_initial_call=True)
-    def result_navigation(file_id,loaded,current,more):
-        from callbacks.lcms_callbacks import _resolve_lcms_spectral_entry
-        spectral=False
-        if file_id:
-            try:spectral=bool(_resolve_lcms_spectral_entry(data_manager,file_id,data_manager.lcms_service))
-            except (KeyError,TypeError,AttributeError):pass
-        available=result_options(spectral)
-        common={'data-overview','peak-analysis','metadata'}
-        advanced=[o for o in available if o['value'] not in common]
-        valid={o['value'] for o in available}
-        target=more if ctx.triggered_id=='results-more' and more in valid else current
-        if target not in valid:target='data-overview'
-        return advanced,target if target not in common else None,target if target!=current else no_update
 
     @app.callback(Output('figure-action-status', 'children', allow_duplicate=True),
                   Input('file-removal-message', 'children'), prevent_initial_call=True)

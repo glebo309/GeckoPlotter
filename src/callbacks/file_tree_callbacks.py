@@ -223,6 +223,21 @@ def register_file_tree_callbacks(app: dash.Dash, data_manager: DataManager) -> N
         return (render_counter or 0) + 1, hidden_ids
 
     @app.callback(
+        Output('hidden-files', 'data', allow_duplicate=True),
+        Input('loaded-files', 'data'),
+        State('hidden-files', 'data'),
+        prevent_initial_call=True,
+    )
+    def sync_loaded_file_visibility(_loaded_files, browser_hidden):
+        """Publish import defaults as well as explicit eye toggles to the tree.
+
+        The browser reapplies this store after tree DOM updates, so it must
+        include paired exports hidden by ingestion before their first render.
+        """
+        hidden = [fid for fid, visible in data_manager.visibility_state.items() if not visible]
+        return dash.no_update if set(hidden) == set(browser_hidden or []) else hidden
+
+    @app.callback(
         Output('file-tree', 'children', allow_duplicate=True),
         [Input('loaded-files', 'data'),
          Input('active-plot-tab', 'data'),

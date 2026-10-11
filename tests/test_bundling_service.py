@@ -139,3 +139,21 @@ def test_mixed_upload_creates_chromeleon_bundle_and_csv_bundle():
     assert by_type[BundleType.CHROMELEON].name == "Run_A"
     assert len(by_type[BundleType.CHROMELEON].component_list) == 2
     assert by_type[BundleType.GENERIC].name == "single"
+
+
+def test_lcms_uses_polarity_metadata_when_export_filename_has_no_detector_hint():
+    result = make_result('sample_signal.cdf', source_category=SourceCategory.LCMS_MS,
+                         metadata={'ionization_mode': 'negative'})
+    bundle = assign_bundles([('sample_signal.cdf', b'', result)])[0]
+    assert bundle.primary.role == ComponentRole.MS_NEGATIVE
+    assert bundle.component_display_name(bundle.primary) == '-TIC'
+
+
+def test_explicit_ms_polarity_metadata_overrides_misleading_export_name():
+    result = make_result('Run_MS1 +TIC.cdf', source_category=SourceCategory.LCMS_MS,
+                         metadata={'ionization_mode': 'negative'})
+    bundle = assign_bundles([('Run_MS1 +TIC.cdf', b'', result)])[0]
+    assert bundle.primary.role == ComponentRole.MS_NEGATIVE
+    uv = make_result('Run_VWD1B.cdf', source_category=SourceCategory.LCMS_UV,
+                     metadata={'ionization_mode': 'negative'})
+    assert assign_bundles([('Run_VWD1B.cdf', b'', uv)])[0].primary.role == ComponentRole.VWD_B

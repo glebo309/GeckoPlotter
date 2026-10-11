@@ -101,3 +101,12 @@ def test_file_removal_feedback_reaches_shared_status_bar():
     assert report('Removed sample') == 'Removed sample'
     assert report('Restored sample') == 'Restored sample'
     assert report(None) is no_update
+
+
+def test_figure_inspector_never_resets_selected_analysis_tab_on_file_change():
+    app = dash.Dash(__name__)
+    callbacks.register_workspace_callbacks(app, None)
+    for callback in app.callback_map.values():
+        outputs = callback['output']
+        if not isinstance(outputs,list):outputs=[outputs]
+        assert not any(output.component_id=='analysis-tabs' for output in outputs)

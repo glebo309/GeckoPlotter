@@ -105,3 +105,33 @@ def test_visibility_control_exposes_current_state(visible):
     icon_props = button.children.to_plotly_json()['props']
     source = 'data-visible-src' if visible else 'data-hidden-src'
     assert icon_props['src'] == icon_props[source]
+
+
+def hidden_files_sync_callback(store):
+    app = dash.Dash(__name__)
+    file_tree_callbacks.register_file_tree_callbacks(app, store)
+    callbacks = [entry['callback'].__wrapped__ for entry in app.callback_map.values()
+                 if any(inp['id']=='loaded-files' for inp in entry['inputs'])
+                 and any(output.component_id=='hidden-files' for output in
+                         (entry['output'] if isinstance(entry['output'],list) else [entry['output']]))]
+    assert len(callbacks) == 1, 'Loading files must publish server visibility to the browser'
+    return callbacks[0]
+
+
+def test_loading_files_syncs_default_hidden_exports_and_existing_hidden_signals():
+    store = DataStore()
+    store.visibility_state.update({'paired-export':False, 'manual-hidden':False, 'positive-ms':True})
+    sync = hidden_files_sync_callback(store)
+    hidden = sync([{'id':'bundle'}], ['manual-hidden'])
+    assert set(hidden) == {'paired-export','manual-hidden'}
+    assert store.visibility_state['positive-ms'] is True
+
+
+def test_visibility_sync_clears_stale_browser_hiding_and_skips_unchanged_state():
+    store = DataStore()
+    store.visibility_state.update({'paired-export':False,'positive-ms':True})
+    sync = hidden_files_sync_callback(store)
+    assert sync([{'id':'bundle'}], ['positive-ms','removed-file']) == ['paired-export']
+    assert sync([{'id':'bundle'}], ['paired-export']) is dash.no_update
+    store.visibility_state.clear()
+    assert sync([], ['paired-export']) == []
