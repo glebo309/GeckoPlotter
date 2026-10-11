@@ -118,8 +118,13 @@ class FileRemovalService:
             self.store.remove_bundle(bundle.bundle_id)
         else:
             component = next(c for c in bundle.component_list if c.component_id == file_id)
+            ids = {file_id}
+            if len(bundle.component_list) == 1:
+                # Removing the final signal also removes its bundle. Imported
+                # peaks and plot settings may be keyed by that bundle ID.
+                ids.add(bundle.bundle_id)
             record = self._capture([bundle], bundle.component_display_name(component), active_file,
-                                   {file_id}, {file_id})
+                                   ids, {file_id})
             self.store.remove_component(file_id)
         self._remove_state(record)
         return record

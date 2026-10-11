@@ -39,6 +39,9 @@ def register_publication_preview_callbacks(app, data_manager):
     plot_manager = PlotManager()
     from services.render_cache import RenderCache
     render_cache = RenderCache()
+    if not hasattr(data_manager, '_render_caches'):
+        data_manager._render_caches = []
+    data_manager._render_caches.append(render_cache)
 
     def _build_pub_figure(plot_settings, active_file, sub_rows, sub_cols,
                           zoom_sync, selected_peak_id,

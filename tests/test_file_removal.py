@@ -212,3 +212,40 @@ def test_showing_one_component_updates_bundle_visibility(monkeypatch):
         triggered=[{'prop_id': json.dumps({'type': 'visibility-btn', 'index': 'tic'}) + '.n_clicks', 'value': 1}]))
     _, hidden = callback([1], [{'type': 'visibility-btn', 'index': 'tic'}], 3)
     assert hidden == ['uv']
+
+
+def test_removing_last_component_cleans_empty_bundle_state_and_bundle_peaks():
+    store = DataStore()
+    store.peak_service.clear_all_peaks()
+    store.add_bundle(Bundle('sample', 'Sample', BundleType.GENERIC, component_list=[component('tic')]))
+    store.file_ui_state['sample'] = {'plot_settings': {'xmin': 4}}
+    store.visibility_state['sample'] = False
+    store.collapse_state['sample'] = 'expanded'
+    store.peak_service._peaks['sample'] = [Peak('p1', 'sample', 'Imported', 1, 0, 2, 3, 3, 2)]
+    record = store.file_removal_service.remove('tic', active_file='tic')
+    assert {'sample', 'tic'} <= record.removed_ids
+    assert store.get_loaded_files_list() == []
+    assert 'sample' not in store.file_ui_state
+    assert 'sample' not in store.visibility_state
+    assert 'sample' not in store.collapse_state
+    assert 'sample' not in store.peak_service._peaks
+    store.file_removal_service.undo()
+    assert store.file_ui_state['sample']['plot_settings']['xmin'] == 4
+    assert store.peak_service._peaks['sample'][0].name == 'Imported'
+
+
+def test_new_upload_after_removal_does_not_restore_removed_files_without_undo():
+    from services.bundling_service import assign_bundles
+    store = populated()
+    store.file_removal_service.remove('sample')
+    new = component('new-data')
+    for bundle in assign_bundles([(new.original_filename, b'new', new.standardized)]):
+        store.add_bundle(bundle)
+    assert store.get_bundle('sample') is None
+    assert store.get_data_by_id('tic') is None
+    assert all(item['id'] != 'sample' for item in store.get_bundled_tree_items())
+    assert len(store.get_loaded_files_list()) == 2
+    # Only the explicit Undo action restores the removed dataset.
+    store.file_removal_service.undo()
+    assert store.get_data_by_id('tic') is not None
+    assert len(store.get_loaded_files_list()) == 3

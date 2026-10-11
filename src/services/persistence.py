@@ -43,9 +43,10 @@ class ProjectPersistence:
       shared-plot-settings)
     """
 
-    def __init__(self, state_file: str):
+    def __init__(self, state_file: str, *, enabled: Optional[bool] = None):
         self._state_file = state_file
-        self._enabled = os.environ.get("GECKO_ENABLE_SESSION_PERSISTENCE") == "1"
+        self._enabled = (os.environ.get("GECKO_ENABLE_SESSION_PERSISTENCE") == "1"
+                         if enabled is None else enabled)
         self._data: Dict[str, Any] = {}
         self._load()
 

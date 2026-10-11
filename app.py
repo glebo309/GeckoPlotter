@@ -55,6 +55,15 @@ app.title = 'GeckoPlotter'
 data_manager = DataStore()
 
 
+@app.server.before_request
+def start_empty_workspace_on_reload():
+    from flask import request
+    # Dash fetches the initial layout once per document load. Normal callbacks,
+    # plot tab switches and asset requests must leave the workspace intact.
+    if request.path == '/_dash-layout' and request.method == 'GET':
+        data_manager.reset_workspace()
+
+
 def _figure_actions(context, menu=True):
     constructor = dmc.MenuItem if menu else html.Button
     return [constructor(label, n_clicks=0, id={'type': 'figure-action', 'context': context, 'action': action},

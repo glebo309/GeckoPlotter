@@ -194,6 +194,9 @@ class DataStore:
         self._component_index: Dict[str, str] = {}
         self._file_index: Dict[str, str] = {}
         self.temp_files: List[str] = []
+        self._persistent_state: Dict[str, Any] = {}
+        self._shared_plot_settings: Dict[str, Any] = {}
+        self._render_caches = []
 
         # UI state
         self.file_ui_state: Dict[str, Dict[str, Any]] = {}
@@ -216,10 +219,36 @@ class DataStore:
         self.plot_settings_service = PlotSettingsService()
         self.export_service = ExportService()
         self.lcms_service = LCMSService()
-        self.project = ProjectPersistence(self._STATE_FILE)
-        self._restore_services()
+        # Loading a page starts an empty workspace. State is saved only through
+        # an explicit export, never restored from an implicit local JSON file.
+        self.project = ProjectPersistence(self._STATE_FILE, enabled=False)
         from .file_removal_service import FileRemovalService
         self.file_removal_service = FileRemovalService(self)
+
+    def reset_workspace(self) -> None:
+        """Discard this local workspace, including undo and temporary uploads.
+
+        Callbacks capture domain service references during registration, so
+        those objects must be reset in place rather than abandoned.
+        """
+        services = {name: value for name, value in vars(self).items()
+                    if name.endswith('_service')}
+        caches = self._render_caches
+        for cache in caches:
+            cache.prune([])
+        for path in self.temp_files:
+            try:
+                os.unlink(path)
+            except OSError:
+                pass
+        self.__dict__.clear()
+        self.__init__()
+        for name, service in services.items():
+            fresh = getattr(self, name)
+            service.__dict__.clear()
+            service.__dict__.update(fresh.__dict__)
+            setattr(self, name, service)
+        self._render_caches = caches
 
     def _restore_services(self) -> None:
         try:
@@ -581,8 +610,6 @@ class DataStore:
             self.delete_publication_memory(file_id)
 
     # Stubs for remaining compat methods
-    _persistent_state: Dict[str, Any] = {}
-    _shared_plot_settings: Dict[str, Any] = {}
 
     def remove_lcms_bundle(self, base_name):
         for bundle in list(self._bundles.values()):
