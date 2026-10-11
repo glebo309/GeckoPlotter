@@ -914,105 +914,24 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
         if file_id == active_file:
             return (dash.no_update,) * 6
 
-        # On shared tabs, only update active-file and metadata — don't touch
-        # main-plot or pub-data-store (those hold shared analysis data).
-        on_shared_tab = active_tab in ('peak-analysis', 'across-samples')
-
+        # Publish the selection immediately. The active-file callback below is
+        # the sole table/metadata owner, avoiding two full table payloads for
+        # every tree click and letting cached plots activate before table work.
         file_data = data_manager.get_data_by_id(file_id)
-        if not file_data:
-            log.error(f"No data found for file: {file_id}")
-
-        # Check if this is a well selection (file_id contains |)
         if not file_data and '|' in file_id:
-            parent_file_id, well_name = file_id.split('|', 1)
-            file_data = data_manager.get_data_by_id(parent_file_id)
-            
-            if file_data:
-                log.debug(f"✅ Using well {well_name} from file {parent_file_id}")
-                figure = plot_manager.get_plot_for_file(file_data)
-                data_table = create_data_table(file_data)
-                # Load data into table editor for publication plotting - extract only the plotted well
-                table_data = prepare_table_data(file_data, file_id=file_id, visible_wells=[well_name])
-                table_editor = create_data_table_editor(table_data, table_id='pub-table')
-                if on_shared_tab:
-                    pub_data = dash.no_update
-                else:
-                    pub_data = table_data.to_json(orient='split') if table_data is not None else None
-                if data_manager.get_publication_memory(file_id) is None:
-                    data_manager.initialise_publication_memory(file_id, get_empty_selections())
-                return dash.no_update, file_id, None, data_table, table_editor, pub_data
+            file_data = data_manager.get_data_by_id(file_id.split('|', 1)[0])
+        if file_data:
+            initialise_file_selections(file_id, file_data)
+        return dash.no_update, file_id, None, dash.no_update, dash.no_update, dash.no_update
 
-        if not file_data:
-            log.warning(f"File data not found for ID: {file_id}")
-            try:
-                error_fig = plot_manager.create_empty_plot("File data not found")
-                error_table = build_message_state(
-                    title="File data not available",
-                    subtitle="This file format could not be parsed. Try exporting as CSV.",
-                    icon="⚠️",
-                    variant="error"
-                )
-                empty_table_editor = create_data_table_editor(None, table_id='pub-table')
-                if data_manager.get_publication_memory(file_id) is None:
-                    data_manager.initialise_publication_memory(file_id, get_empty_selections())
-                return (
-                    dash.no_update,
-                    file_id, None, error_table, empty_table_editor,
-                    dash.no_update if on_shared_tab else None,
-                )
-            except Exception as e:
-                log.exception(f"Error building error state for {file_id}")
-                return (dash.no_update,) * 6
-
-        log.debug(f"✅ Found file data, creating plot...")
-
-        # Determine bundle context (Chromeleon, LCMS, etc.)
-        bundle = data_manager.get_bundle_by_id(file_id)
-        if not bundle and '|' in file_id:
-            # Child selection (e.g., CSV well or LCMS component)
-            parent_id = file_id.split('|', 1)[0]
-            bundle = data_manager.get_bundle_by_id(parent_id)
-
-        if bundle:
-            log.debug(f"📦 Creating bundle metadata table for: {bundle.base_name}")
-            data_table = create_bundle_data_table(bundle, file_data, data_manager)
-            log.debug(f"✅ Bundle metadata table created")
-        else:
-            log.debug(f"📄 Creating file metadata table")
-            data_table = create_data_table(file_data)
-            log.debug(f"✅ File metadata table created")
-
-        # Determine visible wells for table editor (multi-well files)
-        sr = file_data.get('standardized')
-        metadata = file_data.get('metadata', {})
-        visible_wells = None
-
-        if sr is not None and sr.plot_hint == PlotHint.MULTI_Y and sr.x_columns:
-            filled_wells = metadata.get('filled_wells', sr.y_columns)
-            visible_wells = []
-            for well in filled_wells:
-                well_id = f"{file_id}|{well}"
-                is_visible = True
-                if hasattr(data_manager, 'visibility_state'):
-                    is_visible = data_manager.visibility_state.get(well_id, True)
-                if is_visible:
-                    visible_wells.append(well)
-
-        # Create table editor for publication plotting - use smart data extraction
-        table_data = prepare_table_data(file_data, file_id=file_id, visible_wells=visible_wells)
-        sheet_names = file_data.get('metadata', {}).get('sheet_names')
-        active_sheet = file_data.get('metadata', {}).get('active_sheet')
-        table_editor = create_data_table_editor(
-            table_data, table_id='pub-table',
-            sheet_names=sheet_names, active_sheet=active_sheet,
-        )
-        # On shared tabs, don't overwrite pub-data-store with per-file data
-        # — it holds the shared table data that the plot needs.
-        if on_shared_tab:
-            pub_data = dash.no_update
-        else:
-            pub_data = table_data.to_json(orient='split') if table_data is not None else None
-
+    def initialise_file_selections(file_id, file_data, table_data=None):
+        from components.axis_mapper import get_empty_selections
+        if not hasattr(data_manager, 'get_publication_memory'):
+            return
+        if data_manager.get_publication_memory(file_id) is not None:
+            return
+        if table_data is None:
+            table_data = prepare_table_data(file_data, file_id=file_id)
         if data_manager.get_publication_memory(file_id) is None:
             sr = file_data.get('standardized')
             if sr is not None and sr.x_columns and sr.y_columns:
@@ -1021,6 +940,8 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
             else:
                 auto_x = file_data.get('metadata', {}).get('auto_x')
                 auto_y = file_data.get('metadata', {}).get('auto_y', [])
+            if table_data is not None:
+                auto_y = [column for column in (auto_y or []) if column in table_data.columns]
             if auto_x and auto_y and table_data is not None and '_row_id' in table_data.columns:
                 all_row_ids = table_data['_row_id'].tolist()
                 sel = get_empty_selections()
@@ -1036,9 +957,6 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
             else:
                 data_manager.initialise_publication_memory(file_id, get_empty_selections())
 
-        # Never write to main-plot here. master_render owns it — the
-        # active-file change triggers auto_switch_tab which triggers render.
-        return dash.no_update, file_id, None, data_table, table_editor, pub_data
 
     @app.callback(
         [Output('table-editor-container', 'children', allow_duplicate=True),
@@ -1051,19 +969,32 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
     def sync_table_to_active_file(active_file, active_tab):
         """Keep Data Overview table in sync whenever the active file changes.
 
-        handle_file_selection only fires on tree clicks — this covers
-        programmatic active-file changes (tab switches, initial load).
+        Own all table preparation for both tree clicks and programmatic
+        active-file changes (tab switches, initial load).
         """
         if not active_file:
             return create_data_table_editor(None, table_id='pub-table'), None, html.Div()
 
         file_data = data_manager.get_data_by_id(active_file)
+        if not file_data and '|' in active_file:
+            file_data = data_manager.get_data_by_id(active_file.split('|', 1)[0])
         if not file_data:
             return create_data_table_editor(None, table_id='pub-table'), None, html.Div()
 
         on_shared_tab = active_tab in ('peak-analysis', 'across-samples')
 
-        table_data = prepare_table_data(file_data, file_id=active_file)
+        sr = file_data.get('standardized')
+        visible_wells = None
+        if sr is not None and getattr(sr, 'plot_hint', None) == PlotHint.MULTI_Y and sr.x_columns:
+            if '|' in active_file:
+                visible_wells = [active_file.split('|', 1)[1]]
+            else:
+                filled = file_data.get('metadata', {}).get('filled_wells', sr.y_columns)
+                visible_wells = [well for well in filled
+                    if getattr(data_manager, 'visibility_state', {}).get(f'{active_file}|{well}', True)]
+        table_data = (prepare_table_data(file_data, file_id=active_file, visible_wells=visible_wells)
+                      if visible_wells is not None else prepare_table_data(file_data, file_id=active_file))
+        initialise_file_selections(active_file, file_data, table_data)
         sheet_names = file_data.get('metadata', {}).get('sheet_names')
         active_sheet = file_data.get('metadata', {}).get('active_sheet')
         table_editor = create_data_table_editor(
@@ -1288,7 +1219,10 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
         render_inputs = {
             'settings': _raw_render_settings(s), 'render': render_trigger, 'peaks': peak_change_trigger,
             'order': file_order, 'selected': selected_peak_id,
-            'file': active_file if zoom_matches_tab else None,
+            # Separate renders every visible channel and its peaks. Changing
+            # the inspected component alone cannot alter that figure. Overlay
+            # still uses active-file to choose the source peak overlays.
+            'file': active_file if layout_mode != 'stacked' else None,
             'baseline': baseline_mode, 'markers': deconv_markers,
             'deconvolution': deconv_result, 'display': display_opts,
             'visibility': data_manager.visibility_state,

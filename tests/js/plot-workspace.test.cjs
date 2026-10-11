@@ -10,6 +10,7 @@ function setup() {
     let serializations = 0;
     let resizeObserver;
     const props = [];
+    const listeners = {};
     const elements = new Map();
     function element() {
         return {style: {}, dataset: {}, children: [], handlers: {},
@@ -23,13 +24,13 @@ function setup() {
         Plotly: {async react(gd, data, layout) {renders++; gd.data=data; gd.layout=layout;},
             purge() {}, Plots: {resize() {resizes++;}}}, addEventListener() {}};
     const document = {getElementById: id => elements.get(id), createElement: element,
-        dispatchEvent() {}, addEventListener() {}};
+        dispatchEvent() {}, addEventListener(name, handler) {listeners[name] = handler;}};
     vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../../src/assets/js/plot-workspace.js'), 'utf8'),
         {window, document, CustomEvent: function(type) {this.type=type;}, ResizeObserver: class {
             constructor(callback) {resizeObserver = callback;} observe() {}},
             requestAnimationFrame: fn => fn(), console, setTimeout, structuredClone,
             JSON: {parse: JSON.parse, stringify(value) {serializations++; return JSON.stringify(value);}}});
-    return {window, document, props, host: elements.get('plot-workspace'), renders: () => renders,
+    return {window, document, props, listeners, host: elements.get('plot-workspace'), renders: () => renders,
         resizes: () => resizes, serializations: () => serializations, panelResize: () => resizeObserver()};
 }
 
@@ -178,4 +179,39 @@ test('tab departure is announced before the old raw graph is hidden, including c
  s.window.dash_clientside.callback_context={triggered:[{prop_id:'{"type":"plot-tab-btn","index":"spectra"}.n_clicks'}]};
  api.switchTab([0,1],'lcms');
  assert.equal(events[0],'gecko:plot-leave');
+});
+
+
+test('native tab click reveals retained plot before Dash schedules any callback', async () => {
+ const s=setup(), api=s.window.dash_clientside.plotWorkspace;
+ await api.update(figure('lcms'),'lcms',tabs); const first=s.window.geckoActivePlot();
+ await api.update(figure('spectra'),'spectra',tabs);
+ const button={id:JSON.stringify({type:'plot-tab-btn',index:'lcms'})};
+ s.listeners.click({target:{closest:selector=>selector==='.plot-tab-btn'?button:null}});
+ assert.equal(s.window.geckoActivePlot(),first);
+ assert.equal(first.style.display,'block');
+ assert.equal(s.renders(),2);
+ // An echo of the old figure/context must not flash the previous tab back.
+ await api.update(figure('spectra'),'spectra',tabs);
+ assert.equal(s.window.geckoActivePlot(),first);
+ await api.update(figure('lcms'),'lcms',tabs);
+ assert.equal(s.window.geckoActivePlot(),first);
+});
+
+test('file row click uses its existing group to reveal cached plot immediately', async () => {
+ const s=setup(), api=s.window.dash_clientside.plotWorkspace;
+ await api.update(figure('lcms'),'lcms',tabs); const first=s.window.geckoActivePlot();
+ await api.update(figure('spectra'),'spectra',tabs);
+ const group={id:JSON.stringify({type:'file-group',index:'lcms'})};
+ const row={closest:selector=>selector==='.file-group-container'?group:null};
+ s.listeners.click({target:{closest:selector=>selector==='.file-tree-item'?row:null}});
+ assert.equal(s.window.geckoActivePlot(),first);
+ assert.equal(s.renders(),2);
+});
+
+test('visibility and delete controls never trigger an optimistic file switch', async () => {
+ const s=setup(), api=s.window.dash_clientside.plotWorkspace;
+ await api.update(figure('lcms'),'lcms',tabs); const first=s.window.geckoActivePlot();
+ s.listeners.click({target:{closest:()=>null}});
+ assert.equal(s.window.geckoActivePlot(),first);
 });

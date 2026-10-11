@@ -99,3 +99,28 @@ def test_axis_toolbar_controls_render_through_their_settings_store_once(monkeypa
     assert 'pub-zoom-sync' not in {item.component_id for item in inputs}
     assert 'plot-y-scope' not in {item.component_id for item in inputs}
     assert {'pub-zoom-sync','plot-y-scope'} <= {item.component_id for item in states}
+
+
+def test_separate_channel_selection_reuses_group_figure_but_peak_selection_invalidates(monkeypatch):
+    app,cache,args=render_fixture(monkeypatch)
+    args[3]={**args[3],'layout_mode':'stacked'}
+    calls=[]
+    monkeypatch.setattr(callbacks,'_collect_visible_files',lambda *a,**k:calls.append(True) or {})
+    monkeypatch.setattr(dash,'callback_context',SimpleNamespace(triggered=[{'prop_id':'active-file.data'}]))
+    app.functions['master_render'](*args)
+    args[2]='another-channel-in-same-group'
+    assert app.functions['master_render'](*args)[0] is dash.no_update
+    assert len(calls)==1
+    args[15]='new-selected-peak'
+    assert app.functions['master_render'](*args)[0] is not dash.no_update
+    assert len(calls)==2
+
+
+def test_overlay_channel_selection_still_rebuilds_its_source_peak_context(monkeypatch):
+    app,cache,args=render_fixture(monkeypatch)
+    calls=[]
+    monkeypatch.setattr(callbacks,'_collect_visible_files',lambda *a,**k:calls.append(True) or {})
+    monkeypatch.setattr(dash,'callback_context',SimpleNamespace(triggered=[{'prop_id':'active-file.data'}]))
+    args[2]='another-channel-in-same-group'
+    assert app.functions['master_render'](*args)[0] is not dash.no_update
+    assert len(calls)==1

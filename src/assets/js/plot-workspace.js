@@ -4,6 +4,7 @@
     'use strict';
     var plots = new Map();
     var activeId = null, lastTabs = [], updateVersion = 0, publishedTabs = '';
+    var pendingId = null;
     var config = {responsive: true, displayModeBar: false, displaylogo: false,
         doubleClick: 'reset+autosize', scrollZoom: true, edits: {shapePosition: true}};
 
@@ -75,7 +76,8 @@
         var current = plots.get(id);
         if (current) {
             resize(current.gd);
-            if (mirror && changed && current.figure) {
+            if (mirror && (changed || current.needsMirror) && current.figure) {
+                current.needsMirror = false;
                 // Legacy callbacks still consume main-plot.figure. Mirror once;
                 // the visible graph itself is already on screen and untouched.
                 var layout = current.gd.layout || current.figure.layout || {};
@@ -116,7 +118,8 @@
             }
         });
         publishRetainedTabs();
-        var nextId = tabId || '__empty__';
+        if (pendingId && (!lastTabs.some(function (t) {return t.id === pendingId;}) || tabId === pendingId)) pendingId = null;
+        var nextId = pendingId || tabId || '__empty__';
         var changed = activeId !== nextId;
         // Show the cached target before serializing data or awaiting any render.
         activate(nextId, false, false);
@@ -169,7 +172,8 @@
         var current = plots.get(activeId);
         if (current) {
             resize(current.gd);
-            if (changed && current.figure && figureId !== activeId) {
+            if ((changed || current.needsMirror) && current.figure && figureId !== activeId && !pendingId) {
+                current.needsMirror = false;
                 var liveLayout = current.gd.layout || current.figure.layout || {};
                 liveLayout = typeof structuredClone === 'function' ? structuredClone(liveLayout) : JSON.parse(JSON.stringify(liveLayout));
                 current.mirroredFigure = {data: current.figure.data, layout: liveLayout};
@@ -179,6 +183,52 @@
         return '';
     }
 
+    function revealTab(id, mirror) {
+        // Both the direct click and Dash reconciliation share the same layout.
+        if (window.__geckoSyncPlotTabLayout) window.__geckoSyncPlotTabLayout(id, lastTabs);
+        if (document.querySelectorAll) document.querySelectorAll('.plot-tab-btn').forEach(function (button) {
+            try {
+                var selected = JSON.parse(button.id).index === id;
+                button.classList.toggle('active', selected);
+                button.setAttribute('aria-pressed', selected ? 'true' : 'false');
+            } catch (_) {}
+        });
+        var tab = lastTabs.find(function (t) {return t.id === id;});
+        if (tab && tab.type === 'publication') {
+            activate(id, false, false);
+            var publication = window.dash_clientside.publicationWorkspace;
+            if (publication && publication.activate) publication.activate(id);
+        } else {
+            activate(id, mirror, true);
+        }
+    }
+
+    // Capture the actual click before Dash's dependency queue. Retained canvases
+    // can be revealed immediately; Python still owns data/settings selection.
+    document.addEventListener('click', function (event) {
+        if (!event.target || !event.target.closest) return;
+        var button = event.target.closest('.plot-tab-btn');
+        var id;
+        if (button) {
+            if (event.target.closest('[id*="plot-tab-close"]')) return;
+            try {id = JSON.parse(button.id).index;} catch (_) {return;}
+        } else {
+            var row = event.target.closest('.file-tree-item');
+            if (!row) return;
+            // Preserve the publication inspector's existing source-selection behavior.
+            var current = lastTabs.find(function (t) {return t.id === activeId;});
+            if (current && current.type === 'publication') return;
+            var group = row.closest('.file-group-container');
+            if (!group) return;
+            try {id = JSON.parse(group.id).index;} catch (_) {return;}
+        }
+        if (!id || id === activeId || !lastTabs.some(function (t) {return t.id === id;})) return;
+        pendingId = id;
+        var entry = plots.get(id);
+        if (entry) entry.needsMirror = true;
+        revealTab(id, false);
+    }, true);
+
     window.dash_clientside = Object.assign({}, window.dash_clientside, {
         plotWorkspace: {update: update, activate: activate,
             switchTab: function (clicks, current) {
@@ -186,25 +236,7 @@
                 if (!(clicks || []).some(Boolean) || !ctx.triggered.length) return window.dash_clientside.no_update;
                 var id = JSON.parse(ctx.triggered[0].prop_id.replace(/\.n_clicks$/, '')).index;
                 if (id === current) return window.dash_clientside.no_update;
-                // Restore the entire target workspace before revealing/resizing
-                // its retained canvas; publication uses a different panel split.
-                if (window.__geckoSyncPlotTabLayout) window.__geckoSyncPlotTabLayout(id, lastTabs);
-
-                if (document.querySelectorAll) document.querySelectorAll('.plot-tab-btn').forEach(function (button) {
-                    try {
-                        var selected = JSON.parse(button.id).index === id;
-                        button.classList.toggle('active', selected);
-                        button.setAttribute('aria-pressed', selected ? 'true' : 'false');
-                    } catch (_) {}
-                });
-                var tab = lastTabs.find(function (t) {return t.id === id;});
-                if (tab && tab.type === 'publication') {
-                    activate(id, false, false);
-                    var publication = window.dash_clientside.publicationWorkspace;
-                    if (publication && publication.activate) publication.activate(id);
-                } else {
-                    activate(id, true, true);
-                }
+                revealTab(id, true);
                 return id;
             }}
     });
