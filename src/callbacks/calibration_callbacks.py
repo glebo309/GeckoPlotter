@@ -6,7 +6,7 @@ import math
 import uuid
 
 import dash
-from dash import Input, Output, State, html, dcc
+from dash import Input, Output, State, dcc
 import plotly.graph_objects as go
 from services.calibration_service import CalibrationPoint
 
@@ -132,20 +132,10 @@ def register_calibration_callbacks(app: dash.Dash, data_manager) -> None:
                 dict(name='Concentration'+(f' ({units})' if units else ''),id='concentration',type='numeric',format=dict(specifier='.5~g')),
                 dict(name='Peak height' if response_type == 'height' else 'Peak area',id='area',type='numeric',format=dict(specifier='.5~g'))]
 
-    @app.callback(Output('cal-fit-summary','children'),Input('cal-revision','data'),Input('cal-active-model','value'))
-    def fit_summary(_revision,model_id):
-        model=service.get_model(model_id)
-        if model is None or model.coefficients is None:
-            return ''
-        count=sum(point.included for point in model.standards)
-        score=f'R² = {model.r_squared:.6f}' if model.r_squared is not None else 'Saved fit'
-        return f'{score} · {count} standards · {model.fit_type}'
-
     outputs = [Output('cal-active-model','data'),Output('cal-active-model','value'),
         Output('cal-standards-table','data'),Output('cal-standards-table','selected_rows')]
     outputs += [Output(cid, prop) for cid, prop in field_ids]
-    outputs += [Output('cal-curve-graph','figure'),Output('cal-residual-graph','figure'),
-        Output('cal-results-info','children'),Output('cal-feedback','children'),
+    outputs += [Output('cal-curve-graph','figure'),Output('cal-feedback','children'),
         Output('cal-match-label','children'),Output('cal-revision','data'),Output('cal-save-btn','disabled')]
     inputs = [Input('cal-new-btn','n_clicks'),Input('cal-add-peaks-btn','n_clicks'),
         Input('cal-add-manual-btn','n_clicks'),Input('cal-fit-btn','n_clicks'),
@@ -323,23 +313,10 @@ def register_calibration_callbacks(app: dash.Dash, data_manager) -> None:
                 apply_calibrations(data_manager)
             options = [{'value':m.model_id,'label':m.analyte_name} for m in service.get_all_models().values()]
             figure = service.create_calibration_figure(model_id) if model.coefficients is not None else _empty_figure('Select standards and fit calibration')
-            residual = service.create_residual_figure(model_id) if model.coefficients is not None else _empty_figure('Residuals appear after fitting')
-            for fig in (figure,residual):
-                fig.update_layout(margin=dict(l=65,r=24,t=48,b=50),font=dict(size=12),
-                    legend=dict(orientation='h',y=1.02,yanchor='bottom',x=1,xanchor='right'),autosize=True)
-                fig.update_xaxes(showline=True,mirror=True,linecolor='#555')
-                fig.update_yaxes(showline=True,mirror=True,linecolor='#555')
-            info = []
-            if model.coefficients is not None:
-                inc = [s for s in model.standards if s.included]
-                info = [html.Strong(f'R² = {model.r_squared:.6f}' if model.r_squared is not None else 'Imported fit'),
-                    html.Span(f' · {len(inc)} standards · {model.fit_type}'),
-                    html.P('Residuals are measured response minus fitted response. Values outside the standard range are marked in Peaks.')]
-                if len(inc) <= (3 if model.fit_type == 'quadratic' else 2):
-                    info.append(html.P('This fit has no spare levels to assess its shape. Add more concentration levels or replicates.'))
-                if inc:
-                    info.append(html.Table([html.Thead(html.Tr([html.Th('Standard'),html.Th('Known'),html.Th('Back-calculated'),html.Th('Bias (%)')]))]+[
-                        html.Tbody([_back_calculated_row(service,model,s) for s in inc])],className='calibration-diagnostics'))
+            figure.update_layout(margin=dict(l=65,r=24,t=48,b=50),font=dict(size=12),
+                legend=dict(orientation='h',y=1.02,yanchor='bottom',x=1,xanchor='right'),autosize=True)
+            figure.update_xaxes(showline=True,mirror=True,linecolor='#555')
+            figure.update_yaxes(showline=True,mirror=True,linecolor='#555')
             signal_rows = [r for r in rows if r.get('signal_key')]
             matching_signal = bool(signal_rows or model.signal_key)
             matching_units = signal_rows[0].get('x_units', '') if signal_rows else model.x_units
@@ -349,7 +326,7 @@ def register_calibration_callbacks(app: dash.Dash, data_manager) -> None:
                 match_text = (f"Find a peak between {center-tolerance:.4g} and {center+tolerance:.4g} {matching_units} "
                               'in other samples, using the same signal. Its response is converted to concentration using this curve.')
             result = [options,model_id,rows,included] + [values[n] for n in field_names]
-            result += [figure,residual,info,feedback,match_text,(revision or 0)+1 if changed else dash.no_update,model.coefficients is None]
+            result += [figure,feedback,match_text,(revision or 0)+1 if changed else dash.no_update,model.coefficients is None]
             if not hydrate and trigger in {'cal-standards-table', *(cid for cid, _ in field_ids)} and trigger != 'cal-response-type':
                 # Preserve the browser's active cell and newer keystrokes while saving the draft.
                 result[2:12] = [dash.no_update] * 10
@@ -367,11 +344,3 @@ def register_calibration_callbacks(app: dash.Dash, data_manager) -> None:
         import re
         name = re.sub(r'[^\w.-]+','_',model.analyte_name).strip('_') or 'calibration'
         return dcc.send_string(json.dumps(service.export_calibrations([model_id]),indent=2,allow_nan=False),name+'_calibration.json')
-
-
-def _back_calculated_row(service, model, standard):
-    concentration = service.predict_concentration(model.model_id, standard.area)
-    bias = None if concentration is None or standard.concentration == 0 else 100*(concentration-standard.concentration)/standard.concentration
-    return html.Tr([html.Td(standard.sample_name),html.Td(f'{standard.concentration:.5g}'),
-        html.Td('n/a' if concentration is None else f'{concentration:.5g}'),
-        html.Td('n/a' if bias is None else f'{bias:.2f}')])

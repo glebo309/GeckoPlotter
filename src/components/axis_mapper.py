@@ -30,9 +30,10 @@ def section_style(color_key, active=False):
 def selector_button_style(color_key, active=False):
     colors = SECTION_COLORS[color_key]
     base = {
-        'padding': '4px 10px',
-        'fontSize': '11px',
-        'borderRadius': '4px',
+        'padding': '0 10px',
+        'minHeight': '30px',
+        'fontSize': '12px',
+        'borderRadius': '5px',
         'cursor': 'pointer',
         'transition': 'all 0.15s'
     }

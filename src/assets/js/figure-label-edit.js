@@ -1,10 +1,31 @@
 // Edit the live plot's text in place, including a scaled paper/slide preview.
 (function () {
     'use strict';
-    var editing = null;
+    var editing = null, enabled = false;
+    function setEnabled(value) {
+        enabled = !!value; cancel();
+        document.body.classList.toggle('gecko-text-edit-mode', enabled);
+        var button=document.getElementById('plot-tool-edit-text');
+        if(button){button.classList.toggle('active',enabled);button.setAttribute('aria-pressed',String(enabled));}
+        if(enabled && window.dash_clientside){
+            window.dash_clientside.set_props('baseline-mode',{data:'navigate'});
+            window.dash_clientside.set_props('selected-peak-idx',{data:null});
+            if(window.GeckoPlotterManualIntegration) window.GeckoPlotterManualIntegration.syncDrawMode('main-plot','navigate');
+        }
+    }
     function targetAtEvent(gd, event) {
         if (!gd || !event || !event.target) return null;
         var element = event.target;
+        var legend=element.closest && element.closest('g.traces');
+        if(legend && legend.querySelector && legend.querySelector('.legendtext')) {
+            var datum=legend.__data__, item=Array.isArray(datum)?datum[0]:datum;
+            var trace=item && (item.trace || item), meta=trace && trace.meta;
+            if(meta && meta.file_id) {
+                var name=trace.name || '', suffix=meta.y_column ? ' — '+meta.y_column : '';
+                if(suffix && name.endsWith(suffix)) name=name.slice(0,-suffix.length);
+                return {field:'dataset',fileId:meta.rename_file_id || meta.file_id,value:meta.rename_label || name,element:legend.querySelector('.legendtext')};
+            }
+        }
         while (element && String(element.tagName).toLowerCase() === 'tspan') element = element.parentElement;
         if (!element || String(element.tagName).toLowerCase() !== 'text' || !gd.contains(element)) return null;
         var classes = (element.getAttribute('class') || '').split(/\s+/);
@@ -39,15 +60,16 @@
     }
     function begin(gd, hit) {
         cancel();
-        var layout=gd.layout || {}, meta=layout.meta || {};
-        if (!meta.gecko_tab_id) return null;
+        var layout=gd && gd.layout || {}, meta=layout.meta || {};
+        if (!hit.fileId && !meta.gecko_tab_id) return null;
         var title=hit.field==='title' ? layout.title : (layout[hit.field] || {}).title;
         var value=typeof title==='string' ? title : title && title.text || '';
         if (hit.annotationIndex!==undefined) value=hit.text;
+        if (hit.fileId) value=hit.value;
         if (hit.field==='title') value=value.replace(/^<b>([\s\S]*)<\/b>$/, '$1');
         var input=document.createElement('input'), rect=hit.element.getBoundingClientRect();
         input.type='text';input.value=value;input.className='figure-label-editor';
-        input.setAttribute('aria-label',hit.field==='title'?'Edit plot title':'Edit axis label');
+        input.setAttribute('aria-label',hit.fileId?'Edit dataset name':hit.field==='title'?'Edit plot title':'Edit axis label');
         input.setAttribute('title','Enter to apply · Esc to cancel');
         var width=Math.min(420,Math.max(190,rect.width+40));
         Object.assign(input.style,{position:'fixed',left:Math.max(8,Math.min(rect.left,window.innerWidth-width-8))+'px',
@@ -56,6 +78,10 @@
         function commit() {
             if (editing!==session) return;
             var text=input.value;cancel();
+            if(hit.fileId){
+                if(text.trim() && text.trim()!==value) window.dash_clientside.set_props('dataset-name-edit',{data:{file_id:hit.fileId,text:text.trim(),ts:Date.now()}});
+                return;
+            }
             if (text===value || gd.style.display==='none' || !gd.getBoundingClientRect().width) return;
             var current=gd.layout || {}, captured={meta:current.meta || {}};
             Object.keys(current).forEach(function(key){
@@ -78,15 +104,21 @@
         document.body.appendChild(input);input.focus();input.select();return input;
     }
     function handle(event) {
-        var gd=event.target && event.target.closest && event.target.closest('.js-plotly-plot');
-        var hit=targetAtEvent(gd,event);
-        if (!hit || !(gd.layout && gd.layout.meta && gd.layout.meta.gecko_tab_id)) return;
-        // Keep Plotly's plot/axis double-click reset away from editable text.
+        if(event.target.closest && event.target.closest('.figure-label-editor')) return;
+        var tool=event.target.closest && event.target.closest('#plot-tool-edit-text');
+        if(tool){if(event.type==='click')setEnabled(!enabled);return;}
+        if(event.type==='click' && event.target.closest && event.target.closest('#plot-tool-integrate')) setEnabled(false);
+        var label=event.target.closest && event.target.closest('.dataset-name');
+        var gd=event.target.closest && event.target.closest('.js-plotly-plot');
+        var hit=label ? {field:'dataset',fileId:label.dataset.fileId,value:label.textContent,element:label} : targetAtEvent(gd,event);
+        if(!hit) return;
+        if(!enabled && (hit.fileId || event.type==='click')) return;
+        if(!hit.fileId && !(gd.layout && gd.layout.meta && gd.layout.meta.gecko_tab_id)) return;
         event.preventDefault();event.stopPropagation();event.stopImmediatePropagation();
-        if(event.type==='dblclick') begin(gd,hit);
+        if((enabled && event.type==='click') || event.type==='dblclick') begin(gd,hit);
     }
-    ['pointerdown','mousedown','dblclick'].forEach(function(name){document.addEventListener(name,handle,true);});
+    ['pointerdown','mousedown','click','dblclick'].forEach(function(name){document.addEventListener(name,handle,true);});
     document.addEventListener('gecko:plot-leave',cancel);
-    document.addEventListener('keydown',function(event){if(event.key==='Escape')cancel();},true);
-    window.GeckoFigureLabels={targetAtEvent:targetAtEvent,begin:begin,cancel:cancel};
+    document.addEventListener('keydown',function(event){if(event.key==='Escape'){if(editing)cancel();else setEnabled(false);}},true);
+    window.GeckoFigureLabels={targetAtEvent:targetAtEvent,begin:begin,cancel:cancel,setEnabled:setEnabled};
 })();

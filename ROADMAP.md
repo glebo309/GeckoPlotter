@@ -1,9 +1,43 @@
 # GeckoPlotter V2 — Roadmap
 
-_Updated 2026-06-01_
+_Reviewed 2026-10-12_
 
 This is the single source of truth for what's done, what's next, and what's planned.
 Start every new session by reading this file.
+
+
+## Current review (2026-10-12)
+
+The May/June notes below are historical. The current UI and source are ahead of several old unchecked items.
+
+### Delivered since the previous review
+
+- [x] Working calibration editor, fitted curve, JSON save/load, peak matching, and calculated concentrations in Peaks and Compare samples.
+- [x] Interactive deconvolution preview with component removal, adjustable apex markers, accept/cancel, keyboard shortcuts, and retained zoom.
+- [x] Individual accepted component shapes and synchronized table/plot peak removal.
+- [x] Data / Integration / Figure / Export inspector organization; smoothing belongs to Data.
+- [x] Consistent integration tools and a compact peak-area toolbar button.
+- [x] Axis-specific reset and stable X range while selecting/deselecting peaks.
+- [x] Text-edit toolbar mode for dataset names, titles, axis labels, and legend names. Dataset names synchronize with the file browser.
+
+### Still open or deferred
+
+- [ ] Full session save/restore. The current save callback explicitly reports that it is not implemented.
+- [ ] Named figure styles: Prism Classic, Nature, ACS, Angewandte, Presentation, Dark. Existing paper/slide size presets do not fulfill this style-preset request.
+- [ ] Advanced calibration: weighted regression, internal-standard normalization, LOD/LOQ. Force-through-zero is already implemented.
+- [ ] Clarify the historical "HMS analysis" item. The old roadmap never defines the acronym and no current implementation was found. Do not treat it as a scoped feature until identified.
+- [x] Draggable legends with edge snapping, persisted coordinates, context font-size control and shared file-browser/peak visibility.
+- [ ] Drag other figure labels with snap alignment.
+- [x] Research ZIP export: original uploads, untouched parsed CSV, edited data, exact current-figure source values, SVG/PDF/PNG/TIFF/HTML, peak/calibration data, timestamped processing history, linked metadata, checksums, README and HTML report.
+- [ ] Extend research packages to a multi-figure registry, molecule attachments and direct Zenodo draft submission. The current package is a local draft with repository details to complete, not an automatic compliance certification. See docs/RESEARCH_EXPORT.md.
+- [ ] Optional UV/MS detector-delay correction, including visual TIC alignment to UV. Glenn explicitly deferred this until later.
+- [ ] Verify lab deployment/update automation on the actual host. Local work does not establish deployment status; see docs/DEPLOYMENT_PLAN.md.
+
+### Decisions that supersede older proposals
+
+- Keep Fit diagnostics removed; do not reintroduce the old diagnostics table/residual section as unfinished work.
+- Refresh starts a clean workspace. Explicit session saving is a separate future feature.
+- Pan, zoom-to-region, reset view, and undo/redo toolbar buttons were suggested on October 12; they are proposals, not committed new features. Existing gestures/shortcuts remain available.
 
 ## Current State
 
@@ -66,7 +100,7 @@ Goal: make it feel like a pro figure-editing tool with contextual controls.
 - [x] **Axis labels in Plot Settings** — sole source of axis labels (Data Selector labels removed), empty = no label
 - [x] **Black slider styling** — all dcc.Slider components use dark track/handle
 - [x] **Automargin axes** — Plotly automargin prevents label/tick overlap
-- [ ] **Axis-specific zoom reset** — double-click X axis resets only X range; double-click Y resets only Y (needs custom JS handler)
+- [x] **Axis-specific zoom reset** — double-click X axis resets only X range; double-click Y resets only Y (needs custom JS handler)
 
 ### Figure style presets
 - [ ] **Style preset dropdown** — "Figure Style" selector in Publication toolbox (applies Plotly template in one click)
@@ -93,15 +127,15 @@ Goal: make it feel like a pro figure-editing tool with contextual controls.
 - [ ] **Right-click on figure body** → general options (theme, grid, legend position, A/B comparison)
 
 ### Click-to-edit labels
-- [ ] **Click axis labels to edit** — click on X/Y label text on the figure → inline edit field appears
-- [ ] **Click title to edit** — same for figure title
+- [x] **Click axis labels to edit** — click on X/Y label text on the figure → inline edit field appears
+- [x] **Click title to edit** — same for figure title
 - [ ] **Draggable labels** — shift+drag to reposition, with snap alignment (grid-snap like PowerPoint)
 
 ### Toolbox reorganization
-- [ ] **Smarter grouping** — Title + axis labels in one section; layout in another
+- [x] **Smarter grouping** — Title + axis labels in one section; layout in another
 - [ ] **Conditional visibility** — hide options that aren't relevant (e.g., no "show title" toggle if title is empty)
 - [ ] **Per-axis minor ticks** — control minor ticks on X only, Y only, or both; hidden behind expandable "More" section
-- [ ] **Collapsible detail sections** — "More options" expand buttons for advanced controls (tick formatting, grid lines, etc.)
+- [x] **Collapsible detail sections** — "More options" expand buttons for advanced controls (tick formatting, grid lines, etc.)
 
 ---
 

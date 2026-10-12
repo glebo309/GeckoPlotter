@@ -1,4 +1,4 @@
-"""Editable calibration standards, fit diagnostics and saved model controls."""
+"""Editable calibration standards, fitted curve and saved model controls."""
 from dash import html, dcc, dash_table
 import dash_mantine_components as dmc
 
@@ -21,10 +21,10 @@ def create_calibration_panel():
                 dmc.Select(id='cal-active-model', label='Calibration', placeholder='New calibration',
                     data=[], size='xs', clearable=False, allowDeselect=False, className='cal-model-select'),
                 html.Div([
-                    html.Button('New',id='cal-new-btn',n_clicks=0,className='btn btn-secondary'),
+                    dmc.Button('New',id='cal-new-btn',n_clicks=0,size='xs',variant='default'),
                     dcc.Upload(id='cal-load-upload', accept='.json,application/json', multiple=False,
-                        children=html.Button('Load JSON',className='btn btn-secondary')),
-                    html.Button('Save JSON',id='cal-save-btn',n_clicks=0,disabled=True,className='btn btn-secondary'),
+                        children=dmc.Button('Load JSON',size='xs',variant='default')),
+                    dmc.Button('Save JSON',id='cal-save-btn',n_clicks=0,disabled=True,size='xs',variant='default'),
                 ],className='cal-actions'),
             ],className='cal-toolbar'),
             html.Div(id='cal-feedback',role='status',className='cal-feedback',
@@ -49,11 +49,11 @@ def create_calibration_panel():
                         dmc.MultiSelect(id='cal-peak-picker',label='Integrated peaks',data=[],value=[],
                             placeholder='Search samples and peaks…',searchable=True,clearable=True,size='xs'),
                         html.Div([
-                            html.Button('Add selected peaks',id='cal-add-peaks-btn',n_clicks=0,className='btn btn-secondary'),
-                            html.Button('Add manual row',id='cal-add-manual-btn',n_clicks=0,className='btn btn-secondary'),
-                            html.Button('Use as matching peak',id='cal-link-peak-btn',n_clicks=0,
-                                className='btn btn-secondary',
-                                title='Use one selected peak to identify the signal and position for a saved calibration without refitting it.'),
+                            dmc.Button('Add selected peaks',id='cal-add-peaks-btn',n_clicks=0,size='xs',variant='default'),
+                            dmc.Button('Add manual row',id='cal-add-manual-btn',n_clicks=0,size='xs',variant='default'),
+                            dmc.Button('Use as matching peak',id='cal-link-peak-btn',n_clicks=0,
+                                size='xs',variant='default',
+                                attributes={'title':'Use one selected peak to identify the signal and position for a saved calibration without refitting it.'}),
                         ],className='cal-actions cal-add-actions'),
                         html.P('Enter known concentrations. Checked rows are included in the fit.',className='cal-note'),
                         html.Div(dash_table.DataTable(id='cal-standards-table',data=[],
@@ -74,6 +74,10 @@ def create_calibration_panel():
                             id='cal-standards-scroll',className='cal-standards-scroll',role='region',tabIndex=0,
                             **{'aria-label':'Calibration standards. Scroll horizontally to reach every column.'}),
                     ],className='cal-section'),
+                    html.Div([
+                        dmc.Button('Fit calibration',id='cal-fit-btn',n_clicks=0,size='xs',variant='filled'),
+                        html.Span('Refit after changing standards or settings.',className='cal-note'),
+                    ],className='cal-fit-actions'),
                     html.Section([
                         html.H4('Find this peak in other samples',className='cal-heading'),
                         html.Div(id='cal-match-label',children='Select an integrated peak to match its signal and position.',className='cal-note'),
@@ -86,10 +90,6 @@ def create_calibration_panel():
                         dmc.Switch(id='cal-auto-apply',label='Calculate concentrations for matching peaks',
                                    checked=True,size='sm'),
                     ],className='cal-section'),
-                    html.Div([
-                        html.Button('Fit calibration',id='cal-fit-btn',n_clicks=0,className='btn btn-primary'),
-                        html.Span('Fit after editing standards or settings. Linking a matching peak keeps the saved fit.',className='cal-note'),
-                    ],className='cal-fit-actions'),
                 ],className='cal-editor'),
                 html.Div([
                     html.Section([
@@ -98,12 +98,6 @@ def create_calibration_panel():
                             responsive=True,config={'displaylogo':False,'responsive':True},className='cal-curve',
                             style={'minHeight':'360px'}),
                     ],className='cal-section cal-curve-section'),
-                    html.Div([
-                        dcc.Graph(id='cal-residual-graph',figure=_empty_graph('Residuals show the difference from the fitted curve.'),
-                            responsive=True,config={'displaylogo':False,'responsive':True},className='cal-residuals'),
-                        html.Div(id='cal-results-info',className='cal-results'),
-                    ],id='cal-hidden-diagnostics',hidden=True),
-                    html.Div(id='cal-fit-summary',className='cal-results'),
                 ],className='cal-diagnostics'),
             ],className='cal-workspace-grid'),
         ]),

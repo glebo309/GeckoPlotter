@@ -170,7 +170,7 @@ class IntegrationService:
                     working[i] = avg
 
         # Invert transform
-        baseline = (np.exp(np.exp(working) - 1) - 1) ** 2 - 1e-10
+        baseline = (np.exp(np.exp(working) - 1) - 1) ** 2 - 1
         return np.maximum(baseline, 0)
 
     @staticmethod

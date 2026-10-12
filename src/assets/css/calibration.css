@@ -45,3 +45,20 @@
 .calibration-diagnostics { width:100%; border-collapse:collapse; font-size:11px; }
 .calibration-diagnostics th, .calibration-diagnostics td { padding:6px 8px; border-bottom:1px solid #e4e4e6; text-align:right; }
 .calibration-diagnostics th:first-child, .calibration-diagnostics td:first-child { text-align:left; }
+
+/* Keep result tables inside the analysis pane at every split position. */
+#peak-analysis-content, #across-samples-content,
+#peak-analysis-container { min-width:0; max-width:100%; box-sizing:border-box; }
+#peak-table .dash-spreadsheet-container,
+#cross-sample-table .dash-spreadsheet-container { width:100%; max-width:100%; min-width:0; }
+#peak-table .dash-spreadsheet-inner table,
+#cross-sample-table .dash-spreadsheet-inner table { width:100%; table-layout:auto; }
+#peak-table .dash-cell-value,
+#cross-sample-table .dash-cell-value { white-space:nowrap; overflow-wrap:normal; }
+#peak-table .column-header--delete, #peak-table .column-header--edit,
+#cross-sample-table .column-header--delete, #cross-sample-table .column-header--edit { display:none; }
+#peak-table th:hover .column-header--delete, #peak-table th:hover .column-header--edit,
+#cross-sample-table th:hover .column-header--delete, #cross-sample-table th:hover .column-header--edit,
+#peak-table th:focus-within .column-header--delete, #peak-table th:focus-within .column-header--edit,
+#cross-sample-table th:focus-within .column-header--delete, #cross-sample-table th:focus-within .column-header--edit { display:inline; }
+.analysis-group-actions { border-top:1px solid #e2e2e5; padding-top:10px; }

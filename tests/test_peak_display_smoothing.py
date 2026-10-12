@@ -85,3 +85,45 @@ def test_publication_plot_type_change_with_source_metadata_does_not_break_peak_g
     result=editable_publication_figure(fig.to_plotly_json(),{'plot_type':'bar'},{'plot_type':'line'})
     assert result.data[0].type=='bar'
     assert_fill_matches(result)
+
+
+def test_accepted_deconvolution_keeps_component_geometry_after_render_and_publication():
+    from services.peak_display import refresh_peak_display
+    first=peak();first.source='deconvolved'
+    first.poly_y=(Y*.6).tolist()+[.5]*len(X)
+    second=deepcopy(first);second.peak_id='p2';second.poly_y=(Y*.25).tolist()+[.5]*len(X)
+    fig=source();add_peak_traces(fig,[first,second],X,Y)
+    for fill,p in zip([t for t in fig.data if t.fill=='toself'],[first,second]):
+        np.testing.assert_allclose(fill.y,p.poly_y)
+    smooth_plotly_traces(fig.data,9);refresh_peak_display(fig)
+    published=editable_publication_figure(fig.to_plotly_json(),{'layout_mode':'stacked'}, {'layout_mode':'overlay'})
+    for fill,p in zip([t for t in published.data if t.fill=='toself'],[first,second]):
+        np.testing.assert_allclose(fill.y,p.poly_y)
+
+
+def test_browser_roundtrip_integration_uses_smoothed_curve_with_binary_plotly_arrays():
+    import json
+    p=peak();saved=deepcopy(vars(p))
+    fig=go.Figure(go.Scatter(x=X,y=Y,mode='lines',meta={'file_id':'uv'},name='UV'))
+    smooth_plotly_traces(fig.data,9)
+    displayed=list(fig.data[0].y)
+    browser_figure=json.loads(fig.to_json())
+    assert isinstance(browser_figure['data'][0]['x'],dict)
+    result=overlay_peaks_on_figure([p],browser_figure,X,Y,p.peak_id)
+    fill=next(t for t in result.data if t.fill=='toself')
+    np.testing.assert_allclose(fill.y[:len(X)],displayed)
+    assert vars(p)==saved
+    assert result.layout.shapes[0].name=='baseline:p1'
+
+
+def test_publication_smoothing_decodes_browser_arrays_without_losing_original_values():
+    import json
+    fig=go.Figure(go.Scatter(x=X,y=Y,mode='lines',meta={'file_id':'uv'},name='UV'))
+    add_peak_traces(fig,[peak()],X,Y)
+    snapshot=json.loads(fig.to_json())
+    smoothed=editable_publication_figure(snapshot,{'smooth_window':9},{'smooth_window':0})
+    expected=source();smooth_plotly_traces(expected.data,9)
+    fill=next(t for t in smoothed.data if t.fill=='toself')
+    np.testing.assert_allclose(fill.y[:len(X)],expected.data[0].y)
+    restored=editable_publication_figure(smoothed.to_plotly_json(),{'smooth_window':0},{'smooth_window':9})
+    np.testing.assert_allclose(restored.data[0].y,Y)

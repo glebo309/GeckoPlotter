@@ -66,6 +66,11 @@
         // Escape is a cancellation action even while an inspector field has
         // focus. Let the field/dropdown also handle it; do not consume the key.
         if (e.key === 'Escape') {
+            if (window.__geckoBaselineMode === 'deconvolve') {
+                var cancelFit = document.getElementById('deconv-cancel-btn');
+                if (cancelFit) cancelFit.click();
+                return;
+            }
             if (window.GeckoPlotterManualIntegration) {
                 window.GeckoPlotterManualIntegration.cancelInteraction('main-plot');
             }
@@ -79,6 +84,18 @@
                 document.querySelectorAll('details.gesture-help[open]').forEach(function (details) {
                     details.removeAttribute('open');
                 });
+            }
+            return;
+        }
+        if (window.__geckoBaselineMode === 'deconvolve') {
+            if (isTypingTarget(e.target) || e.ctrlKey || e.metaKey || e.altKey || e.repeat) return;
+            var fitButton = e.key === 'Enter' ? 'deconv-accept-btn' :
+                (e.key === 'x' || e.key === 'X' ? 'deconv-cancel-btn' : null);
+            if (fitButton) {
+                e.preventDefault();
+                e.stopPropagation();
+                var button = document.getElementById(fitButton);
+                if (button && !button.disabled) button.click();
             }
             return;
         }

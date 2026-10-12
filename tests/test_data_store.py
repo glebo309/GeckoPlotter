@@ -209,8 +209,50 @@ def test_lcms_eic_overlays_are_persistent_for_component_entries():
     store.add_lcms_eic_overlay("ms-pos-1", overlay)
 
     assert store.get_data_by_id("ms-pos-1")["eic_overlays"] == [overlay]
-    assert store.loaded_data["lcms-bundle-1"]["eic_overlays"] == [overlay]
+    assert store.loaded_data["ms-pos-1"]["eic_overlays"] == [overlay]
+    assert store.get_data_by_id("lcms-bundle-1")["eic_overlays"] == [overlay]
 
     store.clear_lcms_eic_overlays("ms-pos-1")
 
     assert store.get_data_by_id("ms-pos-1")["eic_overlays"] == []
+
+
+def test_peak_colors_match_across_lcms_runs_and_component_owners():
+    store = DataStore()
+    for suffix in ('a', 'b'):
+        primary = make_component('primary-' + suffix)
+        uv = make_component('uv-' + suffix, role=ComponentRole.VWD_A)
+        store.add_bundle(Bundle(bundle_id='run-' + suffix, name=suffix,
+                                bundle_type=BundleType.LCMS,
+                                component_list=[primary, uv]))
+    def add(fid, rt):
+        return store.peak_service.add_baseline_peak(
+            file_id=fid, area=1, height=1, apex_x=rt,
+            poly_x=[rt-.05, rt, rt+.05], poly_y=[0, 1, 0],
+            p_line=[(rt-.05, 0), (rt+.05, 0)],
+            q1=(rt-.05, 0), q2=(rt+.05, 0))
+    add('run-a', 2.0)
+    first = add('run-a', 7.3)
+    store.peak_service.group_peaks_across_samples(file_overlay_map=store.build_file_overlay_map())
+    second = add('uv-b', 7.31)
+    store.peak_service.group_peaks_across_samples(file_overlay_map=store.build_file_overlay_map())
+    assert first.color == second.color
+    assert first.group_id == second.group_id
+
+
+def test_bundle_iterator_keeps_reference_snapshot_during_removal_and_undo():
+    store = DataStore()
+    bundles = [Bundle(name, name, BundleType.GENERIC,
+                      component_list=[make_component(name+'-signal')]) for name in ('a','b','c')]
+    for bundle in bundles:
+        store.add_bundle(bundle)
+    cursor = store.iter_bundles()
+    assert next(cursor) is bundles[0]
+    store.file_removal_service.remove('b')
+    store.file_removal_service.undo()
+    store.file_removal_service.remove('c')
+    remaining = list(cursor)
+    assert remaining[0] is bundles[1]
+    assert remaining[1] is bundles[2]
+    assert remaining[0].dataframe is bundles[1].dataframe
+    assert [bundle.bundle_id for bundle in store.iter_bundles()] == ['a','b']

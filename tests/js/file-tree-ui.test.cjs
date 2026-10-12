@@ -50,3 +50,21 @@ test('group headings are keyboard disclosures and leave their sort button indepe
     assert.equal(container.style.display,'');
     assert.equal(prevented,2);
 });
+
+test('sample visibility does not overwrite the server channel choice', () => {
+    const attrs = {'aria-checked':'true','data-channel-sources':'["a250","b250"]','data-channel-label':'250 nm'};
+    const mark = {textContent:'✓'};
+    const button = {getAttribute:key=>attrs[key],setAttribute:(key,value)=>attrs[key]=value,
+        querySelector:()=>mark,title:''};
+    const context = {window:{},Set,document:{body:{},getElementById:()=>null,
+        querySelectorAll:selector=>selector==='.group-channel-toggle'?[button]:[],
+        addEventListener:()=>{}},MutationObserver:class{observe(){}}};
+    vm.runInNewContext(fs.readFileSync('src/assets/js/file-tree-ui.js','utf8'),context);
+    context.window._geckoApplyHiddenFiles(['a250']);
+    assert.equal(attrs['aria-checked'],'true');
+    assert.equal(mark.textContent,'✓');
+    context.window._geckoApplyHiddenFiles(['a250','b250']);
+    assert.equal(attrs['aria-checked'],'true');
+    context.window._geckoApplyHiddenFiles([]);
+    assert.equal(attrs['aria-checked'],'true');
+});

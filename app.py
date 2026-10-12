@@ -45,11 +45,19 @@ from callbacks.plot_context_menu_callbacks import register_plot_context_menu_cal
 from callbacks.deconvolution_callbacks import register_deconvolution_callbacks
 from callbacks.export_callbacks import register_export_callbacks
 from callbacks.calibration_callbacks import register_calibration_callbacks
+from components.research_export import create_research_export
+from components.pda_explorer import create_pda_explorer
+from services.themes import DEFAULT_THEME, theme_options
+from components.popup_menu import popup_menu, menu_item, menu_divider
+from services.plot_settings_service import DEFAULT_PALETTE, palette_options
+from callbacks.research_export_callbacks import register_research_export_callbacks, register_provenance_capture
 from components.paper_mock import create_paper_mock
 from callbacks.publication_preview_callbacks import register_publication_preview_callbacks
 
 # App setup
 app = dash.Dash(__name__, suppress_callback_exceptions=True, assets_folder='src/assets', update_title=None)
+from services.output_dedupe import install as _install_output_dedupe
+_install_output_dedupe(app)
 app.config.suppress_callback_exceptions = True
 app.title = 'GeckoPlotter'
 
@@ -67,7 +75,7 @@ def start_empty_workspace_on_reload():
 
 
 def _figure_actions(context, menu=True):
-    constructor = dmc.MenuItem if menu else html.Button
+    constructor = menu_item if menu else html.Button
     return [constructor(label, n_clicks=0, id={'type': 'figure-action', 'context': context, 'action': action},
                         **{'data-figure-action': action})
             for label, action in [('Send to publication', 'publication'), ('Quick export SVG', 'export')]]
@@ -145,6 +153,12 @@ _layout_body = html.Div(
         dcc.Store(id='view-mode', data='raw'),
         dcc.Store(id='active-plot-context', data=None),
         dcc.Store(id='current-plot-settings', data={}),
+        # Per-plot settings cache: switching plots applies stored settings in the browser.
+        dcc.Store(id='plot-settings-cache', data={}),  # {context_key: settings}, filled from current-plot-settings
+        dcc.Store(id='plot-settings-miss', data=None),  # context the browser has no settings for -> server hydrate
+        dcc.Store(id='plot-settings-persist', data=None),  # changed settings only -> server persist
+        dcc.Store(id='plot-panel-sync', data=0),  # ticks while a context-menu panel is open
+        dcc.Store(id='plot-settings-figure-key', data={}),  # {_context_key, layout_mode} for describe_figure
         dcc.Store(id='toolbox-tab', data='plot-tools'),
         dcc.Store(id='dev-settings', data={'show': False}),
         dcc.Store(id='pub-data-store'),  # Store for publication plotter data
@@ -153,6 +167,8 @@ _layout_body = html.Div(
         dcc.Store(id='custom-plot-figures', data={}),  # Maps custom tab_id → figure dict
         dcc.Store(id='custom-plot-counter', data=0),  # Auto-incrementing counter for plot names
         dcc.Store(id='tab-rename-event', data=None),  # {tab_id, new_label} from JS
+        dcc.Store(id='dataset-name-edit'),
+        dcc.Store(id='legend-position-edit'),
         dcc.Store(id='plot-export-data'),  # Export data from publication plot
         dcc.Store(id='peak-shared-selections', data={}),  # Shared selections for peak-analysis tab
         dcc.Store(id='cross-shared-selections', data={}),  # Shared selections for across-samples tab
@@ -193,6 +209,7 @@ _layout_body = html.Div(
         dcc.Input(id='ms-scan-client-input', type='number', value=None, style={'display': 'none'}),
         dcc.Store(id='render-trigger', data=0),  # Counter bumped to trigger master render of main-plot
         dcc.Store(id='zoom-state', data=None),  # Persisted user zoom ranges across figure rebuilds
+        dcc.Store(id='main-shape-relayout', data=None),  # relayoutData filtered to shape edits (peak/deconvolution callbacks)
         dcc.Store(id='plot-tabs', data=[]),  # List of plot tab descriptors [{id, label, type, group_key}]
         dcc.Store(id='active-plot-tab', data=None),  # ID of currently displayed plot tab
         dcc.Store(id='rendered-plot-tabs', data=[]),  # Raw figures retained in this browser workspace
@@ -209,6 +226,7 @@ _layout_body = html.Div(
         dcc.Store(id='hidden-files', data=[]),  # List of hidden file IDs for CSS dimming
         dcc.Store(id='group-collapse-state', data={}),  # {group_id: bool} collapse state
         dcc.Store(id='group-move-event', data=None),  # {file_id, source_group, target_group|null}
+        dcc.Store(id='file-multi-selection', data=[]),  # File-tree row keys picked with Cmd/Ctrl/Shift-click (written by file-tree-ui.js)
         dcc.Store(id='pub-custom-dims', data={}),  # Per-preset custom W/H {preset: {w, h}}
         html.Button(id='plot-empty-click-trigger', n_clicks=0, style={'display': 'none'}),
         html.Div(id='clear-transient-shapes-output', style={'display': 'none'}),
@@ -248,12 +266,12 @@ _layout_body = html.Div(
                         html.Div(
                             id='left-column',
                             className='left-column',
-                            style={'display': 'flex', 'flexDirection': 'column', 'minWidth': '200px', 'width': '30%'},
+                            style={'display': 'flex', 'flexDirection': 'column', 'minWidth': '260px', 'width': '24%'},
                             children=[
                                 html.Div(
                                     id='left-top-panel',
                                     className='panel',
-                                    style={'height': '50%', 'display': 'flex', 'flexDirection': 'column', 'overflow': 'hidden'},
+                                    style={'height': '35%', 'display': 'flex', 'flexDirection': 'column', 'overflow': 'hidden'},
                                     children=[
                                         html.Div(
                                             className='panel-header',
@@ -310,15 +328,12 @@ _layout_body = html.Div(
                                                     'minHeight': '0',
                                                 },
                                                 children=[
-                                                    dcc.Loading(
-                                                        id='file-tree-loading',
-                                                        type='circle',
-                                                        color='#1d1d1f',
-                                                        children=html.Div(
-                                                            id='file-tree',
-                                                            className='file-tree',
-                                                            children=render_file_tree([]),
-                                                        ),
+                                                    # No dcc.Loading wrapper: it is flagged dashChildrenUpdate (slows every
+                                                    # renderer update) and its spinner only delayed the tree.
+                                                    html.Div(
+                                                        id='file-tree',
+                                                        className='file-tree',
+                                                        children=render_file_tree([]),
                                                     )
                                                 ],
                                             ),
@@ -335,7 +350,7 @@ _layout_body = html.Div(
                                 html.Div(
                                     id='left-bottom-panel',
                                     className='panel',
-                                    style={'height': '50%', 'display': 'flex', 'flexDirection': 'column'},
+                                    style={'height': '65%', 'display': 'flex', 'flexDirection': 'column'},
                                     children=[
                                         html.Div('Toolbox', className='panel-header'),
                                         # Toolbox tabs (DMC). keepMounted keeps inactive panels mounted so
@@ -494,22 +509,16 @@ _layout_body = html.Div(
 
                                                         # -- 3. Theme & Colors (Analysis only for now) --
                                                         html.Div(id='pt-theme-wrapper', children=[
-                                                            html.Div('Theme & Colors', className='toolbox-section-title'),
-                                                            html.Div([
-                                                                html.Label('Theme', className='form-label'),
-                                                                dmc.Select(id='pt-theme', value='plotly_white', size='xs',
-                                                                           data=[{'label': t, 'value': t} for t in
-                                                                                 ['plotly_white', 'simple_white', 'plotly', 'ggplot2', 'seaborn',
-                                                                                  'plotly_dark', 'presentation', 'none']],
-                                                                           clearable=False, allowDeselect=False, searchable=True),
-                                                            ], style={'marginBottom': '6px'}),
+                                                            # Themes are no longer user-facing: palette and the Plot/Paper
+                                                            # backgrounds cover them. The control stays for saved settings.
+                                                            html.Div(dmc.Select(id='pt-theme', value=DEFAULT_THEME, size='xs',
+                                                                                data=theme_options(), clearable=False,
+                                                                                allowDeselect=False), style={'display': 'none'}),
                                                         ]),
                                                         html.Div([
                                                             html.Label('Color palette', className='form-label'),
-                                                            dmc.Select(id='pt-palette', value='okabe_ito', size='xs',
-                                                                       data=[{'label': p.replace('_', ' ').title(), 'value': p} for p in
-                                                                             ['okabe_ito', 'plotly', 'd3', 'pastel',
-                                                                              'batlow', 'hawaii', 'roma']],
+                                                            dmc.Select(id='pt-palette', value=DEFAULT_PALETTE, size='xs',
+                                                                       data=palette_options(),
                                                                        clearable=False, allowDeselect=False),
                                                         ], style={'marginBottom': '6px'}),
                                                         html.Div([
@@ -681,95 +690,74 @@ _layout_body = html.Div(
                                             ]),
                                             # Integration Tab
                                             dmc.TabsPanel(value="integration", style={'flex': '1', 'overflow': 'auto'}, children=[
-                                                html.Div(
-                                                    id='integration-container',
-                                                    className='toolbox-tab-content',
-                                                    style={'display': 'block', 'padding': '10px', 'overflowY': 'auto', 'maxHeight': 'calc(100% - 40px)'},
-                                                    children=[
-                                                        # -- Manual Baseline Integration --
-                                                        html.Div('Manual Integration', className='toolbox-section-title'),
-                                                        html.Div([
-                                                            html.Button('Draw', id='baseline-draw-btn', className='btn btn-secondary',
-                                                                        title='Draw baseline between two points',
-                                                                        style={'padding': '4px 10px', 'fontSize': '12px'}),
-                                                            html.Button('Edit', id='baseline-edit-btn', className='btn btn-secondary',
-                                                                        title='Edit existing baseline',
-                                                                        style={'display': 'none'}),
-                                                            html.Button('Nav', id='baseline-nav-btn', className='btn btn-secondary',
-                                                                        title='Pan / zoom (default)',
-                                                                        style={'display': 'none'}),
-                                                            html.Button('Clear', id='baseline-clear-btn', className='btn btn-secondary',
-                                                                        title='Delete selected peak, or all manual peaks if none is selected',
-                                                                        style={'padding': '4px 10px', 'fontSize': '12px'}),
-                                                        ], style={'display': 'flex', 'gap': '4px', 'marginBottom': '6px', 'flexWrap': 'wrap'}),
-                                                        html.Div([
-                                                            dmc.Switch(
-                                                                id='easy-integration',
-                                                                label='Easy (baseline -> y=0)',
-                                                                checked=True,
-                                                                size='sm',
-                                                            ),
-                                                        ], style={'marginBottom': '6px'}),
-                                                        html.Div('Draw: off',
-                                                                 id='baseline-mode-indicator',
-                                                                 style={'fontSize': '11px', 'color': '#666', 'marginBottom': '10px'}),
-                                                        html.Div(id='manual-peak-table-container', style={'marginBottom': '10px'}),
-                                                        html.Div([
-                                                            html.Label('RT match tolerance (min)', className='form-label'),
-                                                            dmc.NumberInput(id='int-rt-tolerance', value=0.3, min=0.05, max=1.0,
-                                                                            step=0.05, decimalScale=2, size='xs',
-                                                                            style={'width': '100%'}),
-                                                        ], style={'marginBottom': '6px'}),
-                                                        html.Div(id='ctx-status',
-                                                                 style={'fontSize': '11px', 'color': '#2e7d32', 'marginBottom': '6px'}),
-                                                        html.Hr(style={'margin': '10px 0', 'borderColor': 'rgba(0, 0, 0, 0.1)'}),
-                                                        # -- Peak Deconvolution (EMG) --
-                                                        html.Div('Peak Deconvolution', className='toolbox-section-title'),
-                                                        html.Div([
-                                                            html.Button('Deconvolute', id='deconv-btn',
-                                                                        className='btn btn-primary',
-                                                                        title='Split selected peak into components via EMG fitting',
-                                                                        style={'padding': '4px 10px', 'fontSize': '12px'}),
-                                                        ], style={'marginBottom': '6px'}),
-                                                        html.Div(id='deconv-results-container',
-                                                                 children='Select a peak first.',
-                                                                 style={'fontSize': '11px', 'color': '#888', 'marginBottom': '6px'}),
-                                                        html.Div([
-                                                            html.Button('Accept', id='deconv-accept-btn',
-                                                                        className='btn btn-primary',
-                                                                        title='Convert fitted components to peaks',
-                                                                        style={'padding': '4px 10px', 'fontSize': '12px',
-                                                                               'display': 'none'}),
-                                                            html.Button('Cancel', id='deconv-cancel-btn',
-                                                                        className='btn btn-secondary',
-                                                                        title='Discard fit and markers',
-                                                                        style={'padding': '4px 10px', 'fontSize': '12px',
-                                                                               'display': 'none'}),
-                                                        ], id='deconv-accept-cancel-row',
-                                                           style={'display': 'flex', 'gap': '4px', 'marginBottom': '6px'}),
-                                                        html.Hr(style={'margin': '10px 0', 'borderColor': 'rgba(0, 0, 0, 0.1)'}),
-                                                        # -- Peak Detection --
-                                                        html.Div('Peak Detection', className='toolbox-section-title'),
-                                                        html.Div([
-                                                            html.Label('Threshold', className='form-label'),
-                                                            dmc.NumberInput(id='int-peak-threshold', value=0.01, min=0.001, max=1, step=0.001,
-                                                                            decimalScale=3, size='xs', style={'width': '100%'}),
-                                                        ], style={'marginBottom': '6px'}),
-                                                        html.Div([
-                                                            html.Button('Detect Peaks', id='int-detect-btn', className='btn btn-primary',
-                                                                        style={'marginRight': '8px'}),
-                                                            html.Button('Clear Detected', id='int-clear-btn', className='btn btn-secondary',
-                                                                        title='Remove detected peaks only'),
-                                                        ], style={'display': 'flex', 'marginBottom': '6px'}),
-                                                        dmc.CheckboxGroup(
-                                                            id='int-display-opts',
-                                                            value=['peaks'],
-                                                            children=dmc.Stack([
-                                                                dmc.Checkbox(label='Peak fills', value='peaks'),
-                                                            ], gap=4),
+                                                html.Div(id='integration-container', className='toolbox-tab-content integration-panel', children=[
+                                                    html.Div(id='int-detection-target', className='integration-target', children='Select a signal in Files'),
+                                                    html.Section(className='integration-section', children=[
+                                                        html.Label('Baseline', className='toolbox-section-title', title='For new integrations. Automatic detection splits overlapping peaks vertically at valleys.'),
+                                                        dmc.SegmentedControl(
+                                                            id='integration-baseline', value='linear', fullWidth=True, size='xs',
+                                                            data=[{'label': 'Straight line', 'value': 'linear'},
+                                                                  {'label': 'Zero (y = 0)', 'value': 'zero'}],
                                                         ),
-                                                    ],
-                                                ),
+                                                    ]),
+                                                    # Legacy callback targets; drawing lives in the plot toolbar.
+                                                    html.Div(style={'display': 'none'}, children=[
+                                                        html.Div(className='integration-actions', children=[
+                                                            html.Button('Draw', id='baseline-draw-btn', className='btn btn-secondary', title='Draw an integration baseline on the plot'),
+                                                            html.Button('Edit', id='baseline-edit-btn', style={'display': 'none'}),
+                                                            html.Button('Nav', id='baseline-nav-btn', className='btn btn-secondary', style={'display': 'none'}),
+                                                            html.Button('Clear', id='baseline-clear-btn', className='btn btn-secondary',
+                                                                        title='Delete the selected peak, or all manual peaks in this signal if none is selected'),
+                                                        ]),
+                                                        html.Div(id='baseline-mode-indicator', style={'display': 'none'}),
+                                                        html.Div(id='ctx-status', className='integration-help'),
+                                                    ]),
+                                                    html.Section(className='integration-section integration-detect', children=[
+                                                        html.Div('Automatic detection', className='toolbox-section-title'),
+                                                        html.Div(className='integration-field-head', children=[
+                                                            html.Label('Sensitivity', className='form-label'),
+                                                            html.Div(id='int-sensitivity-help', className='integration-help integration-value'),
+                                                        ]),
+                                                        dmc.Slider(id='int-detection-sensitivity', value=50, min=0, max=100, step=1,
+                                                                   updatemode='mouseup', size='sm', thumbSize=16,
+                                                                   thumbLabel='Peak detection sensitivity',
+                                                                   className='integration-slider'),
+                                                        html.Div([html.Span('Fewer peaks'), html.Span('More peaks')],
+                                                                 className='integration-slider-labels'),
+                                                        html.Div(className='integration-actions integration-actions-row', children=[
+                                                            dmc.Button('Detect peaks', id='int-detect-btn', size='xs', variant='default', disabled=True),
+                                                            dmc.Button('Clear detected', id='int-clear-btn', size='xs', variant='default', disabled=True,
+                                                                       attributes={'title': 'Remove detected peaks from this signal only'}),
+                                                            dmc.Button('Deconvolve…', id='deconv-btn', size='xs', variant='default',
+                                                                       attributes={'title': 'Fit exponentially modified Gaussian components to the selected peak'}),
+                                                        ]),
+                                                    ]),
+                                                    html.Section(className='integration-section integration-display', children=[
+                                                        html.Div('Peak display and matching', className='toolbox-section-title'),
+                                                        html.Div(className='integration-inline-row', children=[
+                                                            dmc.CheckboxGroup(id='int-display-opts', value=['peaks'], children=[
+                                                                dmc.Checkbox(label='Show integrated areas', value='peaks', size='xs'),
+                                                            ]),
+                                                            html.Div(className='integration-tolerance', children=[
+                                                                html.Label('Match RT', className='form-label', htmlFor='int-rt-tolerance',
+                                                                           title='Match retention time within this tolerance'),
+                                                                dmc.NumberInput(id='int-rt-tolerance', value=0.3,
+                                                                                min=0.05, max=1.0, step=0.05, decimalScale=2, size='xs',
+                                                                                prefix='± ', suffix=' min', hideControls=True,
+                                                                                className='integration-tolerance-input',
+                                                                                **{'aria-label': 'Match retention time (± min)'}),
+                                                            ]),
+                                                        ]),
+                                                    ]),
+                                                    html.Section(className='integration-section integration-deconv', children=[
+                                                        html.Div('Peak deconvolution', className='toolbox-section-title'),
+                                                        html.Div(id='deconv-results-container', className='integration-help', title='Shift-click the plot to add a component. Drag a dotted line to set its apex and refit. Use × to remove a component.'),
+                                                        html.Div(id='deconv-accept-cancel-row', className='integration-actions', children=[
+                                                            dmc.Button('Accept fit', id='deconv-accept-btn', size='xs', variant='default', style={'display': 'none'}),
+                                                            dmc.Button('Cancel', id='deconv-cancel-btn', size='xs', variant='default', style={'display': 'none'}),
+                                                        ]),
+                                                    ]),
+                                                ]),
                                             ]),
                                             # Export Tab
                                             dmc.TabsPanel(value="export", style={'flex': '1', 'overflow': 'auto'}, children=[
@@ -830,6 +818,7 @@ _layout_body = html.Div(
                                                                 'border': '1px solid #c8c8c8',
                                                             },
                                                         ),
+                                                        create_research_export(),
                                                         html.Div('Data Export', className='toolbox-section-title'),
                                                         html.Div([
                                                             html.Label('Format', className='form-label'),
@@ -872,7 +861,7 @@ _layout_body = html.Div(
                         html.Div(
                             id='right-column',
                             className='right-column',
-                            style={'display': 'flex', 'flexDirection': 'column', 'width': '70%'},
+                            style={'display': 'flex', 'flexDirection': 'column', 'width': '76%'},
                             children=[
                                 html.Div(
                                     id='right-top-panel',
@@ -894,9 +883,14 @@ _layout_body = html.Div(
                                                     data=[{'label': 'Independent', 'value': 'independent'},
                                                           {'label': 'Shared', 'value': 'global'}]),
                                             ], title='Global scaling links signals with the same measurement units'),
-                                            html.Button('Integrate', id='plot-tool-integrate', n_clicks=0,
-                                                        className='plot-tool', title='Toggle baseline drawing. Shift-drag also integrates when off.',
-                                                        **{'aria-pressed': 'false'}),
+                                            html.Button(html.Span(className='integration-tool-icon', **{'aria-hidden': 'true'}),
+                                                        id='plot-tool-integrate', n_clicks=0,
+                                                        className='plot-tool plot-tool-icon', title='Integrate peaks — drag across a peak. Shortcut: Shift-drag.',
+                                                        **{'aria-pressed': 'false', 'aria-label': 'Integrate peaks'}),
+                                            html.Button(_icon('tabler:pencil', width=20, height=20),
+                                                        id='plot-tool-edit-text', className='plot-tool plot-tool-icon',
+                                                        title='Edit text — click a name, title, axis label, or legend. Esc to finish.',
+                                                        **{'aria-pressed': 'false', 'aria-label': 'Edit text'}),
                                             html.Div(id='plot-toolbar-sync', style={'display': 'none'}),
                                         ]),
                                         html.Div(
@@ -951,6 +945,10 @@ _layout_body = html.Div(
                                                         'cursor': 'col-resize',
                                                     },
                                                 ),
+                                                html.Div(id='pda-scan-cursor-overlay', style={
+                                                    'position':'absolute', 'display':'none', 'top':'0px', 'left':'0px',
+                                                    'height':'0px', 'width':'18px', 'borderLeft':'2px dotted #111',
+                                                    'zIndex':30, 'pointerEvents':'none', 'cursor':'col-resize'}),
                                                 create_paper_mock(),
                                             ],
                                         ),
@@ -991,7 +989,9 @@ _layout_body = html.Div(
                                                         dmc.TabsTab("MS Scan", value="ms-scan"),
                                                         dmc.TabsTab("EIC", value="ms-eic"),
                                                         dmc.TabsTab("Peak Mass", value="ms-peak-mass"),
+                                                        dmc.TabsTab("PDA", value="pda"),
                                                     ]),
+                                                    dmc.TabsPanel(create_pda_explorer(), value="pda", style={'flex':'1', 'height':'100%', 'minHeight':0, 'overflow':'auto'}),
                                                     # Data Overview Tab
                                                     dmc.TabsPanel(value="data-overview", style={'flex': '1', 'overflow': 'auto'}, children=[
                                                     html.Div(id="data-overview-content", className="tab-content active", style={
@@ -1051,7 +1051,7 @@ _layout_body = html.Div(
                                                                 row_deletable=True,
                                                                 sort_action='native',
                                                                 style_table={'display': 'none'},
-                                                                style_cell=TABLE_STYLE_CELL,
+                                                                style_cell={**TABLE_STYLE_CELL, 'minWidth':'72px', 'maxWidth':'180px', 'padding':'6px 8px'},
                                                                 style_header=TABLE_STYLE_HEADER,
                                                                 style_header_conditional=[{'if': {'column_id': '_row_id'}, 'display': 'none'}],
                                                                 style_data=TABLE_STYLE_DATA,
@@ -1069,12 +1069,13 @@ _layout_body = html.Div(
                                                         'height': '100%',
                                                         'overflowY': 'auto'
                                                     }, children=[
-                                                        html.Div([
-                                                            dmc.Button('Calibrate selected peaks',
-                                                                       id='cross-use-calibration-btn', size='xs', disabled=True),
-                                                            html.Span(id='cross-calibration-feedback', role='status',
-                                                                      style={'fontSize': '12px'}),
-                                                        ], className='analysis-actions'),
+                                                        html.Div(id='peak-group-selector-wrapper', style={'display': 'none'}, children=[
+                                                            html.Label("Peak group",
+                                                                       style={'fontWeight': 'bold', 'marginBottom': '5px',
+                                                                              'marginTop': '0', 'display': 'block', 'fontSize': '12px'}),
+                                                            dcc.Dropdown(id='peak-group-selector', value=0,
+                                                                         style={'marginBottom': '10px'}),
+                                                        ]),
                                                         dash_table.DataTable(
                                                             id='cross-sample-table',
                                                             columns=[], data=[],
@@ -1085,7 +1086,7 @@ _layout_body = html.Div(
                                                             row_deletable=True,
                                                             sort_action='native',
                                                             style_table={'display': 'none'},
-                                                            style_cell=TABLE_STYLE_CELL,
+                                                            style_cell={**TABLE_STYLE_CELL, 'minWidth':'72px', 'maxWidth':'180px', 'padding':'6px 8px'},
                                                             style_header=TABLE_STYLE_HEADER,
                                                             style_header_conditional=[{'if': {'column_id': '_row_id'}, 'display': 'none'}],
                                                             style_data=TABLE_STYLE_DATA,
@@ -1093,24 +1094,21 @@ _layout_body = html.Div(
                                                             style_data_conditional=[{'if': {'column_id': '_row_id'}, 'display': 'none'}],
                                                         ),
                                                         html.Div([
-                                                            dcc.Input(id='group-label-input', type='text',
-                                                                      placeholder='Group label', className='form-control'),
+                                                            dmc.Button('Calibrate selected peaks', id='cross-use-calibration-btn',
+                                                                       size='xs', variant='default', disabled=True),
+                                                            dmc.TextInput(id='group-label-input', size='xs',
+                                                                          placeholder='Group label'),
                                                             dmc.Button('Apply to selected', id='apply-group-btn',
                                                                        size='xs', variant='default'),
                                                             dmc.Button('Clear groups', id='clear-groups-btn',
                                                                        size='xs', variant='default'),
+                                                            html.Span(id='cross-calibration-feedback', role='status',
+                                                                      style={'fontSize': '12px'}),
                                                         ], className='analysis-group-actions'),
                                                         # Static components that survive across-samples-container
                                                         # children replacement by update_across_samples_tab
-                                                        html.Div(id='peak-group-selector-wrapper', style={'display': 'none'}, children=[
-                                                            html.Label("Select Peak Group to Compare:",
-                                                                       style={'fontWeight': 'bold', 'marginBottom': '5px',
-                                                                              'marginTop': '15px', 'display': 'block', 'fontSize': '14px'}),
-                                                            dcc.Dropdown(id='peak-group-selector', value=0,
-                                                                         style={'marginBottom': '15px'}),
-                                                        ]),
                                                         html.Div(id='retention-slider-wrapper', style={'display': 'none'}, children=[
-                                                            html.Label("Peak Matching Time Window (min):",
+                                                            html.Label("Match peaks within (± min)",
                                                                        style={'fontWeight': 'bold', 'marginBottom': '5px',
                                                                               'display': 'block', 'fontSize': '14px'}),
                                                             dcc.Slider(id='retention-time-slider', min=0.05, max=1.0,
@@ -1161,7 +1159,7 @@ _layout_body = html.Div(
                                                         'height': '100%', 'minHeight': 0, 'boxSizing': 'border-box', 'overflowY': 'auto'
                                                     }, children=[
                                                         html.Div([
-                                                            html.Div('Apex / Scan Spectrum', style={
+                                                            html.Div('MS scan', style={
                                                                 'fontWeight': 'bold', 'fontSize': '12px'}),
                                                             create_spectrum_polarity_control('ms'),
                                                         ], style={
@@ -1215,7 +1213,7 @@ _layout_body = html.Div(
                                                         'height': '100%', 'minHeight': 0, 'boxSizing': 'border-box', 'overflowY': 'auto'
                                                     }, children=[
                                                         html.Div([
-                                                            html.Div('Extracted Ion Chromatogram', style={
+                                                            html.Div('Extracted ion chromatogram', style={
                                                                 'fontWeight': 'bold', 'fontSize': '12px'}),
                                                             create_spectrum_polarity_control('eic'),
                                                         ], style={
@@ -1284,7 +1282,7 @@ _layout_body = html.Div(
                                                         'height': '100%', 'minHeight': 0, 'boxSizing': 'border-box', 'overflowY': 'auto'
                                                     }, children=[
                                                         html.Div([
-                                                            html.Div('Peak Mass Spectrum', style={
+                                                            html.Div('Peak mass spectrum', style={
                                                                 'fontWeight': 'bold', 'fontSize': '12px'}),
                                                             create_spectrum_polarity_control('peak-mass'),
                                                         ], style={
@@ -1398,26 +1396,14 @@ _layout_body = html.Div(
             style={'position': 'fixed', 'left': '0px', 'top': '0px',
                    'width': '1px', 'height': '1px', 'zIndex': 4000,
                    'pointerEvents': 'none'},
-            children=dmc.Menu(
-                id='context-menu',
-                opened=False,
-                position='bottom-start',
-                offset=2,
-                withinPortal=True,
-                shadow='md',
-                children=[
-                    dmc.MenuTarget(html.Div(style={'width': '1px', 'height': '1px'})),
-                    dmc.MenuDropdown([
-                        dmc.MenuItem('Delete Peak', id='ctx-delete-item'),
-                        dmc.MenuItem('Rename Peak', id='ctx-rename-item'),
-                        dmc.MenuItem('Deconvolute', id='ctx-deconvolve-item'),
-                        dmc.MenuItem('Show Mass', id='ctx-show-mass-item'),
-                        dmc.MenuItem('Integrate in All Files', id='ctx-integrate-item'),
-                        dmc.MenuDivider(),
-                        *_figure_actions('peak'),
-                    ], id='context-menu-dropdown'),
-                ],
-            ),
+            children=popup_menu('context-menu', [
+                menu_item('Delete Peak', id='ctx-delete-item'),
+                menu_item('Rename Peak', id='ctx-rename-item'),
+                menu_item('Baseline y = 0', id='ctx-zero-baseline-item'),
+                menu_item('Auto-deconvolve', id='ctx-deconvolve-item'),
+                menu_item('Show Mass', id='ctx-show-mass-item'),
+                menu_item('Integrate in All Files', id='ctx-integrate-item'),
+            ]),
         ),
         dmc.Modal(
             id='ctx-rename-modal',
@@ -1438,32 +1424,17 @@ _layout_body = html.Div(
             style={'position': 'fixed', 'left': '0px', 'top': '0px',
                    'width': '1px', 'height': '1px', 'zIndex': 4000,
                    'pointerEvents': 'none'},
-            children=dmc.Menu(
-                id='ms-plot-context-menu',
-                opened=False,
-                position='bottom-start',
-                offset=2,
-                withinPortal=True,
-                shadow='md',
-                children=[
-                    dmc.MenuTarget(html.Div(style={'width': '1px', 'height': '1px'})),
-                    dmc.MenuDropdown([
-                        dmc.MenuItem('Open as new plot', id='ms-ctx-open-new-plot'),
-                        dmc.MenuDivider(),
-                        *_figure_actions('ms'),
-                    ], id='ms-plot-context-dropdown'),
-                ],
-            ),
+            children=popup_menu('ms-plot-context-menu', [
+                menu_item('Open as new plot', id='ms-ctx-open-new-plot'),
+                menu_divider(),
+                *_figure_actions('ms'),
+            ]),
         ),
         # -- Right-click plot customization panel (axis editor) --
         html.Div(id='figure-context-anchor',
             style={'position': 'fixed', 'left': '0px', 'top': '0px',
                    'width': '1px', 'height': '1px', 'zIndex': 4000, 'pointerEvents': 'none'},
-            children=dmc.Menu(id='figure-context-menu', opened=False, position='bottom-start',
-                withinPortal=True, shadow='md', children=[
-                    dmc.MenuTarget(html.Div(style={'width': '1px', 'height': '1px'})),
-                    dmc.MenuDropdown(_figure_actions('figure'), id='figure-context-dropdown'),
-                ])),
+            children=popup_menu('figure-context-menu', _figure_actions('figure'))),
         html.Div(
             id='axis-context-panel',
             className='axis-context-panel',
@@ -1562,7 +1533,7 @@ _layout_body = html.Div(
                                     title='Close'),
                     ],
                 ),
-                html.Div('Legend', className='axis-context-panel__section'),
+                dmc.NumberInput(id='legend-ctx-font-size', label='Font size', min=6, max=48, step=1, value=10, size='xs', debounce=True, mb=8),
                 dmc.Switch(id='legend-ctx-show', label='Show legend',
                            checked=True, size='sm', mb=8),
                 html.Div([
@@ -1820,8 +1791,7 @@ _layout_body = html.Div(
 def _add_figure_actions_to_editors(component):
     children = getattr(component, 'children', None)
     if getattr(component, 'id', None) in (
-            'axis-context-panel', 'legend-context-panel', 'trace-context-panel',
-            'title-context-panel', 'label-context-panel'):
+            'legend-context-panel', 'trace-context-panel', 'title-context-panel'):
         component.children = [*(children or []), html.Div(
             _figure_actions(component.id, menu=False), className='figure-editor-actions')]
         return
@@ -1873,10 +1843,14 @@ register_context_menu_callbacks(app, data_manager)
 register_plot_context_menu_callbacks(app, data_manager)
 register_deconvolution_callbacks(app, data_manager)
 register_export_callbacks(app, data_manager)
+register_research_export_callbacks(app, data_manager)
+register_provenance_capture(app, data_manager)
 register_publication_preview_callbacks(app, data_manager)
 register_calibration_callbacks(app, data_manager)
 register_plot_settings_callbacks(app, data_manager)
 register_lcms_callbacks(app, data_manager)
+from callbacks.pda_callbacks import register_pda_callbacks
+register_pda_callbacks(app, data_manager)
 register_ms_context_menu_callbacks(app, data_manager)
 register_figure_actions_callbacks(app)
 from callbacks.axis_inspector_callbacks import register_axis_inspector_callbacks

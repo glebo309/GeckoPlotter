@@ -61,3 +61,10 @@ test('shared publication axis annotations edit their matching measurement axis',
  editor.value='UV';editor.handlers.keydown({key:'Enter',preventDefault(){},stopPropagation(){}});
  assert.equal(events[0][1].data.field,'yaxis2');assert.equal(updates[0]['annotations[0].text'],'UV');
 });
+test('channel legend edits the sample name while preserving detector label',()=>{
+ const {api}=setup(), gd=graph(), label=text('legendtext');
+ const legend={querySelector:()=>label,__data__:[{trace:{name:'Sample A · 263 nm',meta:{file_id:'channel',rename_file_id:'sample',rename_label:'Sample A'}}}]};
+ label.closest=()=>legend;
+ const hit=api.targetAtEvent(gd,{target:label});
+ assert.equal(hit.fileId,'sample');assert.equal(hit.value,'Sample A');
+});

@@ -33,6 +33,7 @@
         gd.on('plotly_relayout', function (event) {
             if (entry.id === activeId) setProps({relayoutData: event});
         });
+        if (window.GeckoLegendVisibility) window.GeckoLegendVisibility.bind(gd);
         entry.bound = true;
     }
 

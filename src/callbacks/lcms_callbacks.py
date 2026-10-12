@@ -137,6 +137,11 @@ def register_lcms_callbacks(app, data_manager):
         target = _polarity_spectral_entry(data_manager, active_file, is_negative, lcms_svc)
         if not target or target[0] == active_file:
             raise dash.exceptions.PreventUpdate
+        # File selection synchronizes both controls. That echo is not a user
+        # request to replace the selected UV channel with its spectral source.
+        current = _resolve_lcms_spectral_entry(data_manager, active_file, lcms_svc)
+        if current and current[0] == target[0]:
+            raise dash.exceptions.PreventUpdate
         return target[0]
 
     @app.callback(
@@ -418,7 +423,10 @@ def register_lcms_callbacks(app, data_manager):
         options = []
         for p in peaks:
             label = p.label or p.name or p.peak_id
-            detail = f"{label}  (RT {p.rt_start:.2f}–{p.rt_end:.2f} min)"
+            if getattr(p, 'source', None) == 'deconvolved':
+                detail = f"{label}  (apex {_component_apex_rt(p):.3f} min)"
+            else:
+                detail = f"{label}  (RT {p.rt_start:.2f}–{p.rt_end:.2f} min)"
             options.append({'label': detail, 'value': p.peak_id})
         return options
 
@@ -480,6 +488,25 @@ def register_lcms_callbacks(app, data_manager):
         # Compare exactly the selected retention-time window in either mode.
         # A second integration is not needed to inspect its mass spectrum.
 
+        if getattr(peak, 'source', None) == 'deconvolved':
+            # Components share integration bounds, but not their apex. Averaging
+            # those bounds would return precisely the same spectrum for all of them.
+            apex = _component_apex_rt(peak)
+            times, _ = lcms_svc.extract_tic(file_data)
+            times = np.asarray(times, dtype=float)[:lcms_svc.get_scan_count(file_data)]
+            valid = np.flatnonzero(np.isfinite(times))
+            if not valid.size or not times[valid].min() <= apex <= times[valid].max():
+                return _empty_peak_mass("No MS scans at component apex"), f"Component apex {apex:.3f} min"
+            candidates = valid[(times[valid] >= peak.rt_start) & (times[valid] <= peak.rt_end)]
+            if not candidates.size:
+                return _empty_peak_mass("No MS scans at component apex"), f"Component apex {apex:.3f} min"
+            scan = int(candidates[np.argmin(np.abs(times[candidates] - apex))])
+            mz, intensity = lcms_svc.get_mass_spectrum(file_data, scan)
+            if not mz.size:
+                return _empty_peak_mass("No spectrum in component apex scan"), ""
+            description = f"Apex scan {times[scan]:.3f} min · may contain mixed ions"
+            return _build_peak_mass_figure(mz, intensity, peak, polarity_label, description)
+
         mz, intensity = lcms_svc.get_averaged_spectrum(file_data, peak.rt_start, peak.rt_end)
         if mz.size == 0:
             return _empty_peak_mass("No scans in peak RT window"), ""
@@ -496,9 +523,9 @@ def register_lcms_callbacks(app, data_manager):
         prevent_initial_call=True,
     )
     def sync_peak_mass_to_click(selected_peak_id, dropdown_peak_id, active_file, render_counter, view_mode):
-        """One bidirectional selection for the spectrum and chromatogram handles."""
+        """Sync explicit peak choices, keeping the spectrum when handles dismiss."""
         unchanged = (dash.no_update,) * 4
-        if not active_file or (view_mode or 'raw') != 'raw':
+        if not active_file or (view_mode or 'raw') != 'raw' or not _lcms_bundle(data_manager, active_file):
             return unchanged
         trigger = callback_context.triggered[0]['prop_id'].split('.')[0] if callback_context.triggered else ''
         from_dropdown = trigger == 'peak-mass-selector'
@@ -506,8 +533,10 @@ def register_lcms_callbacks(app, data_manager):
         if selected_peak_id == dropdown_peak_id:
             return unchanged
         if not peak_id:
+            # Plot deselection only dismisses editing handles. The analysis
+            # panel keeps its last peak until another is chosen or cleared.
             return ((dash.no_update, None, dash.no_update, (render_counter or 0) + 1)
-                    if from_dropdown else (None, dash.no_update, dash.no_update, dash.no_update))
+                    if from_dropdown else unchanged)
 
         sources = [active_file]
         bundle = data_manager.get_bundle(active_file) or data_manager.get_bundle_for_component(active_file)
@@ -578,7 +607,22 @@ def _mass_peak_annotations(mz, relative_intensity, limit=6):
                  font=dict(size=10, color='#333333')) for i in chosen]
 
 
-def _build_peak_mass_figure(mz, intensity, peak, polarity_label="+"):
+def _component_apex_rt(peak):
+    """The fitted EMG maximum, which is later than its center parameter."""
+    from lmfit.models import ExponentialGaussianModel
+
+    params = getattr(peak, 'fit_params', None) or {}
+    if all(key in params for key in ('sigma', 'gamma', 'amplitude')):
+        x = np.linspace(peak.rt_start, peak.rt_end, 800)
+        curve = ExponentialGaussianModel().eval(
+            x=x, center=params.get('center', peak.rt), sigma=params['sigma'],
+            gamma=params['gamma'], amplitude=params['amplitude'])
+        if np.all(np.isfinite(curve)) and np.max(curve) > 0:
+            return float(x[np.argmax(curve)])
+    return float(peak.rt)
+
+
+def _build_peak_mass_figure(mz, intensity, peak, polarity_label="+", spectrum_description=None):
     display = np.asarray(intensity, dtype=float)
     max_int = np.nanmax(display) if display.size else 1.0
     rel = display / max_int * 100 if max_int > 0 else display
@@ -620,7 +664,8 @@ def _build_peak_mass_figure(mz, intensity, peak, polarity_label="+"):
 
     label = peak.label or peak.name or peak.peak_id
     top_peaks = ", ".join(a.text for a in fig.layout.annotations) or "none"
-    info = f"{label} | RT {peak.rt_start:.2f}–{peak.rt_end:.2f} min | Mode: {polarity_label} | Top m/z: {top_peaks}"
+    description = spectrum_description or f"RT {peak.rt_start:.2f}–{peak.rt_end:.2f} min"
+    info = f"{label} | {description} | Mode: {polarity_label} | Top m/z: {top_peaks}"
 
     return fig, info
 

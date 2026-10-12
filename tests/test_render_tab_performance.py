@@ -27,8 +27,11 @@ def render_fixture(monkeypatch):
     normalized=callbacks._raw_render_settings(settings)
     inputs={'settings':normalized,'render':0,'peaks':0,'order':{},'selected':None,'file':'source',
             'baseline':None,'markers':[],'deconvolution':None,'display':['peaks'],'visibility':{},'files':[],
-            'link_x':True,'y_scope':'independent'}
-    cache.put('chrom',inputs,go.Figure(go.Scatter(x=[1,2],y=[3,4])))
+            'link_x':True,'y_scope':'independent','signals':sorted(data),'pda_preview':None}
+    figure=go.Figure(go.Scatter(x=[1,2],y=[3,4]))
+    figure.update_layout(meta={'gecko_tab_id':'chrom', 'gecko_render_revision':callbacks._raw_render_revision(inputs)})
+    cache.put('chrom',inputs,figure)
+    args.append(figure.to_plotly_json())
     return app,cache,args
 
 
@@ -42,9 +45,9 @@ def test_cached_echo_does_not_copy_or_return_figure(monkeypatch):
 def test_cached_tab_uses_browser_cache_but_cold_client_gets_figure(monkeypatch):
     app,cache,args=render_fixture(monkeypatch)
     monkeypatch.setattr(dash,'callback_context',SimpleNamespace(triggered=[{'prop_id':'active-plot-tab.data'}]))
-    args[-1]=['chrom']
+    args[-2]=['chrom']
     assert app.functions['master_render'](*args)[0] is dash.no_update
-    args[-1]=[]
+    args[-2]=[]
     assert isinstance(app.functions['master_render'](*args)[0],go.Figure)
 
 
@@ -72,7 +75,7 @@ def test_warm_browser_rebuilds_after_visibility_changes_while_tab_was_hidden(mon
     closure=app.functions['master_render'].__closure__
     dm=next(cell.cell_contents for cell in closure if isinstance(cell.cell_contents,SimpleNamespace) and hasattr(cell.cell_contents,'visibility_state'))
     dm.visibility_state['source']=False
-    args[-1]=['chrom']
+    args[-2]=['chrom']
     assert app.functions['master_render'](*args)[0] is not dash.no_update
     assert calls==[True]
 
@@ -83,7 +86,7 @@ def test_warm_browser_rebuilds_for_new_peaks_and_axis_scale_edits(monkeypatch):
         calls=[]
         monkeypatch.setattr(callbacks,'_collect_visible_files',lambda *a,**k:calls.append(True) or {})
         monkeypatch.setattr(dash,'callback_context',SimpleNamespace(triggered=[{'prop_id':'active-plot-tab.data'}]))
-        args[-1]=['chrom']
+        args[-2]=['chrom']
         if modification=='peaks':args[9]=1
         elif modification=='scale':args[3]={**args[3],'x_scale':'log'}
         elif modification=='bounds':args[3]={**args[3],'axis_overrides':{'x:min':{'mode':'manual','min':5,'max':9}}}
@@ -107,7 +110,8 @@ def test_separate_channel_selection_reuses_group_figure_but_peak_selection_inval
     calls=[]
     monkeypatch.setattr(callbacks,'_collect_visible_files',lambda *a,**k:calls.append(True) or {})
     monkeypatch.setattr(dash,'callback_context',SimpleNamespace(triggered=[{'prop_id':'active-file.data'}]))
-    app.functions['master_render'](*args)
+    delivered=app.functions['master_render'](*args)[0]
+    args[-1]=delivered.to_plotly_json()
     args[2]='another-channel-in-same-group'
     assert app.functions['master_render'](*args)[0] is dash.no_update
     assert len(calls)==1
@@ -128,6 +132,53 @@ def test_overlay_channel_selection_still_rebuilds_its_source_peak_context(monkey
 
 def test_cold_browser_gets_cached_figure_when_settings_hydrate_before_tab_switch(monkeypatch):
     app, cache, args = render_fixture(monkeypatch)
-    args[-1] = []
+    args[-2] = []
     monkeypatch.setattr(dash, 'callback_context', SimpleNamespace(triggered=[{'prop_id':'current-plot-settings.data'}]))
     assert isinstance(app.functions['master_render'](*args)[0], go.Figure)
+
+
+def test_cached_revision_not_delivered_to_browser_is_sent_again(monkeypatch):
+    app,cache,args=render_fixture(monkeypatch)
+    monkeypatch.setattr(dash,'callback_context',SimpleNamespace(triggered=[{'prop_id':'current-plot-settings.data'}]))
+    # A prior callback computed this revision, but its response was canceled.
+    # The browser still owns the same tab with an earlier figure.
+    args[-1]['layout']['meta']['gecko_render_revision']='previous-delivered-revision'
+    result=app.functions['master_render'](*args)[0]
+    assert isinstance(result,go.Figure)
+    assert result.layout.meta['gecko_render_revision'] != 'previous-delivered-revision'
+
+
+def test_new_component_invalidates_cache_even_when_bundle_list_is_unchanged(monkeypatch):
+    app,cache,args=render_fixture(monkeypatch)
+    calls=[]
+    monkeypatch.setattr(callbacks,'_collect_visible_files',lambda *a,**k:calls.append(True) or {})
+    monkeypatch.setattr(dash,'callback_context',SimpleNamespace(triggered=[{'prop_id':'active-file.data'}]))
+    dm=next(cell.cell_contents for cell in app.functions['master_render'].__closure__
+        if isinstance(cell.cell_contents,SimpleNamespace) and hasattr(cell.cell_contents,'loaded_data'))
+    dm.loaded_data['extracted-wavelength']={'standardized':object()}
+    assert app.functions['master_render'](*args)[0] is not dash.no_update
+    assert calls == [True]
+
+
+def test_table_hydration_echo_cannot_cancel_undelivered_raw_figure(monkeypatch):
+    app,cache,args=render_fixture(monkeypatch)
+    monkeypatch.setattr(dash,'callback_context',SimpleNamespace(triggered=[{'prop_id':'pub-table.sort_by'}]))
+    args[-1]['layout']['meta']['gecko_render_revision']='previous-delivered-revision'
+    assert isinstance(app.functions['master_render'](*args)[0],go.Figure)
+
+
+def test_raw_render_does_not_wait_for_unrelated_publication_preview(monkeypatch):
+    app, _, _ = render_fixture(monkeypatch)
+    registration = app.registrations['master_render']
+    dependencies = [item for group in registration for item in (group if isinstance(group, list) else [group])]
+    assert not any(isinstance(item, dash.Input) and item.component_id == 'pub-plot-trigger' for item in dependencies)
+
+
+def test_pda_cursor_changes_do_not_invalidate_main_plot_cache(monkeypatch):
+    app,cache,args=render_fixture(monkeypatch)
+    monkeypatch.setattr(dash,'callback_context',SimpleNamespace(triggered=[{'prop_id':'current-plot-settings.data'}]))
+    monkeypatch.setattr(cache,'get',lambda *args: (_ for _ in ()).throw(AssertionError('Unneeded figure copy')))
+    assert app.functions['master_render'](*args,pda_cursor={'time_min':4.2})[0] is dash.no_update
+    registration=app.registrations['master_render']
+    deps=[item for group in registration if isinstance(group,list) for item in group]
+    assert not any(isinstance(item,dash.Input) and item.component_id=='pda-main-cursor' for item in deps)

@@ -34,11 +34,20 @@ def _result_columns(frame, hidden):
     readonly = {'Signal', *(name for name, _ in CALIBRATION_COLUMNS)}
     numeric = {'No.', 'RT (min)', 'Area', 'Height', 'Width (min)', 'Concentration',
                'Relative Area (%)', 'Relative Height (%)', 'Within Sample (%)', 'Cross-Sample (%)'}
+    hidden = set(hidden) | {'Calibration status', 'Calibration'}
+    units = {str(v).strip() for v in frame.get('Concentration units', []) if pd.notna(v) and str(v).strip()}
+    if len(units) <= 1:
+        hidden.add('Concentration units')
+    labels = {'Peak Name': 'Peak', 'Concentration units': 'Units',
+              'Within Sample (%)': 'Within sample (%)', 'Cross-Sample (%)': 'Across samples (%)',
+              'Relative Area (%)': 'Area (%)', 'Relative Height (%)': 'Height (%)'}
+    if len(units) == 1:
+        labels['Concentration'] = f'Concentration ({next(iter(units))})'
     result = []
     for name in frame.columns:
         if name in hidden:
             continue
-        column = dict(name=name, id=name, editable=name not in readonly, selectable=True,
+        column = dict(name=labels.get(name, name), id=name, editable=name not in readonly, selectable=True,
                       deletable=name not in readonly, renamable=name not in readonly)
         if name in numeric:
             specifier = 'd' if name == 'No.' else '.4~f' if name in ('RT (min)', 'Width (min)') else '.2f' if '(%)' in name else '.5~g'
@@ -73,6 +82,14 @@ def _comparison_calibrations(data_manager, frame):
 
 def register_tab_callbacks(app: dash.Dash, data_manager) -> None:
     """Register all tab-related callbacks."""
+
+    for table_id in ('peak-table', 'cross-sample-table'):
+        app.clientside_callback(
+            """function(rows) { return (rows || []).map(function(row) {
+                const parts = [row.Calibration, row['Calibration status']].filter(Boolean);
+                return {Concentration: {value: parts.join(' · '), type: 'text'}};
+            }); }""",
+            Output(table_id, 'tooltip_data'), Input(table_id, 'data'))
 
     def peak_sources(active_file_id):
         """LC-MS results cover the bundle while storage remains per channel."""
@@ -120,7 +137,7 @@ def register_tab_callbacks(app: dash.Dash, data_manager) -> None:
         try:
             if bundle and bundle.has_integration_data():
                 peaks_exist = data_manager.peak_service.get_peaks(active_file_id)
-                if not peaks_exist:
+                if not peaks_exist and not data_manager.peak_service.has_peak_history(active_file_id):
                     text = bundle.get_integration_text()
                     if text:
                         integration_results = parse_integration_results(text)
@@ -174,6 +191,64 @@ def register_tab_callbacks(app: dash.Dash, data_manager) -> None:
         except Exception as e:
             log.exception(f"Error updating peak analysis tab: {e}")
             return [], [], HIDE, None
+
+    @app.callback(
+        [Output('peak-change-trigger', 'data', allow_duplicate=True),
+         Output('selected-peak-idx', 'data', allow_duplicate=True)],
+        Input('peak-table', 'data_timestamp'),
+        [State('peak-table', 'data'), State('peak-table', 'data_previous'),
+         State('active-file', 'data'), State('selected-peak-idx', 'data'),
+         State('peak-change-trigger', 'data')],
+        prevent_initial_call=True,
+    )
+    def delete_peak_table_rows(timestamp, rows, previous_rows, active_file, selected_peak, counter):
+        """Persist a user row deletion; never interpret file navigation as deletion."""
+        if timestamp is None or not previous_rows or rows is None or not active_file:
+            raise dash.exceptions.PreventUpdate
+        before = {row.get('peak_id') for row in previous_rows if row.get('peak_id')}
+        after = {row.get('peak_id') for row in rows if row.get('peak_id')}
+        if not after < before:
+            raise dash.exceptions.PreventUpdate
+        removed = before - after
+        owners = {peak.peak_id: peak.file_id for fid, _ in peak_sources(active_file)
+                  for peak in data_manager.peak_service.get_peaks(fid)}
+        removed &= owners.keys()
+        if not removed:
+            raise dash.exceptions.PreventUpdate
+        data_manager.peak_service.delete_peaks(
+            [(owners[peak_id], peak_id) for peak_id in removed],
+            file_overlay_map=data_manager.build_file_overlay_map())
+        return (counter or 0) + 1, None if selected_peak in removed else dash.no_update
+
+    @app.callback(
+        [Output('peak-change-trigger', 'data', allow_duplicate=True),
+         Output('selected-peak-idx', 'data', allow_duplicate=True)],
+        Input('cross-sample-table', 'data_timestamp'),
+        [State('cross-sample-table', 'data'), State('cross-sample-table', 'data_previous'),
+         State('selected-peak-idx', 'data'), State('peak-change-trigger', 'data')],
+        prevent_initial_call=True,
+    )
+    def delete_cross_sample_table_rows(timestamp, rows, previous_rows, selected_peak, counter):
+        """Persist a Compare-table row deletion in PeakService and refresh the plot.
+
+        Rows carry their owner (``file_id``) and ``peak_id``, so the peak is
+        removed from the service wherever it is stored, including deconvolved
+        components. Bumping ``peak-change-trigger`` re-renders the figure
+        (the render cache is keyed on it) and rebuilds the Compare table.
+        """
+        if timestamp is None or not previous_rows or rows is None:
+            raise dash.exceptions.PreventUpdate
+        def keys(items):
+            return {(row.get('file_id'), row.get('peak_id')) for row in items if row.get('peak_id')}
+        before, after = keys(previous_rows), keys(rows)
+        if not after < before:
+            raise dash.exceptions.PreventUpdate
+        removed = data_manager.peak_service.delete_peaks(
+            before - after, file_overlay_map=data_manager.build_file_overlay_map())
+        if not removed:
+            raise dash.exceptions.PreventUpdate
+        gone = {peak.peak_id for peak in removed}
+        return (counter or 0) + 1, None if selected_peak in gone else dash.no_update
 
     @app.callback(Output('peak-analysis-empty', 'style'), Input('peak-table', 'data'))
     def show_peak_table_empty_state(rows):
@@ -522,7 +597,7 @@ def register_tab_callbacks(app: dash.Dash, data_manager) -> None:
             samples = sorted(set(p['sample_name'] for p in group))
             samples_str = ', '.join(samples)
             group_options.append({
-                'label': f"Group {i+1}: {avg_time:.2f} min - Found in {len(group)} samples ({samples_str})",
+                'label': f"Group {i+1}: {avg_time:.2f} min · {len(group)} samples",
                 'value': i
             })
         return group_options, 0
@@ -765,7 +840,7 @@ def create_across_samples_comparison_with_slider(bundles_with_peaks: List[Dict[s
             samples = sorted(set(p['sample_name'] for p in group))
             samples_str = ', '.join(samples)
             group_options.append({
-                'label': f"Group {i+1}: {avg_time:.2f} min - Found in {len(group)} samples ({samples_str})",
+                'label': f"Group {i+1}: {avg_time:.2f} min · {len(group)} samples",
                 'value': i
             })
 
@@ -944,6 +1019,24 @@ def cross_sample_group_to_dataframe(group):
     return pd.DataFrame(rows)
 
 
+def _bundle_peaks(data_manager, bundle, bundle_id):
+    """All peaks of a sample, wherever they are stored.
+
+    Chromatogram and LC-MS samples keep peaks under the id of the detector channel they were integrated on
+    (``peak_owner_id``), not under the sample's id, so the sample id alone finds nothing. Several channels
+    of one sample are merged; each peak appears once.
+    """
+    owners = [bundle_id, data_manager.peak_owner_id(bundle_id)]
+    owners += [component.component_id for component in getattr(bundle, 'component_list', None) or []]
+    seen, peaks = set(), []
+    for owner in dict.fromkeys(owners):
+        for peak in data_manager.peak_service.get_peaks(owner):
+            if peak.peak_id not in seen:
+                seen.add(peak.peak_id)
+                peaks.append(peak)
+    return peaks
+
+
 def _collect_bundles_with_peaks(data_manager, loaded_files):
     """Collect all bundles that have integration data.
 
@@ -951,10 +1044,14 @@ def _collect_bundles_with_peaks(data_manager, loaded_files):
     and persistence work through the service layer.
     """
     bundles_with_peaks = []
-    for bundle_id in list(data_manager.loaded_data.keys()):
-        bundle = data_manager.get_bundle(bundle_id)
-        if not bundle:
+    seen_bundles = set()
+    # loaded_data is keyed by source id: the sample for most files, each detector channel for chromatograms.
+    for source_id in list(data_manager.loaded_data.keys()):
+        bundle = data_manager.get_bundle(source_id) or data_manager.get_bundle_for_component(source_id)
+        if not bundle or bundle.bundle_id in seen_bundles:
             continue
+        seen_bundles.add(bundle.bundle_id)
+        bundle_id = bundle.bundle_id
 
         if bundle.has_integration_data():
             peaks_exist = data_manager.peak_service.get_peaks(bundle_id)
@@ -978,7 +1075,7 @@ def _collect_bundles_with_peaks(data_manager, loaded_files):
                 except Exception:
                     continue
 
-        service_peaks = data_manager.peak_service.get_peaks(bundle_id)
+        service_peaks = _bundle_peaks(data_manager, bundle, bundle_id)
         if service_peaks:
             total_area = sum(max(float(p.area or 0.0), 0.0) for p in service_peaks)
             total_height = sum(max(float(p.height or 0.0), 0.0) for p in service_peaks)

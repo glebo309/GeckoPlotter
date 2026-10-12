@@ -4,6 +4,7 @@ import os
 import re
 import uuid
 from collections import OrderedDict
+from dataclasses import replace
 from typing import Any, Dict, List, NamedTuple, Tuple
 
 try:
@@ -44,6 +45,15 @@ def assign_bundles(parsed_files: List[ParsedFile]) -> List[Bundle]:
 
     for parsed_file in parsed_files:
         filename, raw_bytes, standardized = _unpack_parsed_file(parsed_file)
+        channels = standardized.metadata.get('chromatogram_channels')
+        if channels:
+            # A sectioned export is one injection with independently selectable
+            # signals. This capability is shared by any chromatogram adapter.
+            fallback_index += 1
+            name = standardized.sample_name or _display_name(filename)
+            groups[(BundleType.CHROMATOGRAM, f'{name}:{fallback_index}')] = _channel_components(
+                filename, raw_bytes, standardized, channels)
+            continue
         bundle_type, base_name = _bundle_identity(filename, standardized)
         if base_name is None:
             fallback_index += 1
@@ -68,6 +78,27 @@ def assign_bundles(parsed_files: List[ParsedFile]) -> List[Bundle]:
         )
 
     return bundles
+
+
+def _channel_components(filename, raw_bytes, standardized, channels):
+    common = {k:v for k,v in standardized.metadata.items() if k != 'chromatogram_channels'}
+    components = []
+    for index, channel in enumerate(channels):
+        metadata = dict(common)
+        if index:
+            for key in ('pda', 'instrument_status', 'instrument_peaks'):
+                metadata.pop(key, None)
+        metadata.update(channel.get('metadata', {}))
+        metadata['display_name'] = channel['name']
+        metadata['sample_name'] = standardized.sample_name or _display_name(filename)
+        if index:
+            metadata['source_file_id'] = components[0].component_id
+            if common.get('pda'):
+                metadata['pda_source_id'] = components[0].component_id
+        signal = replace(standardized, data=channel['data'],
+                         column_roles=dict(channel['column_roles']), metadata=metadata)
+        components.append(_create_component(filename, raw_bytes if index == 0 else b'', signal))
+    return components
 
 
 def extract_chromeleon_base_name(filename: str, metadata: Dict[str, Any] | None = None) -> str | None:

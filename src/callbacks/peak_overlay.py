@@ -79,6 +79,21 @@ def add_selected_baseline_handle(fig, peak, row=None):
     line_color = peak.color or '#E69F00'
     p0, p1 = peak.p_line
 
+    if peak.source == 'deconvolved' and not (getattr(peak, 'fit_params', None) or {}).get('integration_edited'):
+        # A component's fitting region is shared with its siblings. Show its
+        # own near-baseline extent, without changing integration/MS bounds.
+        from lmfit.models import ExponentialGaussianModel
+        params = getattr(peak, 'fit_params', None) or {}
+        if all(k in params for k in ('amplitude', 'sigma', 'gamma')):
+            x = np.linspace(p0[0], p1[0], 800)
+            curve = ExponentialGaussianModel().eval(x=x, center=params.get('center', peak.rt),
+                amplitude=params['amplitude'], sigma=params['sigma'], gamma=params['gamma'])
+            support = np.flatnonzero(curve >= np.max(curve) * .01)
+            if support.size:
+                endpoints = x[[max(0, support[0]-1), min(len(x)-1, support[-1]+1)]]
+                ys = np.interp(endpoints, [p0[0], p1[0]], [p0[1], p1[1]])
+                p0, p1 = list(zip(endpoints, ys))
+
     xref = 'x' if not row or row == 1 else f'x{row}'
     yref = 'y' if not row or row == 1 else f'y{row}'
 
@@ -113,9 +128,8 @@ def add_selected_baseline_handle(fig, peak, row=None):
 
 def cleanup_peak_traces(fig):
     """Remove all existing peak overlay traces and shapes from the figure."""
-    fig.data = [t for t in fig.data if not (hasattr(t, 'meta') and t.meta == 'peak_overlay')]
+    fig.data = [t for t in fig.data if not (hasattr(t, 'meta') and isinstance(t.meta, str) and t.meta in ('peak_overlay', 'deconv_overlay'))]
     fig.layout.shapes = ()
-    fig.update_layout(uirevision='main-plot')
 
 
 def add_peak_traces(fig, all_peaks, time_arr, signal_arr, selected_peak_id=None, row=None):
@@ -141,7 +155,7 @@ def add_peak_traces(fig, all_peaks, time_arr, signal_arr, selected_peak_id=None,
         is_selected = peak.peak_id == selected_peak_id
         base_color = peak.color
         fill_color = rgba(base_color, 0.58 if is_selected else 0.30) if base_color else FILL_COLORS[i % len(FILL_COLORS)]
-        line_color = base_color if is_selected else 'rgba(0,0,0,0)'
+        line_color = (base_color or '#447da5') if is_selected or peak.source == 'deconvolved' else 'rgba(0,0,0,0)'
 
         has_custom_label = bool(peak.label) if hasattr(peak, 'label') else False
 
@@ -152,7 +166,7 @@ def add_peak_traces(fig, all_peaks, time_arr, signal_arr, selected_peak_id=None,
                 x=poly_x, y=poly_y,
                 fill='toself', fillcolor=fill_color,
                 mode='lines',
-                line=dict(color=line_color, width=2 if is_selected else 0),
+                line=dict(color=line_color, width=2 if is_selected else (1.5 if peak.source == 'deconvolved' else 0)),
                 customdata=[peak.peak_id] * len(poly_x),
                 hoverinfo='skip',
                 showlegend=False, meta='peak_overlay',
@@ -236,16 +250,17 @@ def add_deconv_overlays(fig, markers, deconv_payload, time_arr, signal_arr, row=
     y_arr = np.asarray(signal_arr, dtype=float)
     finite_y = y_arr[np.isfinite(y_arr)]
     y_top = float(finite_y.max()) * 1.05 if finite_y.size else 1.0
+    fig.update_layout(editrevision='deconv:' + repr([(m.get('x'), m.get('fixed')) for m in (markers or [])]))
 
     # ── Center markers: vertical dashed line + apex dot ──
-    for m in (markers or []):
+    for index, m in enumerate(markers or []):
         mx = m.get('x')
         my = m.get('y')
         if mx is None:
             continue
         fig.add_shape(
             type='line', x0=mx, x1=mx, y0=0, y1=y_top,
-            xref=xref, yref=yref,
+            xref=xref, yref=yref, name=f'deconv:{index}', editable=True,
             line=dict(color='rgba(120,120,120,0.8)', width=1.5, dash='dash'),
         )
         fig.add_trace(go.Scatter(
@@ -294,6 +309,8 @@ def overlay_peaks_on_figure(all_peaks, figure, time_arr, signal_arr, selected_pe
 
     cleanup_peak_traces(fig)
     add_peak_traces(fig, all_peaks, time_arr, signal_arr, selected_peak_id)
+    from services.signal_axis_range import apply_signal_x_bounds
+    apply_signal_x_bounds(fig)
     return fig
 
 
@@ -333,5 +350,7 @@ def patch_figure_with_peaks(all_peaks, current_figure, time_arr, signal_arr, sel
         patch['data'].append(trace)
     patch['layout']['shapes'] = fig_json.get('layout', {}).get('shapes', [])
     patch['layout']['meta'] = fig_json.get('layout', {}).get('meta', {})
-    patch['layout']['uirevision'] = 'main-plot'
+    for key, axis in fig_json.get('layout', {}).items():
+        if key.startswith('xaxis') and isinstance(axis, dict) and 'autorangeoptions' in axis:
+            patch['layout'][key]['autorangeoptions'] = axis['autorangeoptions']
     return patch

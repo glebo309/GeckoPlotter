@@ -125,6 +125,42 @@ def _area_with_constraints(time_arr, signal_arr, p1, p2):
     return res, q1, q2
 
 
+def baseline_edit_values(peak, time_arr, signal_arr, display_p0, display_p1,
+                         calc_p0=None, calc_p1=None):
+    """Reintegrate a baseline edit against the same measured/fitted signal."""
+    calc_p0 = display_p0 if calc_p0 is None else calc_p0
+    calc_p1 = display_p1 if calc_p1 is None else calc_p1
+    x0, x1 = display_p0[0], display_p1[0]
+    integration_x, integration_y = time_arr, signal_arr
+    component_params = None
+    if peak.source == 'deconvolved':
+        from lmfit.models import ExponentialGaussianModel
+        component_params = dict(peak.fit_params or {})
+        if not all(key in component_params for key in ('amplitude', 'sigma', 'gamma')):
+            return None
+        component_params.setdefault('center', peak.rt)
+        component_params.setdefault('baseline', [list(point) for point in peak.p_line])
+        (bx0, by0), (bx1, by1) = component_params['baseline']
+        integration_x = np.linspace(min(x0, x1), max(x0, x1), 1600)
+        integration_y = ExponentialGaussianModel().eval(
+            x=integration_x, **{key: component_params[key]
+                               for key in ('amplitude', 'center', 'sigma', 'gamma')})
+        integration_y += by0 + (by1 - by0) * (integration_x - bx0) / (bx1 - bx0)
+    result, q1, q2 = _area_with_constraints(integration_x, integration_y, calc_p0, calc_p1)
+    if not result:
+        return None
+    values = dict(area=result['area'], height=result['height'], rt=result['apex_x'],
+                  poly_x=result['poly_x'], poly_y=result['poly_y'],
+                  p_line=[display_p0, display_p1], q1=q1, q2=q2,
+                  rt_start=min(x0, x1), rt_end=max(x0, x1), width=abs(x1-x0))
+    if component_params is not None:
+        component_params['integration_edited'] = True
+        values['fit_params'] = component_params
+    if peak.source == 'detected':
+        values['source'] = 'manual'
+    return values
+
+
 # ---------------------------------------------------------------------------
 # Shared: get X/Y arrays from any file
 # ---------------------------------------------------------------------------
@@ -206,6 +242,8 @@ def register_baseline_callbacks(app: dash.Dash, data_manager) -> None:
         prevent_initial_call=True,
     )
     def set_baseline_mode(n_draw, n_nav, current_mode):
+        if current_mode == 'deconvolve':
+            raise PreventUpdate
         ctx = callback_context
         if not ctx.triggered:
             raise PreventUpdate
@@ -217,7 +255,7 @@ def register_baseline_callbacks(app: dash.Dash, data_manager) -> None:
         else:
             mode = current_mode or 'navigate'
 
-        indicator = 'Draw: on' if mode == 'draw' else 'Draw: off'
+        indicator = 'Drag across a peak to integrate. Click Draw again to finish.' if mode == 'draw' else 'Click Draw, then drag across a peak.'
         return mode, indicator, None
 
     # ── Sync button active states ───────────────────────────────────
@@ -313,16 +351,50 @@ def register_baseline_callbacks(app: dash.Dash, data_manager) -> None:
                 return fid
         return rec_id or active_file
 
+    def _is_preview_target(target_file, preview_owners):
+        """True when *target_file* is a channel whose trace is currently drawn as a PDA preview."""
+        if target_file in preview_owners:
+            return True
+        bundles = (data_manager.get_bundle_for_component(owner) for owner in preview_owners if owner)
+        return any(bundle is not None and bundle.bundle_id == target_file for bundle in bundles)
+
+    def _keep_preview(preview, target_file, active_file):
+        """Materialise the previewed wavelength; return (new channel of target's sample, extra outputs) or None.
+
+        The extra outputs are loaded-files, pda-live (off), active-file and status-text.
+        """
+        from services.pda_service import materialise_preview, channel_for_sample
+        try:
+            added = materialise_preview(data_manager, preview)
+        except (ValueError, TypeError):
+            return None
+        channel = channel_for_sample(data_manager, added, target_file)
+        if channel is None:
+            return None
+        entry = data_manager.get_data_by_id(channel) or {}
+        wavelength = (entry.get('metadata') or {}).get('wavelength_nm', preview.get('wavelength_nm'))
+        status = (f"Added {float(wavelength):.0f} nm channel to {len(added)} sample"
+                  + ('s' if len(added) != 1 else '') + ' and integrated it.')
+        # The selected sample follows its new channel, as when a wavelength is added from the PDA tab.
+        selected = channel_for_sample(data_manager, added, active_file) if active_file else None
+        return channel, (data_manager.get_loaded_files_list(), False,
+                         selected if selected else dash.no_update, status)
+
     @app.callback(
         [Output('main-plot', 'figure', allow_duplicate=True),
          Output('peak-change-trigger', 'data', allow_duplicate=True),
          Output('clear-shapes-trigger', 'data', allow_duplicate=True),
          Output('selected-peak-idx', 'data', allow_duplicate=True),
-         Output('render-trigger', 'data', allow_duplicate=True)],
-        [Input('main-plot', 'relayoutData'),
+         Output('render-trigger', 'data', allow_duplicate=True),
+         # Integrating while the PDA live preview is on keeps the previewed wavelength as real channels.
+         Output('loaded-files', 'data', allow_duplicate=True),
+         Output('pda-live', 'checked', allow_duplicate=True),
+         Output('active-file', 'data', allow_duplicate=True),
+         Output('status-text', 'children', allow_duplicate=True)],
+        [Input('main-shape-relayout', 'data'),  # shape edits only; see the filter in viz_callbacks
          Input('manual-draw-line-store', 'data')],
         [State('baseline-mode', 'data'),
-         State('easy-integration', 'checked'),
+         State('integration-baseline', 'value'),
          State('active-file', 'data'),
          State('main-plot', 'figure'),
          State('peak-change-trigger', 'data'),
@@ -332,12 +404,19 @@ def register_baseline_callbacks(app: dash.Dash, data_manager) -> None:
          State('loaded-files', 'data'),
          State('plot-tabs', 'data'),
          State('active-plot-tab', 'data'),
-         State('render-trigger', 'data')],
+         State('render-trigger', 'data'),
+         State('pda-preview', 'data')],
         prevent_initial_call=True,
     )
     def handle_relayout(relayout, draw_line, mode, easy_mode, active_file, current_figure, peak_counter, selected_idx, clear_counter,
-                        plot_settings, loaded_files, plot_tabs, active_tab_id, render_counter):
+                        plot_settings, loaded_files, plot_tabs, active_tab_id, render_counter, preview=None):
         """Handle draw-mode new shapes and edit-mode shape drags."""
+        preview_owners = {t['meta'].get('pda_owner_id') for t in (current_figure or {}).get('data', [])
+                          if isinstance(t.get('meta'), dict) and t['meta'].get('pda_preview')}
+        if preview_owners and not preview:
+            raise PreventUpdate
+        if mode == 'deconvolve':
+            raise PreventUpdate
         import plotly.graph_objects as go
 
         tab = next((t for t in (plot_tabs or []) if t['id'] == active_tab_id), None)
@@ -345,9 +424,13 @@ def register_baseline_callbacks(app: dash.Dash, data_manager) -> None:
             raise PreventUpdate
 
         trigger_id = callback_context.triggered[0]['prop_id'].rsplit('.', 1)[0] if callback_context.triggered else ''
+        draws = trigger_id == 'manual-draw-line-store' and draw_line and (mode == 'draw' or draw_line.get('momentary'))
+        if preview_owners and not draws:
+            raise PreventUpdate  # shape edits are not defined on preview traces
+        keep = (dash.no_update,) * 4  # extra outputs, untouched unless a preview is kept
 
         # ── Draw mode: browser-side custom integration line ──
-        if trigger_id == 'manual-draw-line-store' and draw_line and (mode == 'draw' or draw_line.get('momentary')):
+        if draws:
             display_pts = [(draw_line.get('x0'), draw_line.get('y0')), (draw_line.get('x1'), draw_line.get('y1'))]
             if any(v is None for pt in display_pts for v in pt):
                 raise PreventUpdate
@@ -372,16 +455,31 @@ def register_baseline_callbacks(app: dash.Dash, data_manager) -> None:
             log.debug(f"  draw_line keys={list(draw_line.keys())} subplot_raw={draw_line.get('subplot')}")
             calc_pts = display_pts
 
-            if easy_mode:
+            if easy_mode is True or easy_mode == 'zero':
                 calc_pts = [(display_pts[0][0], 0), (display_pts[1][0], 0)]
+
+            # Drawn on a live PDA preview: keep the previewed wavelength as real channels (the preview switches
+            # off) and integrate the new channel of this sample. Same wavelength, so the same time axis and data.
+            kept = None
+            if preview_owners and _is_preview_target(target_file, preview_owners):
+                kept = _keep_preview(preview, target_file, active_file)
+                if kept is None:
+                    raise PreventUpdate
+                target_file = kept[0]
+
+            def abandon():
+                if kept is None:
+                    raise PreventUpdate
+                return (dash.no_update, dash.no_update, dash.no_update, dash.no_update,
+                        (render_counter or 0) + 1) + kept[1]
 
             time_arr, signal_arr = _get_chrom(target_file)
             if time_arr is None:
-                raise PreventUpdate
+                return abandon()
 
             res, q1, q2 = _area_with_constraints(time_arr, signal_arr, *calc_pts)
             if not res:
-                raise PreventUpdate
+                return abandon()
 
             data_manager.peak_service.save_undo()
 
@@ -439,12 +537,15 @@ def register_baseline_callbacks(app: dash.Dash, data_manager) -> None:
                 file_overlay_map=data_manager.build_file_overlay_map())
             from services.plot_settings_service import DEFAULT_PLOT_SETTINGS
             _s = {**DEFAULT_PLOT_SETTINGS, **(plot_settings or {})}
+            if kept is not None:
+                return (dash.no_update, (peak_counter or 0) + 1, (clear_counter or 0) + 1, None,
+                        (render_counter or 0) + 1) + kept[1]
             if _requires_group_render(plot_settings, current_figure) or draw_line.get('file_id'):
-                return dash.no_update, (peak_counter or 0) + 1, (clear_counter or 0) + 1, None, (render_counter or 0) + 1
+                return (dash.no_update, (peak_counter or 0) + 1, (clear_counter or 0) + 1, None, (render_counter or 0) + 1) + keep
             fig_patch = patch_figure_with_peaks(
                 data_manager.peak_service.get_peaks(target_file), current_figure, time_arr, signal_arr, None
             )
-            return fig_patch, (peak_counter or 0) + 1, (clear_counter or 0) + 1, None, dash.no_update
+            return (fig_patch, (peak_counter or 0) + 1, (clear_counter or 0) + 1, None, dash.no_update) + keep
 
         # ── Edit selected/all baseline shape endpoint(s) ──
         if not active_file:
@@ -491,7 +592,7 @@ def register_baseline_callbacks(app: dash.Dash, data_manager) -> None:
             display_p1 = (x1, y1)
             calc_p0 = display_p0
             calc_p1 = display_p1
-            if easy_mode:
+            if easy_mode is True or easy_mode == 'zero':
                 calc_p0 = (x0, 0)
                 calc_p1 = (x1, 0)
 
@@ -534,51 +635,23 @@ def register_baseline_callbacks(app: dash.Dash, data_manager) -> None:
             if time_arr is None:
                 raise PreventUpdate
 
-            res, q1, q2 = _area_with_constraints(time_arr, signal_arr, calc_p0, calc_p1)
-            if not res:
+            values = baseline_edit_values(p, time_arr, signal_arr, display_p0, display_p1, calc_p0, calc_p1)
+            if values is None:
                 raise PreventUpdate
-
-            p.area = res['area']
-            p.height = res['height']
-            p.rt = res['apex_x']
-            p.poly_x = res['poly_x']
-            p.poly_y = res['poly_y']
-            p.p_line = [display_p0, display_p1]
-            p.q1 = q1
-            p.q2 = q2
-            p.rt_start = min(x0, x1)
-            p.rt_end = max(x0, x1)
-            p.width = p.rt_end - p.rt_start
-            if p.source == 'detected':
-                p.source = 'manual'
-            log.debug(f"Edit-dragged peak idx={shape_idx}: RT={res['apex_x']:.3f} file={edit_file}")
+            for key, value in values.items():
+                setattr(p, key, value)
+            log.debug(f"Edit-dragged peak idx={shape_idx}: RT={p.rt:.3f} file={edit_file}")
 
             if _requires_group_render(plot_settings, current_figure):
-                return dash.no_update, (peak_counter or 0) + 1, (clear_counter or 0) + 1, p.peak_id if mode != 'edit' else None, (render_counter or 0) + 1
+                return (dash.no_update, (peak_counter or 0) + 1, (clear_counter or 0) + 1, p.peak_id if mode != 'edit' else None, (render_counter or 0) + 1) + keep
 
             selected_for_rebuild = None if mode == 'edit' else p.peak_id
             fig_patch = patch_figure_with_peaks(
                 data_manager.peak_service.get_peaks(edit_file), current_figure, time_arr, signal_arr, selected_for_rebuild
             )
-            return fig_patch, (peak_counter or 0) + 1, (clear_counter or 0) + 1, p.peak_id if mode != 'edit' else None, dash.no_update
+            return (fig_patch, (peak_counter or 0) + 1, (clear_counter or 0) + 1, p.peak_id if mode != 'edit' else None, dash.no_update) + keep
 
         raise PreventUpdate
-
-    @app.callback(Output('active-file', 'data', allow_duplicate=True),
-                  Input('plot-peak-click-store', 'data'), State('main-plot', 'figure'),
-                  State('active-file', 'data'), State('active-plot-tab', 'data'),
-                  prevent_initial_call=True)
-    def sync_selected_peak_owner(peak_id, figure, active_file, active_tab):
-        if isinstance(peak_id, dict):
-            peak_id = peak_id.get('peakId')
-        meta = ((figure or {}).get('layout', {}).get('meta') or {})
-        if not peak_id or meta.get('gecko_tab_id') != active_tab:
-            raise PreventUpdate
-        owner = meta.get('gecko_peak_geometry', {}).get(peak_id, {}).get('file_id')
-        if not owner or owner == active_file or not any(
-                peak.peak_id == peak_id for peak in data_manager.peak_service.get_peaks(owner)):
-            raise PreventUpdate
-        return owner
 
     # ── Normal mode: click a filled peak to select/highlight it ───────
 
@@ -592,38 +665,67 @@ def register_baseline_callbacks(app: dash.Dash, data_manager) -> None:
     @app.callback(
         [Output('selected-peak-idx', 'data', allow_duplicate=True),
          Output('main-plot', 'figure', allow_duplicate=True),
-         Output('render-trigger', 'data', allow_duplicate=True)],
+         Output('render-trigger', 'data', allow_duplicate=True),
+         Output('active-file', 'data', allow_duplicate=True)],
         Input('plot-peak-click-store', 'data'),
         [State('active-file', 'data'),
          State('main-plot', 'figure'),
          State('current-plot-settings', 'data'),
          State('render-trigger', 'data'),
-         State('view-mode', 'data')],
+         State('view-mode', 'data'), State('active-plot-tab', 'data')],
         prevent_initial_call=True,
     )
-    def select_peak_from_browser_hit_test(hit_data, active_file, current_figure, plot_settings, render_counter, view_mode):
+    def select_peak_from_browser_hit_test(hit_data, active_file, current_figure, plot_settings, render_counter, view_mode, active_tab=None):
+        if any(s.get('name', '').startswith('deconv:') for s in (current_figure or {}).get('layout', {}).get('shapes', [])):
+            raise PreventUpdate
         if (view_mode or 'raw') != 'raw':
             raise PreventUpdate
-        if not hit_data or not active_file:
+        if not hit_data:
             raise PreventUpdate
 
         peak_id = hit_data.get('peakId') if isinstance(hit_data, dict) else None
         if not peak_id:
             raise PreventUpdate
 
+        meta = (current_figure or {}).get('layout', {}).get('meta') or {}
+        if active_tab is not None and meta.get('gecko_tab_id') != active_tab:
+            raise PreventUpdate
+        owner = meta.get('gecko_peak_geometry', {}).get(peak_id, {}).get('file_id')
+        if not owner or not any(p.peak_id == peak_id for p in data_manager.peak_service.get_peaks(owner)):
+            raise PreventUpdate
+        next_owner = owner if owner != active_file else dash.no_update
+
         log.info(f"🎯 peak selected via hit-test: {peak_id}, stacked={_requires_group_render(plot_settings, current_figure)}")
         if _requires_group_render(plot_settings, current_figure):
-            return peak_id, dash.no_update, (render_counter or 0) + 1
+            # Apply the visible selection in the same response as its owner.
+            # Source changes also refresh tables; their later render requests
+            # can supersede a separate render-trigger response in Dash.
+            import plotly.graph_objects as go
+            from callbacks.peak_overlay import cleanup_peak_traces, add_peak_traces
+            figure = go.Figure(current_figure)
+            visible_ids = dict.fromkeys(
+                trace.meta['file_id'] for trace in figure.data
+                if isinstance(trace.meta, dict) and trace.meta.get('file_id')
+                and trace.visible not in (False, 'legendonly')
+            )
+            cleanup_peak_traces(figure)
+            for file_id in visible_ids:
+                x, y = _get_chrom(file_id)
+                if x is not None:
+                    add_peak_traces(figure, data_manager.peak_service.get_peaks(file_id), x, y, peak_id)
+            from services.signal_axis_range import apply_signal_x_bounds
+            apply_signal_x_bounds(figure)
+            return peak_id, figure, dash.no_update, next_owner
 
-        peak_fid = active_file
-        time_arr, signal_arr = _get_chrom(active_file)
+        peak_fid = owner
+        time_arr, signal_arr = _get_chrom(owner)
         if time_arr is None:
             raise PreventUpdate
 
         fig_patch = patch_figure_with_peaks(
             data_manager.peak_service.get_peaks(peak_fid), current_figure, time_arr, signal_arr, peak_id
         )
-        return peak_id, fig_patch, dash.no_update
+        return peak_id, fig_patch, dash.no_update, next_owner
 
     @app.callback(
         [Output('selected-peak-idx', 'data', allow_duplicate=True),
@@ -642,7 +744,7 @@ def register_baseline_callbacks(app: dash.Dash, data_manager) -> None:
     def select_peak_by_click(click_data, active_file, current_figure, selected_peak_id, mode, plot_settings, render_counter, view_mode):
         import plotly.graph_objects as go
 
-        if (view_mode or 'raw') != 'raw':
+        if mode == 'deconvolve' or (view_mode or 'raw') != 'raw':
             raise PreventUpdate
         if not click_data or not active_file:
             raise PreventUpdate
@@ -691,7 +793,7 @@ def register_baseline_callbacks(app: dash.Dash, data_manager) -> None:
         prevent_initial_call=True,
     )
     def deselect_peak_from_empty_plot_click(n_clicks, active_file, current_figure, selected_peak_id, mode, plot_settings, render_counter, view_mode):
-        if (view_mode or 'raw') != 'raw':
+        if mode == 'deconvolve' or (view_mode or 'raw') != 'raw':
             raise PreventUpdate
         if not n_clicks or not active_file or not selected_peak_id:
             raise PreventUpdate
@@ -867,6 +969,8 @@ def register_baseline_callbacks(app: dash.Dash, data_manager) -> None:
             raise PreventUpdate
 
         action = event['action']
+        if baseline_mode == 'deconvolve' and action != 'toggle_layout':
+            raise PreventUpdate
 
         if action == 'escape':
             new_mode = 'navigate' if baseline_mode in ('draw', 'edit', 'deconvolve') else dash.no_update
@@ -929,26 +1033,6 @@ def register_baseline_callbacks(app: dash.Dash, data_manager) -> None:
             file_overlay_map=data_manager.build_file_overlay_map())
         return (peak_counter or 0) + 1, (render_counter or 0) + 1, None
 
-    # ── Peak count indicator in toolbox ───────────────────────────────
-
-    @app.callback(
-        Output('manual-peak-table-container', 'children'),
-        [Input('peak-change-trigger', 'data')],
-        State('active-file', 'data'),
-        prevent_initial_call=True,
-    )
-    def update_peak_count_indicator(_, active_file):
-        """Show a simple peak count — the actual table is in Peak Analysis tab."""
-        if not active_file:
-            return html.Div()
-        all_peaks = data_manager.peak_service.get_peaks(active_file)
-        count = len(all_peaks)
-        if not count:
-            return html.Div('No peaks', style={'fontSize': '11px', 'color': '#999', 'fontStyle': 'italic'})
-        return html.Div(
-            f'{count} peak{"s" if count != 1 else ""}. See Peak Analysis tab for details.',
-            style={'fontSize': '11px', 'color': '#666'},
-        )
 
 
 # ---------------------------------------------------------------------------

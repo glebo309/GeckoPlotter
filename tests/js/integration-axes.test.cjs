@@ -157,3 +157,68 @@ test('clicking a signal outside its filled region dismisses handles',()=>{
  assert.equal(h.first.__geckoManualIntegrationSelectedPeakId,null);
  assert.ok(h.props.some(item=>item[0]==='interaction-action-store'&&item[1].data.type==='deselect'));
 });
+
+for (const id of ['deconv-btn','deconv-accept-btn','deconv-cancel-btn','baseline-clear-btn']) {
+ test(`clicking ${id} preserves its selected peak before the action runs`,()=>{
+  const h=integrationHarness();
+  h.first.__geckoManualIntegrationSelectedPeakId='owned';
+  h.first.layout.shapes=[{name:'baseline:owned'}];
+  h.docEvents.pointerdown({...h.event,clientX:500,clientY:500,
+    target:{closest:selector=>selector.split(',').map(s=>s.trim()).includes('#'+id)?{}:null}});
+  assert.equal(h.first.__geckoManualIntegrationSelectedPeakId,'owned');
+  assert.equal(h.props.some(item=>item[0]==='interaction-action-store'&&item[1].data.type==='deselect'),false);
+ });
+}
+
+test('deconvolution preview survives background clicks and selection cleanup',()=>{
+ const h=integrationHarness();
+ h.api.syncDrawMode('main-plot','deconvolve');
+ h.first.__geckoManualIntegrationSelectedPeakId='original';
+ h.first.layout.shapes=[{name:'deconv:0',x0:1,x1:1}];
+ const updates=[];h.window.Plotly.relayout=(_,u)=>updates.push(u);
+ h.docEvents.pointerdown({...h.event,clientX:500,clientY:500});
+ h.api.syncSelectedShape('main-plot',null);
+ assert.equal(h.first.__geckoManualIntegrationSelectedPeakId,'original');
+ assert.ok(!updates.some(u=>u.shapes));
+ assert.ok(!h.props.some(p=>p[0]==='interaction-action-store'&&p[1].data.type==='deselect'));
+});
+
+test('deconvolution allows box zoom and double-click reset without changing the preview',()=>{
+ const h=integrationHarness(), updates=[];
+ h.window.Plotly.relayout=(_,u)=>updates.push(u);
+ h.first.__geckoManualIntegrationSelectedPeakId='original';
+ h.first.layout.shapes=[{name:'deconv:0',x0:1,x1:1}];
+ h.api.syncDrawMode('main-plot','deconvolve');
+ assert.equal(updates.at(-1).dragmode,'zoom');
+ let blocked=false;
+ h.first.handlers.pointerdown({...h.event,preventDefault(){blocked=true;}});
+ assert.equal(blocked,false);
+ h.first.handlers.pointerdown({...h.event,detail:2});
+ assert.ok(updates.some(u=>u['xaxis.autorange']===true&&u['yaxis.autorange']===true));
+ assert.equal(h.first.__geckoManualIntegrationMode,'deconvolve');
+ assert.equal(h.first.__geckoManualIntegrationSelectedPeakId,'original');
+ assert.equal(h.first.layout.shapes[0].name,'deconv:0');
+ assert.equal(h.props.length,1);
+ assert.equal(h.props[0][0],'interaction-action-store');
+ assert.equal(h.props[0][1].data.type,'reset-axes');
+});
+
+test('PDA preview can be integrated: the line names the real channel the preview stands in for',()=>{
+ const h=integrationHarness();
+ h.first.data=[{meta:{pda_preview:true,pda_source_id:'src',pda_owner_id:'uv-channel'},x:[0,1],y:[2,3]}];
+ h.api.syncDrawMode('main-plot','draw');
+ h.first.handlers.pointerdown(h.event);
+ assert.ok(h.first.__geckoManualIntegrationDrawing);
+ h.events.pointerup({...h.event,clientX:80});
+ const payload=h.props.find(p=>p[0]==='manual-draw-line-store')[1].data;
+ assert.equal(payload.file_id,'uv-channel');
+});
+
+test('PDA time cursor survives clearing peak selection',()=>{
+ const h=integrationHarness();let last;
+ const cursor={name:'pda-time-cursor',x0:1,x1:1};
+ h.first.layout.shapes=[cursor,{name:'baseline:old'}];
+ h.window.Plotly.relayout=(g,p)=>{if(p.shapes)last=p;};
+ h.api.syncSelectedShape('main-plot',null);
+ assert.deepEqual(Array.from(last.shapes),[cursor]);
+});

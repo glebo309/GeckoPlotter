@@ -25,12 +25,19 @@
         if (window.dash_clientside) window.dash_clientside.set_props('selected-peak-idx', {data:null});
     }
 
+    // A live-preview trace has no file_id of its own; it stands in for the real channel named by pda_owner_id.
+    // The server turns the previewed wavelength into real channels and applies the line to the matching one.
+    function traceFileId(trace) {
+        var meta = trace && trace.meta;
+        return meta ? (meta.file_id || (meta.pda_preview && meta.pda_owner_id) || null) : null;
+    }
+
     function sourceAtSubplot(gd, key) {
         var candidates = (gd.data || []).filter(function(trace) {
-            return trace.meta && trace.meta.file_id && trace.visible !== false && trace.visible !== 'legendonly' &&
+            return traceFileId(trace) && trace.visible !== false && trace.visible !== 'legendonly' &&
                 (trace.xaxis || 'x') + (trace.yaxis || 'y') === key && !trace.fill;
         });
-        return candidates.find(function(trace) {return trace.meta.file_id === window.__geckoActiveFile;}) || candidates[0];
+        return candidates.find(function(trace) {return traceFileId(trace) === window.__geckoActiveFile;}) || candidates[0];
     }
 
     function graphDivFromEvent(event) {
@@ -58,10 +65,11 @@
     function clearTransientShapes(graphId) {
         var gd = getGraphDiv(graphId);
         if (!gd || !window.Plotly || !gd.layout) return;
+        if (gd.__geckoManualIntegrationMode === 'deconvolve') return;
 
         var shapes = gd.layout.shapes || [];
         var kept = shapes.filter(function (shape) {
-            return shape && typeof shape.name === 'string' && shape.name.indexOf('baseline:') === 0;
+            return shape && typeof shape.name === 'string' && (shape.name.indexOf('baseline:') === 0 || shape.name === 'pda-time-cursor');
         });
 
         if (kept.length !== shapes.length) {
@@ -72,6 +80,7 @@
     function syncSelectedShape(graphId, selectedPeakId) {
         var gd = getGraphDiv(graphId);
         if (!gd || !window.Plotly || !gd.layout) return;
+        if (gd.__geckoManualIntegrationMode === 'deconvolve') return;
         // Selection callbacks can arrive after a cached tab has already changed.
         // A peak absent from this figure must never disable its draw tool.
         if (selectedPeakId) {
@@ -96,6 +105,7 @@
             kept = kept.length ? [kept[kept.length - 1]] : [];
         }
 
+        kept = shapes.filter(function(shape) { return shape && shape.name === 'pda-time-cursor'; }).concat(kept);
         if (kept.length !== shapes.length || (kept[0] && shapes[0] && kept[0].name !== shapes[0].name)) {
             window.Plotly.relayout(gd, { shapes: kept });
         }
@@ -106,7 +116,7 @@
         if (!gd || !window.Plotly) return;
         var dragmode = 'zoom';
         if (
-            gd.__geckoManualIntegrationSelectedPeakId ||
+            (gd.__geckoManualIntegrationSelectedPeakId && gd.__geckoManualIntegrationMode !== 'deconvolve') ||
             gd.__geckoManualIntegrationSuspendDrawUntilMouseUp ||
             gd.__geckoManualIntegrationDrawing
         ) {
@@ -342,7 +352,7 @@
         var plots = gd._fullLayout._plots;
         if (plots) {
             var selectedTrace = (gd.data || []).find(function (trace) {
-                return trace.meta && trace.meta.file_id === window.__geckoActiveFile;
+                return traceFileId(trace) === window.__geckoActiveFile;
             });
             var selectedKey = selectedTrace ? (selectedTrace.xaxis || 'x') + (selectedTrace.yaxis || 'y') : null;
             var selectedPlot = selectedKey && plots[selectedKey];
@@ -413,7 +423,7 @@
     }
 
     function setMomentaryDrawActive(active) {
-        var button = document.getElementById('baseline-draw-btn');
+        var button = document.getElementById('plot-tool-integrate');
         if (!button) return;
         button.classList.toggle('momentary-active', active);
     }
@@ -481,7 +491,7 @@
     }
 
     function dismissSelectedPeak(gd) {
-        if (!gd || !gd.__geckoManualIntegrationSelectedPeakId) return false;
+        if (!gd || gd.__geckoManualIntegrationMode === 'deconvolve' || !gd.__geckoManualIntegrationSelectedPeakId) return false;
         gd.__geckoManualIntegrationSelectedPeakId = null;
         clearEmptyClickTimer(gd);
         if (window.Plotly) {
@@ -517,6 +527,7 @@
     }
 
     function consumeSelectedBlankClick(gd, event) {
+        if (gd.__geckoManualIntegrationMode === 'deconvolve') return false;
         if (!gd.__geckoManualIntegrationSelectedPeakId || !isInsidePlotArea(gd, event) ||
             isBaselineHandleTarget(gd, event) || peakIdAtEvent(gd, event)) return false;
         suspendDrawUntilMouseUp(gd);
@@ -584,7 +595,7 @@
             startClientX: event.clientX,
             startClientY: event.clientY,
             startData: startData,
-            fileId: source && source.meta.file_id,
+            fileId: source && traceFileId(source),
             tabId: gd.dataset && gd.dataset.workspacePlot,
             startSubplot: startSp,
             momentary: isDrawModifier(event) && gd.__geckoManualIntegrationMode !== 'draw'
@@ -762,18 +773,22 @@
             return;
         }
 
-        // Deconvolve mode: a plain click places (or removes) a peak-center
-        // marker. Server-side decides add vs remove by proximity.
-        if (gd.__geckoManualIntegrationMode === 'deconvolve' &&
-            isInsidePlotArea(gd, event) && !isOverlayTarget(event)) {
-            var dp = dataPointAtEvent(gd, event);
-            if (dp) {
-                stopPlotlyGesture(event);
-                gd.__geckoManualIntegrationLastPlotlyClickAt = Date.now();
-                clearEmptyClickTimer(gd);
-                publishDeconvMarkerClick(dp.x);
-                return;
+        // Keep the preview session intact. Shift-click explicitly adds a
+        // component; normal clicks remain available for zoom/shape dragging.
+        if (gd.__geckoManualIntegrationMode === 'deconvolve') {
+            if (event.shiftKey && isInsidePlotArea(gd, event) &&
+                !(event.target && event.target.closest('.shapelayer, .modebar'))) {
+                var dp = dataPointAtEvent(gd, event);
+                var target = ((gd.layout || {}).shapes || []).find(function(s) {
+                    return s.name && s.name.indexOf('deconv:') === 0;
+                });
+                var subplot = subplotAtEvent(gd, event);
+                if (dp && target && subplot && subplot.key === (target.xref || 'x') + (target.yref || 'y')) {
+                    stopPlotlyGesture(event);
+                    publishDeconvMarkerClick(dp.x);
+                }
             }
+            return;
         }
 
         var peakId = peakIdAtEvent(gd, event);
@@ -890,6 +905,7 @@
 
         gd.addEventListener('contextmenu', function (event) {
             event.preventDefault();
+            if (gd.__geckoManualIntegrationMode === 'deconvolve') return;
             var peakId = peakIdAtEvent(gd, event);
             if (peakId) {
                 event.stopPropagation();
@@ -915,7 +931,14 @@
             var consumeBlankBeforePlotly = function (event) {
                 if (event.detail && event.detail > 1) return;
                 var eventGd = graphDivFromEvent(event);
-                if (!eventGd) { dismissSelectedPeak(boundActiveGraph); return; }
+                if (!eventGd) {
+                    // Peak actions need the selection when their click reaches
+                    // Dash. Only background clicks should dismiss it here.
+                    if (event.target && event.target.closest && event.target.closest(
+                        '#deconv-btn, #deconv-accept-btn, #deconv-cancel-btn, #baseline-clear-btn')) return;
+                    dismissSelectedPeak(boundActiveGraph);
+                    return;
+                }
                 if (!isInsidePlotArea(eventGd,event) && !isOverlayTarget(event)) dismissSelectedPeak(eventGd);
                 handleGraphPointerDown(eventGd, event);
             };

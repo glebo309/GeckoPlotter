@@ -36,7 +36,7 @@ def test_visible_spectrum_owns_draw_even_before_active_file_restoration(monkeypa
     result=draw()
     assert saved[0]['file_id']=='blue'
     assert result[0] is no_update  # canonical render overlays all source peaks, not stale hidden figure
-    assert result[-1]==1
+    assert result[4]==1  # render-trigger; later outputs are the PDA-preview extras
 
 @pytest.mark.parametrize('file_id,tab_id,active_tab',[
     ('blue','spectra','chrom'),('control','spectra','spectra'),('missing','spectra','spectra'),('blue','pub','pub')])

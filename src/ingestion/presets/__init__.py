@@ -4,6 +4,7 @@ from ..stage_2_registry import FormatPreset
 
 
 def load_all_presets() -> List[FormatPreset]:
+    from .shimadzu_ascii import ShimadzuASCIIPreset
     from .cary_kinetics import CaryKineticsPreset
     from .chromeleon_txt import ChromeleonTxtPreset
     from .plate_reader_csv import PlateReaderCSVPreset
@@ -13,6 +14,7 @@ def load_all_presets() -> List[FormatPreset]:
     from .excel_xlsx import ExcelPreset
 
     return [
+        ShimadzuASCIIPreset(),
         CaryKineticsPreset(),
         ChromeleonTxtPreset(),
         AgilentLCMSCSVPreset(),

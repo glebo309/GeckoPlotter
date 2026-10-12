@@ -16,7 +16,7 @@ def test_calibration_controls_are_visible_and_callbacks_have_real_components():
               'cal-units','cal-fit-type','cal-force-zero','cal-response-type','cal-peak-picker',
               'cal-add-peaks-btn','cal-add-manual-btn','cal-standards-table','cal-match-position',
               'cal-match-tolerance','cal-match-label','cal-auto-apply','cal-fit-btn',
-              'cal-curve-graph','cal-residual-graph','cal-results-info','cal-feedback'}
+              'cal-curve-graph','cal-feedback'}
     assert expected <= ui.keys()
     assert isinstance(ui['cal-load-upload'],dcc.Upload)
     assert isinstance(ui['cal-download'],dcc.Download)
@@ -44,7 +44,7 @@ def test_standard_rows_are_editable_inclusion_selectable_without_fake_data():
 
 def test_empty_calibration_graphs_are_responsive_and_do_not_invent_a_fit():
     ui=nodes()
-    for graph_id in ('cal-curve-graph','cal-residual-graph'):
+    for graph_id in ('cal-curve-graph',):
         graph=ui[graph_id]
         assert graph.responsive
         assert not graph.figure['data']
@@ -57,18 +57,26 @@ def test_saved_calibration_can_link_a_measured_peak_without_refitting():
     ui=nodes()
     assert 'cal-link-peak-btn' in ui
     assert ui['cal-link-peak-btn'].children=='Use as matching peak'
-    assert 'without refitting' in ui['cal-link-peak-btn'].title
+    assert 'without refitting' in ui['cal-link-peak-btn'].attributes['title']
     assert ui['cal-save-btn'].disabled is True
     assert ui['cal-units'].label=='Concentration units'
 
 
-def test_diagnostics_are_hidden_but_callback_targets_stay_mounted():
-    from components.workspace_layout import walk
+def test_all_diagnostics_are_removed_not_only_hidden():
     ui=nodes()
-    hidden=ui.get('cal-hidden-diagnostics')
-    assert hidden is not None and hidden.hidden is True
-    assert {'cal-residual-graph','cal-results-info'} <= {
-        getattr(node,'id',None) for node in walk(hidden)}
+    assert not {'cal-residual-graph','cal-results-info','cal-hidden-diagnostics','cal-fit-summary'} & ui.keys()
+
+
+def test_calibration_actions_use_consistent_mantine_buttons_with_one_primary_action():
+    import dash_mantine_components as dmc
+    ui=nodes()
+    buttons=[ui[key] for key in ('cal-new-btn','cal-save-btn','cal-add-peaks-btn',
+                                'cal-add-manual-btn','cal-link-peak-btn','cal-fit-btn')]
+    buttons.append(ui['cal-load-upload'].children)
+    for button in buttons:
+        assert isinstance(button,dmc.Button)
+        assert button.size=='xs'
+        assert button.variant==('filled' if getattr(button,'id',None)=='cal-fit-btn' else 'default')
 
 
 def test_standards_scroll_region_is_keyboard_reachable_without_squeezing_columns():

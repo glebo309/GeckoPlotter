@@ -1,3 +1,4 @@
+from services.dataset_names import display_name, trace_display_name
 # =============================================================================
 # File: callbacks/viz_callbacks.py
 # =============================================================================
@@ -18,6 +19,7 @@ import plotly.graph_objects as go
 from services.plot_manager import PlotManager
 from services.data_store import DataStore as DataManager, BundleType
 from services.plot_smoothing import smooth_plotly_traces
+from services.metadata_display import group_metadata, measurement_summary
 from components.data_table_editor import create_data_table_editor
 from components.publication_plot import create_publication_plot
 from callbacks.peak_overlay import overlay_peaks_on_figure, patch_figure_with_peaks, rgba, FILL_COLORS, cleanup_peak_traces, add_peak_traces
@@ -116,7 +118,7 @@ def _get_x_domain_signature(metadata, fdata):
     return f"{round(lo, decimals)}:{round(hi, decimals)}"
 
 
-def _get_overlay_group(metadata, fdata, file_id=None, dm=None):
+def _get_overlay_group(metadata, fdata, file_id=None, dm=None, ignore_override=False):
     """Return composite key (source_category, x_axis, x_domain) for overlay grouping.
 
     Files overlay when they share both the same source type AND the same
@@ -124,11 +126,18 @@ def _get_overlay_group(metadata, fdata, file_id=None, dm=None):
     "Time" or "X" column from being placed on the same plot.
 
     If the file has a group override (from cross-group drag-drop), use that.
+    The file tree drags whole bundles, so a bundle's override also applies to
+    its components (chromatogram/LC-MS signals are plotted per component).
+    *ignore_override* returns the natural group instead.
     Components of one LCMS run share its bundle-specific group. Equal time
     ranges in different runs never imply an automatic comparison.
     """
-    if file_id and dm and hasattr(dm, 'group_overrides'):
-        override = dm.group_overrides.get(file_id)
+    overrides = getattr(dm, 'group_overrides', None) if dm and not ignore_override else None
+    if file_id and overrides:
+        override = overrides.get(file_id)
+        if not override and hasattr(dm, 'get_bundle_for_component'):
+            owner = dm.get_bundle_for_component(file_id)
+            override = overrides.get(owner.bundle_id) if owner else None
         if override:
             return override
 
@@ -324,11 +333,11 @@ def _collect_visible_files(dm, active_file_id=None, loaded_files=None, target_gr
                 x_col = sr.x_columns[0]
                 sub_df = fdata['data'][[x_col] + [w for w in vis_wells if w in fdata['data'].columns]].copy()
                 sub_data = {**fdata, 'data': sub_df}
-                name = os.path.splitext(fdata.get('record', {}).get('name', fid))[0]
+                name = trace_display_name(fdata)
                 groups[group].append((name, sub_data))
         else:
             if vis_state.get(fid, True):
-                name = os.path.splitext(fdata.get('record', {}).get('name', fid))[0]
+                name = trace_display_name(fdata)
                 groups[group].append((name, fdata))
 
     result = dict(groups)
@@ -442,6 +451,91 @@ def _add_signal_processing_overlays(figure, data_manager, file_id, display_opts)
 
 
 
+def _apply_pda_main_preview(figure, data_manager, preview):
+    """Preview one UV channel per visible sample of this plot without changing data.
+
+    The sample being inspected keeps its inspected channel; every other sample shows the same channel when it has
+    it, else its first visible UV trace. A sample with no visible trace (hidden in the tree) gets none.
+    """
+    if not preview or not preview.get('owner_id'):
+        return None
+    from services.pda_service import resolve_pda_source, extract_pda_views, pda_series_sources
+    from services.channel_visibility import channel_identity
+    owner = preview['owner_id']
+    source = resolve_pda_source(data_manager, owner)
+    if not source or source[0] != preview.get('source_id'):
+        return None
+    selected_bundle = data_manager.get_bundle(owner) or data_manager.get_bundle_for_component(owner)
+    if not selected_bundle:
+        return None
+    selected_component = next((c for c in selected_bundle.component_list if c.component_id == owner), None)
+    identity = channel_identity(selected_component) if selected_component else None
+    sources = pda_series_sources(data_manager, owner)
+
+    # Which sample (bundle) does each plotted trace belong to? Traces are matched by the component they plot
+    # (meta.file_id); previews already applied and peak traces are never candidates.
+    owner_of_component = {}
+    for bundle_id in sources:
+        bundle = data_manager.get_bundle(bundle_id)
+        for component in (bundle.component_list if bundle else ()):
+            owner_of_component[component.component_id] = (bundle_id, component)
+    candidates = {bundle_id: [] for bundle_id in sources}
+    for trace in figure.data:
+        meta = trace.meta if isinstance(trace.meta, dict) else {}
+        if meta.get('pda_preview') or meta.get('peak_id'):
+            continue
+        fid = meta.get('file_id')
+        found = owner_of_component.get(fid)
+        if found is None:
+            continue
+        bundle_id, component = found
+        trace_identity = channel_identity(component)
+        if trace_identity and trace_identity[0].startswith('ms:'):
+            continue
+        resolved = resolve_pda_source(data_manager, fid)
+        if not resolved or resolved[0] != sources[bundle_id][0]:
+            continue
+        candidates[bundle_id].append((trace, fid, trace_identity))
+
+    replaced = []
+    for bundle_id, (source_id, payload) in sources.items():
+        options = candidates[bundle_id]
+        target = (next((c for c in options if c[1] == owner), None)
+                  or next((c for c in options if identity and c[2] == identity), None)
+                  or next((c for c in options if c[2] and c[2][0].startswith('uv')), None)
+                  or (options[0] if options else None))
+        if target is None:
+            continue
+        try:
+            view = extract_pda_views(payload, preview.get('wavelength_nm'), preview.get('time_min'))
+        except (ValueError, TypeError):
+            continue
+        trace, fid, _ = target
+        bundle = data_manager.get_bundle(bundle_id)
+        trace.x = view['times'].tolist()
+        trace.y = view['chromatogram'].tolist()
+        sample = f'{bundle.name} · ' if len(sources) > 1 else ''
+        trace.name = f"{sample}PDA {view['wavelength_nm']:.0f} nm · preview"
+        trace.meta = {'pda_preview': True, 'pda_source_id': source_id, 'pda_owner_id': fid}
+        trace.customdata = None
+        trace.hovertemplate = '%{x:.4g} min<br>%{y:.5g} mAU<extra>%{fullData.name}</extra>'
+        replaced.append(fid)
+    return replaced[0] if len(replaced) == 1 else (replaced or None)
+
+
+def _apply_pda_main_cursor(figure, cursor):
+    """Remove legacy editable shapes; the source-owned DOM overlay handles time."""
+    figure.layout.shapes = tuple(shape for shape in (figure.layout.shapes or ())
+                                 if shape.name != 'pda-time-cursor')
+
+
+def _raw_render_revision(inputs):
+    """Identify the figure revision actually delivered to a browser."""
+    import hashlib
+    import json
+    return hashlib.sha256(json.dumps(inputs, sort_keys=True, default=str).encode()).hexdigest()[:24]
+
+
 def _raw_render_settings(settings):
     """Fingerprint only settings that affect a raw figure's rendered content."""
     result = dict(settings)
@@ -504,7 +598,9 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
             tid = _tab_id_from_group(group)
             existing = next((t for t in existing_tabs if t['id'] == tid), None)
             if existing:
-                new_tabs.append(existing)
+                # A regrouped file may reach a tab id with a different key tuple.
+                new_tabs.append({**existing, 'group_key': list(group)}
+                                if existing.get('type') == 'raw' else existing)
             else:
                 new_tabs.append({
                     'id': tid,
@@ -544,7 +640,11 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
         else:
             next_active = new_tabs[0]['id'] if new_tabs else None
 
-        return new_tabs, next_active
+        # A name edit changes loaded-files but not the tab structure. Re-emitting
+        # the same active tab can cancel its concurrent rename render in Dash.
+        if new_tabs == existing_tabs:
+            return dash.no_update, dash.no_update
+        return new_tabs, next_active if next_active != current_active_tab else dash.no_update
 
     @app.callback(
         Output('plot-tab-bar', 'children'),
@@ -662,6 +762,26 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
         # Updating active-file also refreshes Data Overview, metadata and peak
         # results; the figure's settings remain owned by its existing tab key.
         return (selected if selected != current_file else dash.no_update), restored_zoom
+
+    # Only shape edits reach the peak/deconvolution callbacks. Zoom, pan and autorange relayouts used to send the
+    # whole figure (several MB) to the server as State just to be ignored there.
+    app.clientside_callback(
+        """
+        function(relayoutData) {
+            if (!relayoutData) return window.dash_clientside.no_update;
+            var shapes = null;
+            Object.keys(relayoutData).forEach(function(key) {
+                if (key.indexOf('shapes[') === 0) { shapes = shapes || {}; shapes[key] = relayoutData[key]; }
+            });
+            if (!shapes) return window.dash_clientside.no_update;
+            shapes._ts = Date.now();
+            return shapes;
+        }
+        """,
+        Output('main-shape-relayout', 'data'),
+        Input('main-plot', 'relayoutData'),
+        prevent_initial_call=True,
+    )
 
     # Capture user zoom into a dedicated store so it survives figure rebuilds.
     app.clientside_callback(
@@ -908,6 +1028,14 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
                 file_id = comp_ids[0]
                 log.debug(f"Resolved LCMS bundle click to first component: {file_id}")
 
+        # A compact sample row can outlive a legend visibility change.
+        # Always select the currently visible detector channel for analysis.
+        if hasattr(data_manager, 'get_bundle_for_component'):
+            channel_bundle = data_manager.get_bundle_for_component(file_id)
+            if channel_bundle and channel_bundle.bundle_type in (BundleType.CHROMATOGRAM, BundleType.LCMS):
+                from services.channel_visibility import visible_component_id
+                file_id = visible_component_id(data_manager, channel_bundle, file_id)
+
         log.debug(f"File clicked: {file_id} (tab={active_tab})")
 
         # Don't redraw if the same file is already active
@@ -1088,7 +1216,7 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
         [Output('main-plot', 'figure', allow_duplicate=True),
          Output('zoom-state', 'data', allow_duplicate=True)],
         [Input('active-plot-tab', 'data'),
-         Input('pub-plot-trigger', 'data'),
+         State('pub-plot-trigger', 'data'),
          Input('active-file', 'data'),
          Input('current-plot-settings', 'data'),
          Input('render-trigger', 'data'),
@@ -1110,7 +1238,9 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
          State('deconv-markers', 'data'),
          State('deconv-result', 'data'),
          State('int-display-opts', 'value'),
-         State('rendered-plot-tabs', 'data')],
+         State('rendered-plot-tabs', 'data'),
+         State('main-inspector-context', 'data'),
+         Input('pda-preview', 'data'), State('pda-main-cursor', 'data')],
         prevent_initial_call=True
     )
     def master_render(active_tab_id, plot_trigger, active_file, plot_settings, render_trigger,
@@ -1118,7 +1248,7 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
                       link_x, y_scope,
                       loaded_files, plot_tabs, pub_plot_figure, selected_peak_id,
                       zoom_state, zoom_memory, custom_figures,
-                      baseline_mode, deconv_markers, deconv_result, display_opts, rendered_tabs=None):
+                      baseline_mode, deconv_markers, deconv_result, display_opts, rendered_tabs=None, current_figure=None, pda_preview=None, pda_cursor=None):
         """Single owner of main-plot. Renders the active plot tab's figure."""
         import plotly.graph_objects as go
         from services.plot_settings_service import PlotSettingsService, DEFAULT_PLOT_SETTINGS
@@ -1197,8 +1327,9 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
             return fig, no_zoom
 
         # -- Raw tab --
-        if trigger_id in ('pub-plot-trigger', 'pub-table', 'peak-table', 'cross-sample-table'):
-            return dash.no_update, no_zoom
+        # Table-derived publication previews do not drive this plot. Other
+        # shared inputs still use the delivery check below because Dash can
+        # cancel a response while settings are being hydrated.
 
         s = {**DEFAULT_PLOT_SETTINGS, **(plot_settings or {})}
         layout_mode = s.get('layout_mode', 'overlay')
@@ -1226,13 +1357,21 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
             'deconvolution': deconv_result, 'display': display_opts,
             'visibility': data_manager.visibility_state,
             'files': [record.get('id') for record in (loaded_files or [])],
+            # Adding a wavelength does not change its parent bundle's ID.
+            'signals': sorted(data_manager.loaded_data),
+            'pda_preview': pda_preview,
             'link_x': link_x, 'y_scope': y_scope,
         }
+        render_revision = _raw_render_revision(render_inputs)
         if render_cache.matches(active_tab_id, render_inputs):
-            if active_tab_id in (rendered_tabs or []):
+            delivered_meta = (current_figure or {}).get('layout', {}).get('meta') or {}
+            if (active_tab_id in (rendered_tabs or []) and isinstance(delivered_meta, dict)
+                    and delivered_meta.get('gecko_tab_id') == active_tab_id
+                    and delivered_meta.get('gecko_render_revision') == render_revision):
                 return dash.no_update, set_zoom
-            # A fresh browser still needs a figure even when another client has
-            # already populated the server cache. Warm clients retain their DOM.
+            # Computing a revision is not proof that the browser received it:
+            # Dash may cancel its response when a newer callback starts. Resend
+            # the cached figure until the browser's figure acknowledges it.
             return render_cache.get(active_tab_id, render_inputs), set_zoom
 
         visible_files = _collect_visible_files(
@@ -1242,7 +1381,7 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
         visible_files = filter_ms_polarity(visible_files, s.get('ms_polarity', 'both'))
         if not visible_files:
             figure = plot_manager.create_hidden_state_plot()
-            figure.update_layout(meta={'gecko_tab_id': active_tab_id})
+            figure.update_layout(meta={'gecko_tab_id': active_tab_id, 'gecko_render_revision': render_revision})
             render_cache.put(active_tab_id, render_inputs, figure)
             return figure, set_zoom
 
@@ -1255,30 +1394,34 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
             smooth_plotly_traces(fig_sm.data, smooth_window)
             figure = fig_sm
 
-        show_peaks = 'peaks' in (display_opts or ['peaks'])
+        preview_owner = _apply_pda_main_preview(figure, data_manager, pda_preview)
+
+        show_peaks = 'peaks' in (['peaks'] if display_opts is None else display_opts)
 
         # If the user switched palette, update peak_service and re-group
         # so peak.color reflects the new palette. Compare by name (robust).
         from services.plot_settings_service import PlotSettingsService as _PSS
-        _pal_name = s.get('palette', 'okabe_ito')
+        from services.plot_settings_service import DEFAULT_PALETTE as _DEFAULT_PALETTE
+        _pal_name = s.get('palette', _DEFAULT_PALETTE)
         _ps = data_manager.peak_service
         if getattr(_ps, '_palette_name', None) != _pal_name:
             _ps.set_palette(_pal_name, _PSS.get_color_palette(_pal_name))
             _ps.group_peaks_across_samples(
                 file_overlay_map=data_manager.build_file_overlay_map())
 
-        if show_peaks:
+        if show_peaks or deconv_result:
             fig_obj_for_peaks = go.Figure(figure) if isinstance(figure, dict) else figure
             cleanup_peak_traces(fig_obj_for_peaks)
             flat_files = [entry for files in visible_files.values() for entry in files]
             for row_idx, (_name, fdata) in enumerate(flat_files, start=1):
                 fid = _find_file_id(data_manager, fdata)
-                if not fid:
+                if not fid or fid in ([preview_owner] if isinstance(preview_owner, str) else (preview_owner or [])):
                     continue
                 peaks = data_manager.peak_service.get_peaks(fid)
-                deconvolving = baseline_mode == 'deconvolve' and any(p.peak_id == selected_peak_id for p in peaks)
+                preview_peak_id = (deconv_result or {}).get('peak_id', selected_peak_id)
+                deconvolving = bool(deconv_result) and any(p.peak_id == preview_peak_id for p in peaks)
                 if deconvolving:
-                    peaks = [p for p in peaks if p.peak_id != selected_peak_id]
+                    peaks = [p for p in peaks if p.peak_id != preview_peak_id]
                 if not peaks and not deconvolving:
                     continue
                 time_arr, signal_arr = get_xy_arrays(data_manager, fid)
@@ -1333,6 +1476,8 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
             PlotSettingsService.apply_to_figure(fig_obj, ps)
             from services.axis_linking import apply_axis_linking
             apply_axis_linking(fig_obj, bool(link_x), y_scope == 'global')
+            from services.signal_axis_range import apply_signal_x_bounds
+            apply_signal_x_bounds(fig_obj)
             fig_obj.update_layout(uirevision=active_tab_id,
                 meta={**(fig_obj.layout.meta or {}), 'gecko_tab_id': active_tab_id})
             if (effective_zoom and s.get('auto_range', True)
@@ -1352,6 +1497,8 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
         except Exception:
             log.exception("Failed to apply plot settings to raw figure")
 
+        _apply_pda_main_cursor(figure, pda_cursor)
+        figure.update_layout(meta={**(figure.layout.meta or {}), 'gecko_render_revision': render_revision})
         render_cache.put(active_tab_id, render_inputs, figure)
         return figure, set_zoom
 
@@ -1362,7 +1509,7 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
     @app.callback(
         Output('active-file', 'data', allow_duplicate=True),
         Input('main-plot', 'clickData'),
-        [State('main-plot', 'figure'),
+        [State('main-inspector-context', 'data'),
          State('active-file', 'data')],
         prevent_initial_call=True,
     )
@@ -1419,55 +1566,38 @@ def create_bundle_data_table(bundle, file_data: Dict[str, Any], data_manager) ->
         
         files_section = html.Div(file_list_items, style={'marginBottom': '20px', 'paddingLeft': '10px'})
 
-        # Rich metadata section
-        metadata_rows = []
-        field_display_order = [
-            ('file_path', 'File Path'), ('channel', 'Channel'), ('data_vault', 'Data Vault'),
-            ('injection', 'Injection'), ('injection_number', 'Injection Number'), ('position', 'Position'),
-            ('processing_method', 'Processing Method'), ('instrument_method', 'Instrument Method'),
-            ('type', 'Type'), ('status', 'Status'), ('injection_date', 'Injection Date'),
-            ('injection_time', 'Injection Time'), ('injection_volume_μl', 'Injection Volume μL'),
-            ('dilution_factor', 'Dilution Factor'), ('weight', 'Weight'),
-            ('time_min_min', 'Time Min (min)'), ('time_max_min', 'Time Max (min)'),
-            ('data_points', 'Data Points'), ('detector', 'Detector'),
-            ('exporting_data_system', 'Exporting Data System'), ('signal_quantity', 'Signal Quantity'),
-            ('signal_unit', 'Signal Unit'), ('signal_min', 'Signal Min'), ('signal_max', 'Signal Max'),
-            ('driver_name', 'Driver Name'), ('channel_type', 'Channel Type'),
-            ('min_step_s', 'Min Step (s)'), ('max_step_s', 'Max Step (s)'), ('average_step_s', 'Average Step (s)'),
-            ('signal_info', 'Signal Info'), ('wavelength_nm', 'Wavelength (nm)'),
-            ('time_range', 'Time Range'), ('value_range', 'Value Range'),
-        ]
-        
-        for field_key, field_label in field_display_order:
-            if field_key in metadata:
-                value = metadata[field_key]
-                metadata_rows.append(html.Tr([
-                    html.Td(field_label, style={'padding': '6px 10px', 'fontWeight': '500', 'color': '#555',
-                        'fontSize': '13px', 'verticalAlign': 'top', 'width': '40%', 'borderBottom': '1px solid #f0f0f0'}),
-                    html.Td(str(value), style={'padding': '6px 10px', 'color': '#333', 'fontSize': '13px',
-                        'verticalAlign': 'top', 'borderBottom': '1px solid #f0f0f0', 'wordBreak': 'break-word'})
-                ]))
-        
-        for key, value in metadata.items():
-            if key not in [field[0] for field in field_display_order] and key != 'file_type':
-                display_key = key.replace('_', ' ').title()
-                metadata_rows.append(html.Tr([
-                    html.Td(display_key, style={'padding': '6px 10px', 'fontWeight': '500', 'color': '#555',
-                        'fontSize': '13px', 'verticalAlign': 'top', 'width': '40%', 'borderBottom': '1px solid #f0f0f0'}),
-                    html.Td(str(value), style={'padding': '6px 10px', 'color': '#333', 'fontSize': '13px',
-                        'verticalAlign': 'top', 'borderBottom': '1px solid #f0f0f0', 'wordBreak': 'break-word'})
-                ]))
-        
-        metadata_section = html.Div([
-            html.Table(metadata_rows, style={'width': '100%', 'borderCollapse': 'collapse',
-                'backgroundColor': '#ffffff', 'border': '1px solid #e0e0e0', 'borderRadius': '4px'})
-        ]) if metadata_rows else html.Div()
+        metadata_section = build_metadata_panel(metadata)
 
         return html.Div([bundle_header, files_section, metadata_section], style={'padding': '5px 0'})
 
     except Exception as e:
         log.exception("Unable to display bundle details")
         return build_message_state(title="Unable to display bundle details", subtitle=str(e), icon="⚠️", variant="error")
+
+
+def _measurement_metadata_summary(key, value):
+    return measurement_summary(key, value)
+
+
+_META_LABEL_STYLE = {'padding': '5px 10px', 'fontWeight': '500', 'color': '#555', 'fontSize': '13px',
+                     'verticalAlign': 'top', 'width': '38%', 'borderBottom': '1px solid #f0f0f0'}
+_META_VALUE_STYLE = {'padding': '5px 10px', 'color': '#333', 'fontSize': '13px', 'verticalAlign': 'top',
+                     'borderBottom': '1px solid #f0f0f0', 'wordBreak': 'break-word'}
+
+
+def build_metadata_panel(metadata: Optional[Dict[str, Any]]) -> html.Div:
+    """Curated metadata grouped as Sample / Acquisition / Instrument / Method / Detector / Channels."""
+    sections = []
+    for group, rows in group_metadata(metadata):
+        sections.append(html.Div([
+            html.H6(group, style={'margin': '0 0 4px 0', 'color': '#333', 'fontSize': '13px', 'fontWeight': '600'}),
+            html.Table(
+                [html.Tr([html.Td(label, style=_META_LABEL_STYLE), html.Td(text, style=_META_VALUE_STYLE)])
+                 for label, text in rows],
+                style={'width': '100%', 'borderCollapse': 'collapse', 'backgroundColor': '#ffffff',
+                       'border': '1px solid #e0e0e0', 'borderRadius': '4px'}),
+        ], className='metadata-group', style={'marginBottom': '12px'}))
+    return html.Div(sections) if sections else html.Div()
 
 
 def create_data_table(file_data: Dict[str, Any]) -> html.Div:
@@ -1504,14 +1634,6 @@ def create_data_table(file_data: Dict[str, Any]) -> html.Div:
             if sr.sample_name:
                 sr_items.append(html.P(f"Sample: {sr.sample_name}",
                                         style={'margin': '2px 0', 'fontSize': '13px'}))
-            for key, val in sr.metadata.items():
-                if isinstance(val, dict):
-                    for k2, v2 in val.items():
-                        sr_items.append(html.P(f"{k2}: {v2}",
-                                               style={'margin': '2px 0', 'fontSize': '13px'}))
-                else:
-                    sr_items.append(html.P(f"{key}: {val}",
-                                           style={'margin': '2px 0', 'fontSize': '13px'}))
             sr_section = html.Div([
                 html.H6("Pipeline Detection", style={'margin': '0 0 6px 0', 'color': '#333'}),
                 html.Div(sr_items, style={'paddingLeft': '4px'})
@@ -1519,33 +1641,11 @@ def create_data_table(file_data: Dict[str, Any]) -> html.Div:
                       'border': '1px solid #e0e0e0', 'borderRadius': '4px'})
 
         # Metadata section
-        if metadata:
-            metadata_items = []
-            for key, value in metadata.items():
-                if key != 'file_type':  # Skip redundant info
-                    display_key = key.replace('_', ' ').title()
-                    metadata_items.append(html.Tr([
-                        html.Td(display_key, style={'fontWeight': 'bold', 'padding': '4px 8px'}),
-                        html.Td(str(value), style={'padding': '4px 8px'})
-                    ]))
-
-            if metadata_items:
-                metadata_section = html.Div([
-                    html.H6("📊 Metadata", style={'margin': '0 0 8px 0', 'color': '#333'}),
-                    html.Table(
-                        metadata_items,
-                        style={
-                            'width': '100%',
-                            'border': '1px solid #e0e0e0',
-                            'borderRadius': '4px',
-                            'fontSize': '13px'
-                        }
-                    )
-                ], style={'marginBottom': '15px'})
-            else:
-                metadata_section = html.Div()
-        else:
-            metadata_section = html.Div()
+        groups = build_metadata_panel(metadata)
+        metadata_section = html.Div([
+            html.H6("\U0001F4CA Metadata", style={'margin': '0 0 8px 0', 'color': '#333'}),
+            groups,
+        ], style={'marginBottom': '15px'}) if groups.children else html.Div()
 
         # Data info (no preview - that's in Data Overview tab)
         if data is not None and not data.empty:

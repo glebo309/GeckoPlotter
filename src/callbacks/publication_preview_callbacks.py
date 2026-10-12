@@ -114,7 +114,7 @@ def register_publication_preview_callbacks(app, data_manager):
             fig_obj = go.Figure(data=all_traces, layout=base_obj.layout)
 
         # Peak overlays
-        show_peaks = 'peaks' in (display_opts or ['peaks'])
+        show_peaks = 'peaks' in (['peaks'] if display_opts is None else display_opts)
         if show_peaks:
             if layout_mode == 'stacked':
                 flat_files = []
@@ -282,7 +282,7 @@ def register_publication_preview_callbacks(app, data_manager):
         entry = (custom_figures or {}).get(active_tab_id, {})
         render_cache.prune(t['id'] for t in (plot_tabs or []))
         cache_key = {'settings':plot_settings, 'snapshot':entry, 'rows':sub_rows, 'cols':sub_cols,
-                     'link_x':zoom_sync}
+                     'link_x':zoom_sync, 'visibility':dict(data_manager.visibility_state)}
         if entry.get('source_group_key'):
             cache_key.update(render=render_trigger, peak=peak_trigger, files=loaded_files, order=file_order)
         cached = render_cache.get(active_tab_id, cache_key)
@@ -309,6 +309,9 @@ def register_publication_preview_callbacks(app, data_manager):
             fig_obj = editable_publication_figure(snapshot, settings, entry.get('plot_settings'))
         else:
             fig_obj = go.Figure()
+
+        from services.legend_visibility import apply_file_visibility
+        apply_file_visibility(fig_obj, data_manager.visibility_state)
 
         fig_obj.update_layout(
             uirevision=active_tab_id,

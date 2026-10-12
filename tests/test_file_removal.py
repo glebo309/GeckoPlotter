@@ -249,3 +249,90 @@ def test_new_upload_after_removal_does_not_restore_removed_files_without_undo():
     store.file_removal_service.undo()
     assert store.get_data_by_id('tic') is not None
     assert len(store.get_loaded_files_list()) == 3
+
+
+def channel_samples():
+    from test_channel_visibility import samples
+    store=samples()
+    for name in ('a','b'):
+        bundle=store.get_bundle(name)
+        first,second=bundle.component_list
+        second.original_filename=first.original_filename
+        first.raw_bytes=b'original ASCII'
+        first.metadata['pda']={'time_min':[0,1,2],'wavelength_nm':[250,263,280],
+                               'absorbance_mau':[[0,0,0],[3,4,5],[0,0,0]]}
+        first.metadata['instrument_status']={'pressure':[1,2,3]}
+        second.metadata.update(pda_source_id=first.component_id,source_file_id=first.component_id)
+        store.peak_service._peaks[first.component_id]=[Peak(name+'peak',first.component_id,'P',1,0,2,3,3,2)]
+    return store
+
+
+def test_remove_shared_channel_is_one_undo_and_preserves_sibling_edits():
+    store=channel_samples()
+    frames={c.component_id:c.dataframe for b in store.iter_bundles() for c in b.component_list}
+    record=store.file_removal_service.remove_channels(['a','b'],'uv:250',active_file='b250')
+    assert record.label=='250 nm channel from 2 samples'
+    assert len(store.file_removal_service._history)==1
+    assert all(store.get_data_by_id(fid) is None for fid in ('a250','b250'))
+    assert all(fid not in store.peak_service._peaks for fid in ('a250','b250'))
+    store.get_bundle('a').component_list[0].metadata['display_name']='Edited surviving channel'
+    store.file_removal_service.undo()
+    assert not store.file_removal_service.can_undo
+    assert store.get_bundle('a').component_list[1].metadata['display_name']=='Edited surviving channel'
+    for fid,frame in frames.items():
+        assert store.get_data_by_id(fid)['data'] is frame
+    assert store.peak_service._peaks['b250'][0].peak_id=='bpeak'
+
+
+def test_remove_pda_owner_keeps_original_payload_and_extraction_then_undo():
+    from services.pda_service import resolve_pda_source,add_pda_chromatogram
+    store=channel_samples()
+    owner=store.get_bundle('a').component_list[0]
+    matrix=owner.metadata['pda']
+    raw=owner.raw_bytes
+    store.file_removal_service.remove_channels(['a'],'uv:250')
+    source,payload=resolve_pda_source(store,'a263')
+    assert source=='a263' and payload is matrix
+    assert store.get_bundle('a').primary.raw_bytes is raw
+    assert store.get_bundle('a').primary.metadata['instrument_status'] is owner.metadata['instrument_status']
+    added=add_pda_chromatogram(store,'a263',280)
+    store.get_bundle('a').component_list[0].metadata['user_note']='keep this'
+    store.file_removal_service.undo()
+    assert resolve_pda_source(store,added)==('a250',matrix)
+    assert resolve_pda_source(store,'a263')==('a250',matrix)
+    assert store.get_data_by_id(added) is not None
+    siblings=store.get_bundle('a').component_list
+    assert siblings[1].metadata['user_note']=='keep this'
+    assert siblings[0].raw_bytes is raw
+    assert not siblings[1].raw_bytes
+    assert 'pda' not in siblings[1].metadata
+
+
+def test_remove_channel_ignores_unrelated_groups_and_can_remove_final_signal():
+    store=channel_samples()
+    assert store.file_removal_service.remove_channels(['a'],'uv:999') is None
+    assert not store.file_removal_service.can_undo
+    store.file_removal_service.remove_channels(['a'],'uv:263')
+    assert store.get_data_by_id('b263') is not None
+    store.file_removal_service.remove_channels(['a'],'uv:250')
+    assert store.get_bundle('a') is None
+    store.file_removal_service.undo()
+    assert store.get_data_by_id('a250') is not None
+    assert store.get_data_by_id('a263') is None
+
+
+def test_removing_one_lcms_channel_keeps_remaining_peak_owner_and_render_source_stable():
+    from test_channel_visibility import signal
+    from services.data_store import ComponentRole,SourceCategory
+    store=DataStore()
+    pos=signal('pos',role=ComponentRole.MS_POSITIVE,category=SourceCategory.LCMS_MS)
+    uv=signal('uv',280,role=ComponentRole.VWD_A,category=SourceCategory.LCMS_UV)
+    store.add_bundle(Bundle('run','Run',BundleType.LCMS,component_list=[pos,uv]))
+    peak=Peak('keep','uv','P',1,0,2,3,3,2)
+    store.peak_service._peaks['uv']=[peak]
+    store.file_removal_service.remove_channels(['run'],'ms:positive')
+    assert store.peak_owner_id('uv')=='uv'
+    assert list(store.loaded_data)==['uv']
+    assert store.peak_service.get_peaks(store.peak_owner_id('uv'))==[peak]
+    store.file_removal_service.undo()
+    assert list(store.loaded_data)==['pos','uv']

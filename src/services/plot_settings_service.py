@@ -7,96 +7,34 @@ from typing import Dict, List, Optional
 
 import plotly.graph_objects as go
 
+from services.crameri_colors import CATEGORICAL, CATEGORICAL_LABELS
+from services.themes import DARK_THEMES, DEFAULT_THEME
+
 
 # ---------------------------------------------------------------------------
 # Color palettes
 # ---------------------------------------------------------------------------
 
 COLOR_PALETTES: Dict[str, List[str]] = {
-    "okabe_ito": [
-        "#E69F00",
-        "#56B4E9",
-        "#009E73",
-        "#F0E442",
-        "#0072B2",
-        "#D55E00",
-        "#CC79A7",
-    ],
-    "plotly": [
-        "#636EFA",
-        "#EF553B",
-        "#00CC96",
-        "#AB63FA",
-        "#FFA15A",
-        "#19D3F3",
-        "#FF6692",
-        "#B6E880",
-        "#FF97FF",
-        "#FECB52",
-    ],
-    "d3": [
-        "#1F77B4",
-        "#FF7F0E",
-        "#2CA02C",
-        "#D62728",
-        "#9467BD",
-        "#8C564B",
-        "#E377C2",
-        "#7F7F7F",
-        "#BCBD22",
-        "#17BECF",
-    ],
-    "pastel": [
-        "#A8D8EA",
-        "#FFB7B2",
-        "#B5EAD7",
-        "#FFDAC1",
-        "#C7CEEA",
-        "#E2C2F8",
-        "#F5E6CC",
-        "#D4E09B",
-        "#F6D6AD",
-        "#CBDFBD",
-    ],
-    # Crameri scientific colour maps — categorical (CVD-friendly, perceptually uniform)
-    # Ref: Crameri (2018) doi:10.5281/zenodo.1243862
-    "batlow": [
-        "#011959",
-        "#103F60",
-        "#1C6B71",
-        "#44877D",
-        "#7AAB78",
-        "#B8CC6B",
-        "#EEDA71",
-        "#FAB85D",
-        "#E88556",
-        "#D94D4D",
-    ],
-    "hawaii": [
-        "#8C0273",
-        "#8B2B8B",
-        "#77539B",
-        "#5878A2",
-        "#3E98A0",
-        "#3CB491",
-        "#5FCC72",
-        "#96DE51",
-        "#C9EC53",
-        "#F1F1B0",
-    ],
-    "roma": [
-        "#7E1900",
-        "#B14F12",
-        "#D98B3B",
-        "#F2C971",
-        "#FEFEBB",
-        "#87CFBA",
-        "#3D9BA5",
-        "#1D6688",
-        "#1B3764",
-        "#1A0C3C",
-    ],
+    # Okabe-Ito (colour-blind safe) plus Fabio Crameri's categorical scientific colour maps
+    # (https://www.fabiocrameri.ch/colourmaps/, doi:10.5281/zenodo.1243862).
+    "okabe_ito": ["#E69F00", "#56B4E9", "#009E73", "#F0E442", "#0072B2", "#D55E00", "#CC79A7"],
+    # Familiar Matplotlib / Seaborn / Plotly palettes
+    "muted": ["#4878D0", "#EE854A", "#6ACC64", "#D65F5F", "#956CB4", "#8C613C", "#DC7EC0", "#797979", "#D5BB67", "#82C6E2"],
+    "pastel": ["#A1C9F4", "#FFB482", "#8DE5A1", "#FF9F9B", "#D0BBFF", "#DEBB9B", "#FAB0E4", "#CFCFCF", "#FFFEA3", "#B9F2F0"],
+    "set2": ["#66C2A5", "#FC8D62", "#8DA0CB", "#E78AC3", "#A6D854", "#FFD92F", "#E5C494", "#B3B3B3"],
+    "tab10": ["#1F77B4", "#FF7F0E", "#2CA02C", "#D62728", "#9467BD", "#8C564B", "#E377C2", "#7F7F7F", "#BCBD22", "#17BECF"],
+    "plotly": ["#636EFA", "#EF553B", "#00CC96", "#AB63FA", "#FFA15A", "#19D3F3", "#FF6692", "#B6E880", "#FF97FF", "#FECB52"],
+    **CATEGORICAL,
 }
+DEFAULT_PALETTE = "muted"
+
+
+def palette_options():
+    named = [('muted', 'Muted (Seaborn)'), ('pastel', 'Pastel (Seaborn)'), ('set2', 'Set2 (Matplotlib)'),
+             ('tab10', 'Tab10 (Matplotlib)'), ('plotly', 'Plotly'), ('okabe_ito', 'Okabe-Ito')]
+    return [{'label': label, 'value': k} for k, label in named] + [
+        {'label': 'Crameri ' + CATEGORICAL_LABELS[k], 'value': k} for k in CATEGORICAL]
 
 # ---------------------------------------------------------------------------
 # Legend position lookup
@@ -134,8 +72,8 @@ DEFAULT_PLOT_SETTINGS: Dict[str, object] = {
     "y_scale": "linear",
     "categorical_x": True,
     # Theme & Colors
-    "theme": "plotly_white",
-    "palette": "okabe_ito",
+    "theme": DEFAULT_THEME,
+    "palette": DEFAULT_PALETTE,
     "bg_color": "#ffffff",
     "paper_color": "#ffffff",
     # Traces
@@ -207,8 +145,8 @@ class PlotSettings:
     categorical_x: bool = True
 
     # -- 3. Style / Theme --
-    theme: str = "plotly_white"
-    palette: str = "okabe_ito"
+    theme: str = DEFAULT_THEME
+    palette: str = DEFAULT_PALETTE
     bg_color: str = "#ffffff"            # plot area background
     paper_color: str = "#ffffff"         # surrounding paper
 
@@ -237,6 +175,8 @@ class PlotSettings:
     # -- 7. Legend --
     show_legend: bool = True
     legend_pos: str = "top-right"
+    legend_font_size: Optional[float] = None
+    legend_positions: Dict[str, dict] = field(default_factory=dict)
 
     # -- 8. Grid & Frame --
     show_grid_x: bool = True
@@ -306,8 +246,8 @@ class PlotSettingsService:
 
     @staticmethod
     def get_color_palette(name: str) -> List[str]:
-        """Return the colour list for *name*, falling back to ``okabe_ito``."""
-        return list(COLOR_PALETTES.get(name, COLOR_PALETTES["okabe_ito"]))
+        """Return the colour list for *name*, falling back to the default."""
+        return list(COLOR_PALETTES.get(name, COLOR_PALETTES[DEFAULT_PALETTE]))
 
     # -- Legend coordinates --------------------------------------------------
 
@@ -338,8 +278,8 @@ class PlotSettingsService:
         # serialised into dcc.Store JSON.  All visual properties are set
         # explicitly below.
         import plotly.io as pio
-        theme = pio.templates[settings.theme].layout if settings.theme in pio.templates else pio.templates['plotly_white'].layout
-        foreground = '#f2f5fa' if settings.theme == 'plotly_dark' else '#444'
+        theme = pio.templates[settings.theme].layout if settings.theme in pio.templates else pio.templates[DEFAULT_THEME].layout
+        foreground = theme.font.color or ('#f2f5fa' if settings.theme in DARK_THEMES else '#444')
         fig.layout.template = None
         # Also strip any coloraxis entries that may have leaked in
         layout_json = fig.layout.to_plotly_json()
@@ -535,9 +475,10 @@ class PlotSettingsService:
                     x_domain = layout_json.get('xaxis' + suffix, {}).get('domain', [0, 1])
                     coords['y'] = y_domain[0] + coords['y'] * (y_domain[1] - y_domain[0])
                     coords['x'] = x_domain[0] + coords['x'] * (x_domain[1] - x_domain[0])
+                coords.update(settings.legend_positions.get(lk, {}))
                 lk_kwargs.update(coords)
                 lk_kwargs.update(bgcolor=_hex_to_rgba(settings.paper_color, .85), borderwidth=0,
-                                 font=dict(size=settings.font_size, color=foreground))
+                                 font=dict(size=settings.legend_font_size or settings.font_size, color=foreground))
             fig.update_layout(**{lk: lk_kwargs})
 
         # -- Colour palette & trace styling ----------------------------------

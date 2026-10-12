@@ -5,7 +5,7 @@ Does NOT attempt content inspection -- that is Stage 2's job.
 """
 
 _KNOWN_EXTENSIONS = {
-    "csv", "tsv", "txt", "log",
+    "csv", "tsv", "txt", "asc", "log",
     "json", "xml",
     "cdf", "cdfx",
     "xlsx", "xls",

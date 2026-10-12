@@ -105,3 +105,20 @@ def test_scan_cursor_owner_is_resolved_spectral_component_even_when_uv_selected(
     monkeypatch.setattr('callbacks.lcms_callbacks._scan_label', lambda *args: 'Scan 2')
     result = callback('uv', [{'id': fid} for fid in ('positive', 'negative', 'uv')])
     assert result[-1] == {'file_id': 'negative'}
+
+
+@pytest.mark.parametrize('control', ['ms', 'eic'])
+@pytest.mark.parametrize('previous_mode', ['positive', 'negative'])
+def test_uv_selection_survives_programmatic_polarity_control_sync(monkeypatch, control, previous_mode):
+    import dash
+    from callbacks.lcms_callbacks import _resolve_lcms_spectral_entry
+    functions,_=fixture()
+    sync=functions['sync_polarity_toggle']
+    store=next(cell.cell_contents for cell in sync.__closure__ if isinstance(cell.cell_contents,DataStore))
+    _resolve_lcms_spectral_entry(store,previous_mode,store.lcms_service)
+    values=sync('uv')
+    monkeypatch.setattr('callbacks.lcms_callbacks.callback_context',SimpleNamespace(
+        triggered=[{'prop_id':control+'-polarity-toggle.value'}]))
+    with pytest.raises(dash.exceptions.PreventUpdate):
+        functions['polarity_toggle_switch'](values[0],values[4],'uv')
+    assert _resolve_lcms_spectral_entry(store,'uv',store.lcms_service)[0]==previous_mode

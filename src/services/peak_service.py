@@ -14,7 +14,7 @@ from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
-from scipy.signal import find_peaks
+from scipy.signal import find_peaks, peak_widths
 
 # Okabe-Ito colorblind-friendly palette
 OKABE_ITO_PALETTE = [
@@ -64,8 +64,10 @@ class PeakService:
 
     MAX_UNDO = 50
 
-    def __init__(self, file_id_resolver=None) -> None:
+    def __init__(self, file_id_resolver=None, color_scope_resolver=None) -> None:
         self._file_id_resolver = file_id_resolver
+        self._color_scope_resolver = color_scope_resolver
+        self._grouping_window = None
         self._peaks: Dict[str, List[Peak]] = {}
         self._color_index: int = 0
         self._file_color_index: Dict[str, int] = {}
@@ -75,7 +77,7 @@ class PeakService:
         self._undo_stack: List[Dict[str, List[Peak]]] = []
         self._redo_stack: List[Dict[str, List[Peak]]] = []
         self._palette: List[str] = list(OKABE_ITO_PALETTE)
-        self._palette_name: str = 'okabe_ito'
+        self._palette_name: str = 'muted'
 
     def _resolve_file_id(self, file_id):
         """Use one peak owner for equivalent bundle/primary-component selections."""
@@ -163,15 +165,15 @@ class PeakService:
 
     @staticmethod
     def _is_same_peak(existing: Peak, rt: float, rt_start: float, rt_end: float, rt_tol: float = 0.08) -> bool:
-        """Return True if a candidate peak likely represents an existing peak."""
-        if abs(existing.rt - rt) <= rt_tol:
-            return True
-        if existing.rt_start and existing.rt_end:
-            overlap_start = max(existing.rt_start, rt_start)
-            overlap_end = min(existing.rt_end, rt_end)
-            if overlap_end >= overlap_start:
-                return True
-        return False
+        """Keep existing integrations without suppressing neighbouring apices.
+
+        Detected tails can overlap a manually drawn baseline even when the
+        candidate apex lies outside it. Only an apex inside that integration
+        is already accounted for; touching/overlapping tails are not enough.
+        """
+        if existing.rt_end > existing.rt_start:
+            return existing.rt_start <= rt <= existing.rt_end
+        return abs(existing.rt - rt) <= rt_tol
 
     # ------------------------------------------------------------------
     # Peak detection
@@ -186,6 +188,9 @@ class PeakService:
         slope_threshold: float = 0.001,
         extension_factor: float = 1.1,
         min_prominence: Optional[float] = None,
+        display_signal: Optional[np.ndarray] = None,
+        baseline: Optional[np.ndarray] = None,
+        integration_baseline: Optional[str] = None,
     ) -> List[Peak]:
         """
         Auto-detect peaks in a chromatographic signal.
@@ -201,18 +206,24 @@ class PeakService:
         threshold : float
             Minimum peak height as a fraction of the signal range.
         slope_threshold : float
-            Absolute slope value below which a peak boundary is placed.
+            Retained for compatibility; boundaries use relative prominence.
         extension_factor : float
             Multiplicative factor to widen detected boundaries slightly.
         min_prominence : float, optional
             Minimum prominence for scipy.signal.find_peaks. If None, derived
             from threshold and signal range.
+        integration_baseline : {'linear', 'zero'}, optional
+            Baseline for quantitation and fill on display_signal. Detection
+            still uses signal (the processed trace). None preserves the
+            supplied estimated baseline and corrected-signal quantitation.
 
         Returns
         -------
         List[Peak]
             Detected peaks, stored internally and returned.
         """
+        if integration_baseline not in (None, 'linear', 'zero'):
+            raise ValueError('Unknown integration baseline')
         file_id = self._resolve_file_id(file_id)
         signal = np.asarray(signal, dtype=float)
         time_axis = np.asarray(time_axis, dtype=float)
@@ -236,42 +247,86 @@ class PeakService:
 
         peaks: List[Peak] = []
         existing_non_detected = [p for p in self._peaks.get(file_id, []) if p.source != 'detected']
-        dt = np.median(np.diff(time_axis)) if time_axis.size > 1 else 1.0
-        slope = np.gradient(signal, dt)
-
-        for idx in indices:
+        # Prominence-relative widths are independent of detector units. Bound
+        # each integration by neighbouring valleys so large ion counts cannot
+        # make every peak extend over the entire chromatogram.
+        _, _, left_ips, right_ips = peak_widths(
+            signal, indices, rel_height=0.99,
+            prominence_data=(properties['prominences'], properties['left_bases'], properties['right_bases']),
+        )
+        valleys = [int(a + np.argmin(signal[a:b+1])) for a, b in zip(indices[:-1], indices[1:])]
+        # Unresolved neighbours share the outer baseline. A valley partitions
+        # their areas vertically; it must not pull the baseline up into a peak.
+        # Resolved peaks retain their own baseline. The 1% return criterion is
+        # relative to the smaller adjacent peak on the corrected signal.
+        cluster_geometry = {}
+        if integration_baseline in ('linear', 'zero') and len(indices):
+            raw = signal if display_signal is None else np.asarray(display_signal)
+            groups = [[0]]
+            for number, valley in enumerate(valleys):
+                return_level = .01 * min(signal[indices[number]], signal[indices[number+1]])
+                if signal[valley] > max(return_level, 0):
+                    groups[-1].append(number+1)
+                else:
+                    groups.append([number+1])
+            for group in groups:
+                first, last = group[0], group[-1]
+                lower = valleys[first-1] if first else 0
+                upper = valleys[last] if last < len(valleys) else len(signal)-1
+                left, right = int(indices[first]), int(indices[last])
+                # Use the outer peaks' own heights, so a tall neighbour cannot
+                # truncate the tail of a smaller peak in the same cluster.
+                left_floor = max(0, .01 * signal[left])
+                right_floor = max(0, .01 * signal[right])
+                while left > lower and signal[left] > left_floor:
+                    left -= 1
+                while right < upper and signal[right] > right_floor:
+                    right += 1
+                extended_left = max(lower, int(np.floor(indices[first] - (indices[first]-left)*extension_factor)))
+                extended_right = min(upper, int(np.ceil(indices[last] + (right-indices[last])*extension_factor)))
+                # Extension can cross a small, below-threshold neighbour. Stop
+                # at the lowest point instead of anchoring on its rising flank.
+                left = int(extended_left + np.argmin(raw[extended_left:left+1]))
+                right = int(right + np.argmin(raw[right:extended_right+1]))
+                splits = [int(a + np.argmin(raw[a:b+1]))
+                          for a, b in zip(indices[first:last], indices[first+1:last+1])]
+                bounds = [left, *splits, right]
+                for offset, number in enumerate(group):
+                    cluster_geometry[number] = (bounds[offset], bounds[offset+1], left, right)
+        for number, idx in enumerate(indices):
             rt = float(time_axis[idx])
             apex_height = float(signal[idx])
+            lower = valleys[number-1] if number else int(properties['left_bases'][number])
+            upper = valleys[number] if number < len(valleys) else int(properties['right_bases'][number])
+            left_ext = max(lower, int(np.floor(idx - (idx-left_ips[number])*extension_factor)))
+            right_ext = min(upper, int(np.ceil(idx + (right_ips[number]-idx)*extension_factor)))
 
-            # Walk left to find start boundary
-            left = idx
-            while left > 0:
-                if abs(slope[left]) < slope_threshold:
-                    break
-                if signal[left] < height_cutoff * 0.1:
-                    break
-                left -= 1
-
-            # Walk right to find end boundary
-            right = idx
-            while right < len(signal) - 1:
-                if abs(slope[right]) < slope_threshold:
-                    break
-                if signal[right] < height_cutoff * 0.1:
-                    break
-                right += 1
-
-            # Apply extension factor around the apex
-            half_width = max(idx - left, right - idx)
-            extended_half = int(half_width * extension_factor)
-            left_ext = max(0, idx - extended_half)
-            right_ext = min(len(signal) - 1, idx + extended_half)
-
+            if number in cluster_geometry:
+                left_ext, right_ext, baseline_left, baseline_right = cluster_geometry[number]
+            if right_ext <= left_ext:
+                continue
             rt_start = float(time_axis[left_ext])
             rt_end = float(time_axis[right_ext])
 
-            area = self.calculate_peak_area(signal, time_axis, rt_start, rt_end)
+            segment = slice(left_ext, right_ext + 1)
+            xs = time_axis[segment]
+            top = (signal if display_signal is None else np.asarray(display_signal))[segment]
+            if integration_baseline == 'linear':
+                bottom = np.interp(xs, time_axis[[baseline_left, baseline_right]],
+                                   raw[[baseline_left, baseline_right]])
+            elif integration_baseline == 'zero':
+                bottom = np.zeros_like(xs)
+            else:
+                bottom = np.zeros_like(xs) if baseline is None else np.asarray(baseline)[segment]
+            if integration_baseline is not None:
+                response = np.maximum(top - bottom, 0)
+                area = float(np.trapezoid(response, xs))
+                apex_height = float(response[idx-left_ext])
+            else:
+                area = self.calculate_peak_area(signal, time_axis, rt_start, rt_end)
             width = rt_end - rt_start
+            if area <= 0 or apex_height <= 0:
+                continue
 
             if any(self._is_same_peak(p, rt, rt_start, rt_end) for p in existing_non_detected):
                 continue
@@ -289,8 +344,15 @@ class PeakService:
                 color=self._next_color(file_id),
                 source='detected',
             )
+            # Display the same baseline used for quantitation.
+            peak.poly_x = np.r_[xs, xs[::-1]].tolist()
+            peak.poly_y = np.r_[top, bottom[::-1]].tolist()
+            peak.q1 = (float(xs[0]), float(bottom[0]))
+            peak.q2 = (float(xs[-1]), float(bottom[-1]))
+            peak.p_line = [peak.q1, peak.q2]
             peak.width_half_height = self.calculate_width_at_half_height(
-                signal, time_axis, peak
+                response if integration_baseline is not None else signal,
+                xs if integration_baseline is not None else time_axis, peak
             )
             peaks.append(peak)
 
@@ -820,6 +882,7 @@ class PeakService:
         self._color_index = 0
         self._file_color_index.clear()
         self._group_colors.clear()  # clears entire nested dict
+        self._grouping_window = None
 
     def clear_manual_peaks(self, file_id: str) -> None:
         """Remove all manual baseline peaks for a file."""
@@ -849,6 +912,29 @@ class PeakService:
         before = len(peaks)
         self._peaks[fid] = [p for p in peaks if p.peak_id != peak_id]
         return len(self._peaks[fid]) < before
+
+    def delete_peaks(self, targets, file_overlay_map: Optional[Dict[str, str]] = None) -> List[Peak]:
+        """Delete peaks from every UI path (tables, context menu, keyboard).
+
+        ``targets`` is an iterable of ``(file_id, peak_id)``. One undo snapshot
+        covers the whole batch. Unknown targets are ignored; nothing is saved
+        and nothing is regrouped when no peak was actually found. Surviving
+        siblings (e.g. the other components of a deconvolution) keep their tags
+        and colours. Returns the removed peaks.
+        """
+        found = []
+        for file_id, peak_id in dict.fromkeys((f, p) for f, p in targets if f and p):
+            peak = next((p for p in self._peaks.get(self._resolve_file_id(file_id), [])
+                         if p.peak_id == peak_id), None)
+            if peak is not None:
+                found.append((file_id, peak))
+        if not found:
+            return []
+        self.save_undo()
+        for file_id, peak in found:
+            self.remove_peak(file_id, peak.peak_id)
+        self.group_peaks_across_samples(file_overlay_map=file_overlay_map)
+        return [peak for _, peak in found]
 
     def rename_peak(self, file_id: str, peak_id: str, new_name: str) -> bool:
         """Rename a peak and propagate to all peaks in the same group."""
@@ -887,6 +973,10 @@ class PeakService:
                 return True
         return False
 
+    def has_peak_history(self, file_id: str) -> bool:
+        """An empty edited peak list must not trigger another instrument import."""
+        return self._resolve_file_id(file_id) in self._peaks
+
     def get_peaks(self, file_id: str) -> List[Peak]:
         """Return all peaks for a given file."""
         file_id = self._resolve_file_id(file_id)
@@ -914,8 +1004,9 @@ class PeakService:
         are considered the same compound across samples. Each group receives
         a shared ``group_id`` and a consistent color.
 
-        Color cycling is scoped per overlay group so that each plot tab
-        starts from color[0] independently.
+        Existing identities and colours survive additions and removals. New
+        peaks use the nearest available match, with one peak per file in each
+        group. A scope resolver can match comparable signals across plot tabs.
 
         Parameters
         ----------
@@ -932,111 +1023,78 @@ class PeakService:
         Dict[str, List[Peak]]
             group_id -> list of peaks in that group.
         """
-        all_peaks: List[Peak] = []
-        peak_file_map: Dict[str, str] = {}
-        for file_id, pks in self._peaks.items():
-            for p in pks:
-                all_peaks.append(p)
-                peak_file_map[p.peak_id] = file_id
-
-        if not all_peaks:
-            return {}
-
-        def _rt_from_regular_gid(gid: Optional[str]) -> Optional[float]:
-            if not gid or not gid.startswith("compound_rt"):
-                return None
-            try:
-                return float(gid.replace("compound_rt", "", 1))
-            except (TypeError, ValueError):
-                return None
-
-        def _stable_regular_gid(group: List[Peak], mean_rt: float) -> Tuple[str, bool]:
-            existing_gids = [p.group_id for p in group if p.group_id]
-            compatible: List[str] = []
-            for gid in existing_gids:
-                gid_rt = _rt_from_regular_gid(gid)
-                if gid_rt is None or abs(gid_rt - mean_rt) <= max(rt_window, 0.05):
-                    compatible.append(gid)
-            if compatible:
-                counts: Dict[str, int] = {}
-                for gid in compatible:
-                    counts[gid] = counts.get(gid, 0) + 1
-                return max(counts, key=counts.get), True
-            return f"compound_rt{mean_rt:.3f}", bool(existing_gids)
-
-        # ── Partition peaks by overlay group ──────────────────────────
-        overlay_buckets: Dict[str, List[Peak]] = {}
-        for p in all_peaks:
-            fid = peak_file_map[p.peak_id]
-            og = file_overlay_map.get(fid, '') if file_overlay_map else ''
-            overlay_buckets.setdefault(og, []).append(p)
-
+        # Keep established identities instead of reclustering from the leftmost
+        # peak on every edit. Otherwise removing a neighbour can change a
+        # surviving peak's group (and its colour).
+        regroup = self._grouping_window is not None and rt_window != self._grouping_window
+        self._grouping_window = rt_window
+        buckets: Dict[str, List[Peak]] = {}
+        for fid, peaks in self.get_all_peaks().items():
+            scope = (self._color_scope_resolver(fid) if self._color_scope_resolver
+                     else (file_overlay_map or {}).get(fid, ''))
+            buckets.setdefault(scope, []).extend(peaks)
         result: Dict[str, List[Peak]] = {}
+        pal = self._palette or OKABE_ITO_PALETTE
 
-        for og_key, og_peaks in overlay_buckets.items():
-            # Deconvolved peaks match across samples by their deconv_group tag,
-            # not RT proximity — otherwise two close components (e.g. RT 5.1 and
-            # 5.2) would collide into one group. Everything else uses RT windows.
-            deconv_peaks = [
-                p for p in og_peaks if p.source == 'deconvolved' and p.deconv_group
-            ]
-            regular_peaks = [
-                p for p in og_peaks if not (p.source == 'deconvolved' and p.deconv_group)
-            ]
+        def anchor(gid):
+            try:
+                return float(gid.removeprefix('compound_rt').split('_')[0])
+            except (ValueError, AttributeError):
+                return None
 
-            # gid -> list of peaks, where gid is the group identifier
-            grouped: List[Tuple[str, List[Peak]]] = []
-
-            # ── Deconvolved: bucket by tag ────────────────────────────
-            tag_buckets: Dict[str, List[Peak]] = {}
-            for p in deconv_peaks:
-                tag_buckets.setdefault(p.deconv_group, []).append(p)
-            for tag, members in tag_buckets.items():
-                grouped.append((tag, members))
-
-            # ── Regular: RT-proximity grouping ────────────────────────
-            regular_peaks.sort(key=lambda p: p.rt)
-            if regular_peaks:
-                current_group: List[Peak] = [regular_peaks[0]]
-                rt_groups: List[List[Peak]] = []
-                for peak in regular_peaks[1:]:
-                    group_mean_rt = np.mean([p.rt for p in current_group])
-                    same_file_as_existing = any(
-                        peak_file_map.get(peak.peak_id) == peak_file_map.get(p.peak_id)
-                        for p in current_group
-                    )
-                    if abs(peak.rt - group_mean_rt) <= rt_window and not same_file_as_existing:
-                        current_group.append(peak)
-                    else:
-                        rt_groups.append(current_group)
-                        current_group = [peak]
-                rt_groups.append(current_group)
-                for group in rt_groups:
-                    mean_rt = float(np.mean([p.rt for p in group]))
-                    gid, had_existing_gid = _stable_regular_gid(group, mean_rt)
-                    grouped.append((gid, group, had_existing_gid))
-
-            # Stable color assignment: cached colors survive across calls,
-            # new groups get the next free palette slot.
-            pal = getattr(self, '_palette', None) or OKABE_ITO_PALETTE
-            og_colors = self._group_colors.setdefault(og_key, {})
-            for entry in grouped:
-                if len(entry) == 3:
-                    gid, group, had_existing_gid = entry
+        for scope, peaks in buckets.items():
+            colors = self._group_colors.setdefault(scope, {})
+            groups: Dict[str, List[Peak]] = {}
+            pending = []
+            for peak in peaks:
+                if peak.source == 'deconvolved' and peak.deconv_group:
+                    groups.setdefault(peak.deconv_group, []).append(peak)
+                elif peak.group_id and not regroup:
+                    groups.setdefault(peak.group_id, []).append(peak)
                 else:
-                    gid, group = entry
-                    had_existing_gid = False
-                if gid not in og_colors:
-                    seed_color = None
-                    if not had_existing_gid:
-                        seed_color = next((p.color for p in group if p.color), None)
-                    og_colors[gid] = seed_color or pal[len(og_colors) % len(pal)]
+                    pending.append(peak)
 
-                color = og_colors[gid]
-                for peak in group:
+            # Assign closest pairs first. A broad tolerance must not let an
+            # earlier, weaker match steal the exact RT match in another file.
+            while pending:
+                candidates = []
+                for i, peak in enumerate(pending):
+                    for gid in dict.fromkeys([*groups, *([] if regroup else colors)]):
+                        rt = anchor(gid)
+                        if rt is None:
+                            continue  # deconvolution components retain their tags
+                        members = groups.get(gid, [])
+                        if any(p.file_id == peak.file_id for p in members):
+                            continue
+                        distance = min((abs(peak.rt-p.rt) for p in members),
+                                       default=abs(peak.rt-rt))
+                        if distance <= rt_window:
+                            candidates.append((distance, i, gid))
+                if candidates:
+                    _, index, gid = min(candidates)
+                    peak = pending.pop(index)
+                else:
+                    peak = pending.pop(0)
+                    base = (peak.group_id if regroup and peak.group_id else f'compound_rt{peak.rt:.3f}')
+                    gid = base
+                    suffix = 2
+                    while gid in groups or (gid in colors and not regroup):
+                        gid = f'{base}_{suffix}'
+                        suffix += 1
+                groups.setdefault(gid, []).append(peak)
+
+            for gid, members in groups.items():
+                if gid not in colors:
+                    # Preserve imported colours when available, but don't restart
+                    # the palette for each sample. Deleted identities stay reserved.
+                    preferred = members[0].color
+                    free = [c for c in pal if c not in colors.values()]
+                    colors[gid] = (preferred if preferred in free and not members[0].group_id
+                                   else free[0] if free else pal[len(colors) % len(pal)])
+                for peak in members:
                     peak.group_id = gid
-                    peak.color = color
-                result[gid] = group
+                    peak.color = colors[gid]
+                result.setdefault(gid, []).extend(members)
 
         return result
 
@@ -1220,6 +1278,7 @@ class PeakService:
     def serialize(self) -> dict:
         """Serialize all peak data for persistence (JSON-compatible)."""
         return {
+            "grouping_window": self._grouping_window,
             "color_index": self._color_index,
             "file_color_index": self._file_color_index,
             "group_colors": self._group_colors,  # nested dict, JSON-safe
@@ -1231,6 +1290,7 @@ class PeakService:
 
     def deserialize(self, data: dict) -> None:
         """Restore peak data from a previously serialized dict."""
+        self._grouping_window = data.get("grouping_window")
         self._color_index = data.get("color_index", 0)
         self._file_color_index = data.get("file_color_index", {})
         # Support both old flat format and new nested format

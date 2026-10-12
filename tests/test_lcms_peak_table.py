@@ -75,3 +75,62 @@ def test_peaks_display_precision_does_not_round_underlying_measurements():
     assert numeric['RT (min)']['format']['specifier']=='.4~f'
     assert [c['id'] for c in columns].index('Concentration') < [c['id'] for c in columns].index('Area')
     assert style['overflowX']=='auto' and style['maxWidth']=='100%'
+
+
+def test_table_delete_removes_service_peak_and_refresh_cannot_restore_it():
+    import dash
+    dm,app,table=fixture();tic=add(dm.peak_service,'component');uv=add(dm.peak_service,'other')
+    rows=table('component',1,0,0,'peak-analysis',0,[])[0]
+    remaining=[row for row in rows if row['peak_id'] != uv.peak_id]
+    out=app.functions['delete_peak_table_rows'](123,remaining,rows,'component',uv.peak_id,5)
+    assert out[0]==6 and out[1] is None
+    assert dm.peak_service.get_peaks('other')==[]
+    assert {row['peak_id'] for row in table('component',6,0,0,'peak-analysis',0,[])[0]}=={tic.peak_id}
+    app.functions['delete_peak_table_rows'](124,[],remaining,'component',None,6)
+    assert table('component',7,0,0,'peak-analysis',0,[])[0]==[]
+    assert all(not peaks for peaks in dm.peak_service.get_all_peaks().values())
+
+
+def test_table_navigation_or_renaming_is_not_a_peak_deletion():
+    import pytest
+    from dash.exceptions import PreventUpdate
+    dm,app,table=fixture();peak=add(dm.peak_service,'component')
+    delete=app.functions['delete_peak_table_rows']
+    before=[{'peak_id':peak.peak_id,'Peak Name':'Original'}]
+    for rows in ([{'peak_id':peak.peak_id,'Peak Name':'Renamed'}], [{'peak_id':'another-file'}]):
+        with pytest.raises(PreventUpdate):delete(1,rows,before,'component',None,0)
+    assert dm.peak_service.get_peaks('component')==[peak]
+
+
+def test_deleted_instrument_peaks_are_not_reimported_on_table_refresh(monkeypatch):
+    dm=setup();app=App();register_tab_callbacks(app,dm)
+    peak=add(dm.peak_service,'bundle')
+    dm.peak_service.remove_peak('bundle',peak.peak_id)
+    bundle=dm.get_bundle('bundle');reads=[]
+    monkeypatch.setattr(bundle,'has_integration_data',lambda:True)
+    monkeypatch.setattr(bundle,'get_integration_text',lambda:reads.append(True) or '')
+    assert app.functions['update_peak_analysis_tab']('bundle',1,0,0,'peak-analysis',0,[])[0]==[]
+    assert reads==[]
+
+
+def test_compare_finds_peaks_stored_under_a_channel_id():
+    """Peaks integrated on a detector channel are owned by the channel, not the sample id."""
+    from callbacks.tab_callbacks import _bundle_peaks
+    dm = setup(BundleType.LCMS)
+    bundle = next(dm.iter_bundles())
+    channel = bundle.component_list[0].component_id
+    dm.peak_service.add_baseline_peak(file_id=channel, area=4, height=9, apex_x=.92, poly_x=[.5, 1, 1, .5],
+        poly_y=[0, 9, 0, 0], p_line=[(.5, 0), (1, 0)], q1=(.5, 0), q2=(1, 0))
+    found = _bundle_peaks(dm, bundle, bundle.bundle_id)
+    assert len(found) == 1 and found[0].file_id == channel
+
+
+def test_compare_collects_each_sample_once_when_data_is_keyed_by_channel():
+    from callbacks.tab_callbacks import _collect_bundles_with_peaks
+    dm = setup(BundleType.LCMS)
+    bundle = next(dm.iter_bundles())
+    for component in bundle.component_list:
+        dm.peak_service.add_baseline_peak(file_id=component.component_id, area=4, height=9, apex_x=.92,
+            poly_x=[.5, 1, 1, .5], poly_y=[0, 9, 0, 0], p_line=[(.5, 0), (1, 0)], q1=(.5, 0), q2=(1, 0))
+    found = _collect_bundles_with_peaks(dm, dm.get_loaded_files_list())
+    assert [item['bundle'].bundle_id for item in found] == [bundle.bundle_id]

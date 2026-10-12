@@ -4,6 +4,11 @@ from services.workspace_inspector import active_figure, signal_choices, edit_sig
 
 
 def register_workspace_callbacks(app, data_manager):
+    for source, prop, target in (('main-plot', 'figure', 'main-inspector-context'),
+                                 ('pub-preview-graph', 'data', 'publication-inspector-context')):
+        app.clientside_callback(
+            ClientsideFunction(namespace='inspectorContext', function_name='summarize'),
+            Output(target, 'data'), Input(source, prop), State(target, 'data'))
     app.clientside_callback(
         ClientsideFunction(namespace='resize', function_name='syncAnalysisDock'),
         [Output('analysis-dock', 'value'), Output('analysis-dock-owner', 'data')],
@@ -18,8 +23,9 @@ def register_workspace_callbacks(app, data_manager):
          Output('signal-inspector-select','value'),Output('signal-inspector-options','data'),
          Output('plot-tool-publication','disabled'),Output('plot-tool-export','disabled'),
          Output('plot-tool-integrate','disabled'),Output('plot-tool-integrate','title')],
-        [Input('main-plot','figure'),Input('pub-preview-graph','data'),Input('active-plot-tab','data'),
-         Input('plot-tabs','data'),Input('current-plot-settings','data')],
+        [Input('main-inspector-context','data'),Input('publication-inspector-context','data'),Input('active-plot-tab','data'),
+         # Only the owner and layout mode matter here, so unrelated settings edits do not re-run this callback.
+         Input('plot-tabs','data'),Input('plot-settings-figure-key','data')],
         State('signal-inspector-select','value'))
     def describe_figure(raw,pub,tab,tabs,settings,selected):
         figure=active_figure(tab,tabs,raw,pub)
@@ -27,6 +33,8 @@ def register_workspace_callbacks(app, data_manager):
         if figure is None or (tab and context and not context.endswith(':'+tab)):
             name=next((t.get('label') for t in tabs or [] if t.get('id')==tab),'No figure selected')
             return name,'Select a figure or import data to begin.',{'display':'none'},[],None,[],True,True,True,'Load source data to integrate peaks'
+        preview = any(isinstance(t.get('meta'), dict) and t['meta'].get('pda_preview')
+                      for t in figure.get('data', []))
         signals=signal_choices(figure)
         options=[{'value':o['value'],'label':o['label']} for o in signals]
         name=next((t.get('label') for t in tabs or [] if t.get('id')==tab),'No figure selected')
@@ -41,7 +49,8 @@ def register_workspace_callbacks(app, data_manager):
                 selected if selected in [o['value'] for o in options] else (options[0]['value'] if options else None),
                 signals,not bool(signals),not bool(signals),not bool(signals) or kind=='publication',
                 'Integrate peaks in the source data tab' if kind=='publication' else
-                'Select a region to integrate a peak' if signals else 'Load source data to integrate peaks')
+                ('Integrate peaks — drag across a peak. Shortcut: Shift-drag. The previewed wavelength is kept as a channel.'
+                 if preview else 'Integrate peaks — drag across a peak. Shortcut: Shift-drag.') if signals else 'Load source data to integrate peaks')
 
     @app.callback(
         [Output('signal-color','value'),Output('signal-width','value'),Output('signal-dash','value'),

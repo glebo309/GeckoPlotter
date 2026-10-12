@@ -23,6 +23,9 @@ class FileRemoval:
     imported: set = field(default_factory=set)
     color_indexes: dict = field(default_factory=dict)
     order: list = field(default_factory=list)
+    source_transfers: list = field(default_factory=list)
+    batch: int = 0  # Records sharing a non-zero batch id are undone together
+    batch_label: str = ''
 
 
 class FileRemovalService:
@@ -33,6 +36,8 @@ class FileRemovalService:
     def __init__(self, store):
         self.store = store
         self._history = []
+        self._batching = False
+        self._batch_seq = 0
 
     @property
     def can_undo(self):
@@ -65,7 +70,8 @@ class FileRemovalService:
         record.imported = service._imported_files.intersection(state_ids)
         record.color_indexes = {key: service._file_color_index[key] for key in state_ids if key in service._file_color_index}
         self._history.append(record)
-        self._history = self._history[-self.MAX_UNDO:]
+        if not self._batching:
+            self._history = self._history[-self.MAX_UNDO:]
         return record
 
     def _remove_state(self, record):
@@ -129,6 +135,136 @@ class FileRemovalService:
         self._remove_state(record)
         return record
 
+    def remove_many(self, file_ids, active_file=None):
+        """Remove several rows as one undo step; ids already gone with an earlier row are skipped."""
+        records = []
+        self._batching = True
+        try:
+            for file_id in dict.fromkeys(file_ids):
+                record = self.remove(file_id, active_file=active_file)
+                if record is not None:
+                    records.append(record)
+        finally:
+            self._batching = False
+        if len(records) < 2:
+            self._history = self._history[-self.MAX_UNDO:]
+            return records[0] if records else None
+        self._batch_seq += 1
+        label = f'{len(records)} items'
+        for record in records:
+            record.batch, record.batch_label = self._batch_seq, label
+        self._history = self._history[-max(self.MAX_UNDO, len(records)):]
+        return replace(records[-1], label=label,
+                       removed_ids=set().union(*(r.removed_ids for r in records)))
+
+    @staticmethod
+    def _with_metadata(component, metadata, **changes):
+        standardized = component.standardized
+        if standardized is not None:
+            standardized = replace(standardized, metadata=metadata)
+        return replace(component, metadata=metadata, standardized=standardized, **changes)
+
+    def _retain_sample_sources(self, bundle, removed, record):
+        """Move shared source payloads by reference before removing their signal."""
+        survivors = [c for c in bundle.component_list if c.component_id not in removed]
+        if not survivors:
+            return
+        for owner in list(bundle.component_list):
+            if owner.component_id not in removed:
+                continue
+            related = [c for c in survivors if c.original_filename == owner.original_filename
+                       or c.metadata.get('pda_source_id') == owner.component_id
+                       or c.metadata.get('source_file_id') == owner.component_id]
+            if not related:
+                continue
+            successor = related[0]
+            payloads = {key: value for key, value in owner.metadata.items()
+                        if key in ('pda', 'instrument_status', 'instrument_peaks') and key not in successor.metadata}
+            raw = owner.raw_bytes if owner.raw_bytes and not successor.raw_bytes else None
+            if not payloads and raw is None:
+                continue
+            record.source_transfers.append({'owner': owner.component_id, 'successor': successor.component_id,
+                                            'payloads': payloads, 'raw': raw})
+            changed = []
+            for component in bundle.component_list:
+                if component.component_id in removed:
+                    changed.append(component)
+                    continue
+                metadata = dict(component.metadata)
+                for key in ('pda_source_id', 'source_file_id'):
+                    if metadata.get(key) == owner.component_id:
+                        metadata[key] = successor.component_id
+                changes = {}
+                if component.component_id == successor.component_id:
+                    metadata.update(payloads)
+                    if raw is not None:
+                        changes['raw_bytes'] = raw
+                changed.append(self._with_metadata(component, metadata, **changes))
+            bundle.component_list = changed
+            survivors = [c for c in changed if c.component_id not in removed]
+
+    def remove_channels(self, bundle_ids, channel_key, active_file=None):
+        """Remove one detector channel across samples as a single undo action."""
+        from .channel_visibility import channel_identity
+        bundles, removed, label = [], set(), None
+        state_ids = set()
+        for bundle_id in dict.fromkeys(bundle_ids):
+            bundle = self.store.get_bundle(bundle_id)
+            if bundle is None:
+                continue
+            matching = []
+            for component in bundle.component_list:
+                identity = channel_identity(component)
+                if identity and identity[0] == channel_key:
+                    matching.append(component.component_id)
+                    label = identity[1]
+                    state_ids.add(self.store.peak_owner_id(component.component_id))
+            if matching:
+                bundles.append(bundle)
+                removed.update(matching)
+                if len(matching) == len(bundle.component_list):
+                    state_ids.add(bundle.bundle_id)
+        if not bundles:
+            return None
+        state_ids.update(removed)
+        count = len(bundles)
+        record = self._capture(bundles, f'{label} channel from {count} sample' + ('s' if count != 1 else ''),
+                               active_file, state_ids, removed)
+        for bundle in bundles:
+            self._retain_sample_sources(bundle, removed, record)
+            for component in list(bundle.component_list):
+                if component.component_id in removed:
+                    self.store.remove_component(component.component_id)
+            remaining = self.store.get_bundle(bundle.bundle_id)
+            if remaining:
+                self.store.visibility_state[bundle.bundle_id] = any(
+                    self.store.visibility_state.get(self.store.peak_owner_id(c.component_id), True)
+                    for c in remaining.component_list)
+        self._remove_state(record)
+        return record
+
+    def _restore_sample_sources(self, record):
+        for transfer in reversed(record.source_transfers):
+            owner, successor = transfer['owner'], transfer['successor']
+            bundle = self.store.get_bundle_for_component(owner)
+            if bundle is None:
+                continue
+            changed = []
+            for component in bundle.component_list:
+                metadata = dict(component.metadata)
+                for key in ('pda_source_id', 'source_file_id'):
+                    if metadata.get(key) == successor:
+                        metadata[key] = owner
+                changes = {}
+                if component.component_id == successor:
+                    for key, value in transfer['payloads'].items():
+                        if metadata.get(key) is value:
+                            metadata.pop(key)
+                    if transfer['raw'] is not None and component.raw_bytes is transfer['raw']:
+                        changes['raw_bytes'] = b''
+                changed.append(self._with_metadata(component, metadata, **changes))
+            self.store.add_bundle(replace(bundle, component_list=changed, components={}))
+
     def remove_all(self, active_file=None):
         bundles = list(self.store.iter_bundles())
         if not bundles:
@@ -145,6 +281,15 @@ class FileRemovalService:
     def undo(self):
         if not self._history:
             return None
+        record = self._undo_one()
+        if record.batch:
+            batch = record.batch
+            while self._history and self._history[-1].batch == batch:
+                self._undo_one()
+            record = replace(record, label=record.batch_label or record.label)
+        return record
+
+    def _undo_one(self):
         record = self._history.pop()
         for original in record.bundles:
             current = self.store.get_bundle(original.bundle_id)
@@ -159,6 +304,7 @@ class FileRemovalService:
                 ordered.extend(restored.values())
                 original = replace(current, component_list=ordered, components={})
             self.store.add_bundle(original)
+        self._restore_sample_sources(record)
         existing = self.store.all_bundles()
         self.store._bundles = {key: existing.pop(key) for key in record.order if key in existing}
         self.store._bundles.update(existing)

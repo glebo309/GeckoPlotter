@@ -387,11 +387,16 @@ class DataManager:
         try:
             content_bytes = _decode_content(file_record['encoded'])
             temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=f"_{file_record['name']}")
-            temp_file.write(content_bytes)
-            temp_file.close()
-            self.temp_files.append(temp_file.name)
-
-            sr = ingest_file(temp_file.name, file_record['name'])
+            try:
+                temp_file.write(content_bytes)
+                temp_file.close()
+                sr = ingest_file(temp_file.name, file_record['name'])
+            finally:
+                temp_file.close()
+                try:
+                    os.unlink(temp_file.name)  # fully read during ingestion; never keep a copy on disk
+                except OSError:
+                    pass
             if sr is None:
                 log.error(f"Pipeline could not parse {file_record['name']}")
                 return None

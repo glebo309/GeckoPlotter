@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Iterable, Optional
 
 import numpy as np
+from services.plot_arrays import numeric_plot_array
 
 
 def _coerce_window(requested_window) -> int:
@@ -32,7 +33,7 @@ def smooth_trace_y(y_values, requested_window):
     Returns ``None`` when smoothing should be skipped.
     """
     try:
-        y = np.asarray(y_values, dtype=float)
+        y = numeric_plot_array(y_values)
     except (TypeError, ValueError):
         return None
 
@@ -68,7 +69,10 @@ def smooth_plotly_traces(traces: Iterable, requested_window) -> None:
         meta = dict(trace.meta) if isinstance(trace.meta, dict) else {}
         original = meta.get('gecko_original_y')
         if original is None:
-            original = list(trace.y)
+            try:
+                original = numeric_plot_array(trace.y).tolist()
+            except (TypeError, ValueError):
+                continue
         elif not window:
             trace.y = original
         if not window:

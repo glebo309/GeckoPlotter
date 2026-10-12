@@ -22,6 +22,8 @@
         var ctx = window.dash_clientside.callback_context;
         var trigger = ctx && ctx.triggered.length ? ctx.triggered[0].prop_id.split('.')[0] : '';
         if (trigger.indexOf('plot-tool-') === 0 && args.slice(0, -2).some(Boolean)) action(trigger, mode);
+        var textTool = document.getElementById('plot-tool-edit-text');
+        if (textTool) textTool.disabled = mode === 'deconvolve';
         ['overlay', 'separate', 'integrate'].forEach(function (tool) {
             var button = document.getElementById('plot-tool-' + tool);
             if (!button) return;

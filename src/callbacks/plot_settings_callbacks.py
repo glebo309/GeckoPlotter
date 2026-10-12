@@ -7,19 +7,25 @@ Stores
 
 Callback paths (no overlap)
 ---------------------------
-1. **Context Resolution** – computes ``active-plot-context`` from file/tab/view
-2. **Context Load / Hydrate** – loads saved settings, populates controls + store
+1. **Context Resolution** – clientside; computes ``active-plot-context``
+2. **Context Load / Hydrate** – clientside, from ``plot-settings-cache`` (one
+   entry per plot context, filled from every ``current-plot-settings`` value).
+   Only a context the browser has not seen yet goes through the server
+   ``hydrate_plot_settings`` (via ``plot-settings-miss``).
 3. **User Edit** – all controls → ``current-plot-settings`` (sole runtime writer)
-4. **Persist** – saves ``current-plot-settings`` to persistence under context key
+4. **Persist** – a clientside gate forwards only *changed* settings to
+   ``plot-settings-persist``; the server saves them under the context key
 
 Render lives in publication_callbacks.update_pub_plot (reads current-plot-settings).
 """
 
 import copy
+import json
 import dash
-from dash import Input, Output, State, callback_context
+from dash import ClientsideFunction, Input, Output, State, callback_context
 
-from services.plot_settings_service import DEFAULT_PLOT_SETTINGS
+from services.plot_settings_service import DEFAULT_PLOT_SETTINGS, DEFAULT_PALETTE
+from services.themes import DEFAULT_THEME
 
 
 def _build_layout_opts(s):
@@ -38,39 +44,177 @@ def _build_layout_opts(s):
     return opts
 
 
-def register_plot_settings_callbacks(app, data_manager):
-    """Register the 4 plot-settings callbacks (resolve, hydrate, edit, persist)."""
+# Controls filled from a settings object, in the order of
+# ``hydrate_plot_settings`` outputs (minus the series builder) and of
+# ``plotSettingsCache.controlValues`` in plot-settings-cache.js.
+HYDRATED_CONTROLS = (
+    ('plot-type', 'value'), ('y1-stats', 'value'), ('x-label-input', 'value'),
+    ('y1-label-input', 'value'), ('y2-label-input', 'value'), ('show-raw-points', 'checked'),
+    ('y2-enable', 'checked'), ('pt-smooth-window', 'value'), ('pt-plot-type', 'value'),
+    ('pt-auto-range', 'checked'), ('pt-categorical-x', 'checked'), ('pt-x-min', 'value'),
+    ('pt-x-max', 'value'), ('pt-y-min', 'value'), ('pt-y-max', 'value'),
+    ('pt-x-scale', 'value'), ('pt-y-scale', 'value'), ('pt-theme', 'value'),
+    ('pt-palette', 'value'), ('pt-bg-color', 'value'), ('pt-paper-color', 'value'),
+    ('pt-line-width', 'value'), ('pt-marker-size', 'value'), ('pt-line-style', 'value'),
+    ('pt-marker-symbol', 'value'), ('pt-trace-opacity', 'value'), ('pt-bar-gap', 'value'),
+    ('pt-bar-group-gap', 'value'), ('pt-title', 'value'), ('pt-font', 'value'),
+    ('pt-font-size', 'value'), ('pt-title-font-size', 'value'), ('pt-tick-font-size', 'value'),
+    ('pt-bold-title', 'checked'), ('pt-show-legend', 'checked'), ('pt-legend-pos', 'value'),
+    ('pt-layout-opts', 'value'), ('pt-tick-dir', 'value'), ('pt-grid-style', 'value'),
+    ('pt-frame-width', 'value'), ('pt-tick-length', 'value'), ('pt-layout-mode', 'value'),
+    ('pt-shared-axis-labels', 'checked'), ('pt-x-label', 'value'), ('pt-y-label', 'value'),
+    ('pt-subplot-spacing', 'value'), ('pub-subplot-rows', 'value'), ('pub-subplot-cols', 'value'),
+    ('pub-fig-width-mm', 'value'), ('pub-fig-height-mm', 'value'), ('pub-preset', 'value'),
+    ('pub-dpi', 'value'), ('pub-export-format', 'value'), ('pub-zoom-sync', 'checked'),
+    ('plot-y-scope', 'value'),
+)
 
-    # ------------------------------------------------------------------
-    # 1. Context Resolution
-    # ------------------------------------------------------------------
-    @app.callback(
+# Hidden mirrors of the axis labels: nothing listens to them, so the clientside
+# hydrator always writes them instead of reading their current value.
+HIDDEN_ECHO_CONTROLS = ('x-label-input', 'y1-label-input', 'y2-label-input')
+
+# Panels of the context menus that mirror current-plot-settings while open.
+CONTEXT_PANELS = ('axis-context-panel', 'legend-context-panel', 'trace-context-panel',
+                  'title-context-panel', 'label-context-panel')
+
+_SHOW = {}  # display: default (visible)
+_HIDE = {'display': 'none'}
+
+
+def resolve_plot_context(active_file, view_mode, active_tab, plot_tab, current_context):
+    """Context key of the visible plot, or ``dash.no_update`` when unchanged.
+
+    Reference implementation of ``plotSettingsCache.resolveContext`` (the
+    callback itself is clientside; a parity test keeps the two identical).
+    Shared tabs get their own context so settings persist across file switches.
+    Plot tab is included so each plot tab keeps independent settings.
+    """
+    suffix = f':{plot_tab}' if plot_tab else ''
+    if (view_mode or 'raw') == 'raw':
+        context_key = f'shared:raw{suffix}'
+    elif active_tab in ('peak-analysis', 'across-samples'):
+        context_key = f'shared:{active_tab}{suffix}'
+    elif active_file:
+        context_key = f'file:{active_file}{suffix}'
+    else:
+        context_key = None
+    return dash.no_update if context_key == current_context else context_key
+
+
+def panel_visibility(view_mode, settings):
+    """Toggle settings panel sections based on view-mode and current settings.
+
+    Reference implementation of ``plotSettingsCache.panelVisibility``.
+    """
+    s = {**DEFAULT_PLOT_SETTINGS, **(settings or {})}
+    is_raw = (view_mode or 'raw') == 'raw'
+    plot_type = s.get('plot_type', 'bar')
+    auto_range = s.get('auto_range', True)
+    show_legend = s.get('show_legend', True)
+    layout_opts = []
+    if s.get('show_grid_x'):
+        layout_opts.append('grid_x')
+    if s.get('show_grid_y'):
+        layout_opts.append('grid_y')
+    if s.get('show_tick_marks'):
+        layout_opts.append('ticks')
+
+    header = ('Publication Plot Settings' if ':publication-' in (s.get('_context_key') or '')
+              else 'Raw Plot Settings' if is_raw else 'Analysis Plot Settings')
+    plot_type_vis = _HIDE if is_raw else _SHOW
+    raw_layout_vis = _SHOW if is_raw else _HIDE
+    theme_vis = _SHOW  # always visible
+    if is_raw:
+        bar_vis = _HIDE
+        line_vis = _SHOW   # line width matters for raw
+        marker_vis = _HIDE
+    else:
+        bar_vis = _SHOW if plot_type == 'bar' else _HIDE
+        line_vis = _SHOW if plot_type in ('line', 'scatter') else _HIDE
+        marker_vis = _SHOW if plot_type in ('scatter', 'line') else _HIDE
+    range_vis = _HIDE if auto_range else _SHOW
+    legend_pos_vis = _SHOW if show_legend else _HIDE
+    has_grid_or_ticks = ('grid_x' in layout_opts or 'grid_y' in layout_opts
+                         or 'ticks' in layout_opts)
+    tick_grid_vis = _SHOW if has_grid_or_ticks else _HIDE
+    return (header, plot_type_vis, raw_layout_vis, theme_vis, bar_vis, line_vis, marker_vis,
+            range_vis, _HIDE if is_raw else _SHOW, legend_pos_vis, tick_grid_vis)
+
+
+def _defaults_call(function_name):
+    """Inline clientside wrapper that hands the Python defaults to a JS function."""
+    defaults = json.dumps(DEFAULT_PLOT_SETTINGS)
+    return ('function(){return window.dash_clientside.plotSettingsCache.%s(%s,'
+            '...arguments);}' % (function_name, defaults))
+
+
+def _register_clientside(app):
+    """Browser-side switching: resolve, hydrate from cache, track, gate, visibility."""
+    cs = ClientsideFunction
+    app.clientside_callback(
+        cs(namespace='plotSettingsCache', function_name='resolveContext'),
         Output('active-plot-context', 'data'),
-        [Input('active-file', 'data'),
-         Input('view-mode', 'data'),
-         Input('active-tab', 'data'),
-         Input('active-plot-tab', 'data')],
+        [Input('active-file', 'data'), Input('view-mode', 'data'),
+         Input('active-tab', 'data'), Input('active-plot-tab', 'data')],
         State('active-plot-context', 'data'),
     )
-    def resolve_plot_context(active_file, view_mode, active_tab, plot_tab, current_context):
-        """Compute the context key for the currently visible plot.
+    live = [(cid, prop) for cid, prop in HYDRATED_CONTROLS if cid not in HIDDEN_ECHO_CONTROLS]
+    app.clientside_callback(
+        _defaults_call('hydrate'),
+        [Output('current-plot-settings', 'data', allow_duplicate=True)]
+        + [Output(cid, prop, allow_duplicate=True) for cid, prop in HYDRATED_CONTROLS]
+        + [Output('plot-settings-miss', 'data')],
+        Input('active-plot-context', 'data'),
+        [State('plot-settings-cache', 'data'), State('y1-series-count', 'data')]
+        + [State(cid, prop) for cid, prop in live],
+        prevent_initial_call=True,
+    )
+    app.clientside_callback(
+        cs(namespace='plotSettingsCache', function_name='trackSettings'),
+        [Output('plot-settings-cache', 'data'), Output('plot-settings-persist', 'data')],
+        [Input('current-plot-settings', 'data'), Input('loaded-files', 'data')],
+        [State('plot-settings-cache', 'data'), State('active-plot-context', 'data')],
+        prevent_initial_call=True,
+    )
+    app.clientside_callback(
+        cs(namespace='plotSettingsCache', function_name='panelsOpen'),
+        Output('plot-panel-sync', 'data'),
+        Input('current-plot-settings', 'data'),
+        [State('plot-panel-sync', 'data')] + [State(panel, 'style') for panel in CONTEXT_PANELS],
+        prevent_initial_call=True,
+    )
+    app.clientside_callback(
+        cs(namespace='plotSettingsCache', function_name='figureKey'),
+        Output('plot-settings-figure-key', 'data'),
+        Input('current-plot-settings', 'data'),
+        State('plot-settings-figure-key', 'data'),
+    )
+    app.clientside_callback(
+        _defaults_call('panelVisibility'),
+        [Output('pt-panel-header', 'children'),
+         Output('pt-plot-type-wrapper', 'style'),
+         Output('pt-raw-layout-wrapper', 'style'),
+         Output('pt-theme-wrapper', 'style'),
+         Output('pt-bar-wrapper', 'style'),
+         Output('pt-line-controls-wrapper', 'style'),
+         Output('pt-marker-wrapper', 'style'),
+         Output('pt-range-wrapper', 'style'),
+         Output('pt-categorical-x', 'style'),
+         Output('pt-legend-pos-wrapper', 'style'),
+         Output('pt-tick-grid-detail-wrapper', 'style')],
+        [Input('view-mode', 'data'), Input('current-plot-settings', 'data')],
+    )
 
-        Shared tabs get their own context so settings persist across file switches.
-        Plot tab is included so each plot tab keeps independent settings.
-        """
-        suffix = f':{plot_tab}' if plot_tab else ''
-        if (view_mode or 'raw') == 'raw':
-            context_key = f'shared:raw{suffix}'
-        elif active_tab in ('peak-analysis', 'across-samples'):
-            context_key = f'shared:{active_tab}{suffix}'
-        elif active_file:
-            context_key = f'file:{active_file}{suffix}'
-        else:
-            context_key = None
-        return dash.no_update if context_key == current_context else context_key
+
+def register_plot_settings_callbacks(app, data_manager):
+    """Register the plot-settings callbacks (clientside switching + server fallback, edit, persist)."""
+
+    _register_clientside(app)
 
     # ------------------------------------------------------------------
-    # 2. Context Load / Hydrate
+    # 2. Context Load / Hydrate (server fallback)
+    #    Runs only for a context the browser has no cached settings for;
+    #    plot-settings-miss carries that context key.
     # ------------------------------------------------------------------
     @app.callback(
         [
@@ -137,7 +281,7 @@ def register_plot_settings_callbacks(app, data_manager):
             Output('pub-zoom-sync', 'checked', allow_duplicate=True),
             Output('plot-y-scope', 'value', allow_duplicate=True),
         ],
-        Input('active-plot-context', 'data'),
+        Input('plot-settings-miss', 'data'),
         State('active-file', 'data'),
         State('active-plot-tab', 'data'),
         State('custom-plot-figures', 'data'),
@@ -355,6 +499,9 @@ def register_plot_settings_callbacks(app, data_manager):
         eff_x_label = pt_x_label if pt_x_label is not None else current_settings.get('x_label', '')
         eff_y_label = pt_y_label if pt_y_label is not None else current_settings.get('y1_label', '')
 
+        if 'pt-legend-pos.value' in triggered_props and pt_legend_pos != current_settings.get('legend_pos'):
+            current_settings = {**current_settings, 'legend_positions': {}}
+
         new_settings = {
             **current_settings,
             'subplot_rows': subplot_rows if subplot_rows not in (None, '') else current_settings.get('subplot_rows', DEFAULT_PLOT_SETTINGS['subplot_rows']),
@@ -385,8 +532,8 @@ def register_plot_settings_callbacks(app, data_manager):
             'x_scale': pt_x_scale or 'linear',
             'y_scale': pt_y_scale or 'linear',
             # Theme & Colors
-            'theme': pt_theme or 'plotly_white',
-            'palette': pt_palette or 'okabe_ito',
+            'theme': pt_theme or DEFAULT_THEME,
+            'palette': pt_palette or DEFAULT_PALETTE,
             'bg_color': pt_bg_color or '#ffffff',
             'paper_color': pt_paper_color or '#ffffff',
             # Traces
@@ -452,12 +599,12 @@ def register_plot_settings_callbacks(app, data_manager):
     # ------------------------------------------------------------------
     @app.callback(
         Output('dummy-output', 'children', allow_duplicate=True),
-        [Input('current-plot-settings', 'data')],
+        [Input('plot-settings-persist', 'data')],
         [State('active-plot-context', 'data')],
         prevent_initial_call=True,
     )
     def persist_plot_settings(settings, context_key):
-        """Save current-plot-settings to persistence under the active context."""
+        """Save a changed current-plot-settings value under its own context."""
         import logging
         _log = logging.getLogger('geckoplotter.settings')
         if not context_key or not settings:
@@ -496,90 +643,7 @@ def register_plot_settings_callbacks(app, data_manager):
                 options.add('grid_'+direction)
         return hex_color(layout.plot_bgcolor), hex_color(layout.paper_bgcolor), sorted(options)
 
-    # ------------------------------------------------------------------
-    # 5. Visibility — context-aware panel sections
-    # ------------------------------------------------------------------
-    _SHOW = {}  # display: default (visible)
-    _HIDE = {'display': 'none'}
-
-    @app.callback(
-        [
-            # Phase 1.1 — dynamic header
-            Output('pt-panel-header', 'children'),
-            # Phase 1.2 — analysis-only vs raw-only wrappers
-            Output('pt-plot-type-wrapper', 'style'),
-            Output('pt-raw-layout-wrapper', 'style'),
-            Output('pt-theme-wrapper', 'style'),
-            # Phase 1.3 — plot-type-specific wrappers
-            Output('pt-bar-wrapper', 'style'),
-            Output('pt-line-controls-wrapper', 'style'),
-            Output('pt-marker-wrapper', 'style'),
-            # Phase 1.4 — conditional dependents
-            Output('pt-range-wrapper', 'style'),
-            Output('pt-categorical-x', 'style'),
-            Output('pt-legend-pos-wrapper', 'style'),
-            Output('pt-tick-grid-detail-wrapper', 'style'),
-        ],
-        [
-            Input('view-mode', 'data'),
-            Input('current-plot-settings', 'data'),
-        ],
-    )
-    def update_panel_visibility(view_mode, settings):
-        """Toggle settings panel sections based on view-mode and current settings."""
-        s = {**DEFAULT_PLOT_SETTINGS, **(settings or {})}
-        is_raw = (view_mode or 'raw') == 'raw'
-        plot_type = s.get('plot_type', 'bar')
-        auto_range = s.get('auto_range', True)
-        show_legend = s.get('show_legend', True)
-        layout_opts = []
-        if s.get('show_grid_x'):
-            layout_opts.append('grid_x')
-        if s.get('show_grid_y'):
-            layout_opts.append('grid_y')
-        if s.get('show_tick_marks'):
-            layout_opts.append('ticks')
-
-        # 1.1 — header text
-        header = ('Publication Plot Settings' if ':publication-' in (s.get('_context_key') or '')
-                  else 'Raw Plot Settings' if is_raw else 'Analysis Plot Settings')
-
-        # 1.2 — analysis-only vs raw-only
-        plot_type_vis = _HIDE if is_raw else _SHOW
-        raw_layout_vis = _SHOW if is_raw else _HIDE
-        theme_vis = _SHOW  # always visible
-
-        # 1.3 — plot-type-specific (only in analysis mode)
-        if is_raw:
-            bar_vis = _HIDE
-            line_vis = _SHOW   # line width matters for raw
-            marker_vis = _HIDE
-        else:
-            bar_vis = _SHOW if plot_type == 'bar' else _HIDE
-            line_vis = _SHOW if plot_type in ('line', 'scatter') else _HIDE
-            marker_vis = _SHOW if plot_type in ('scatter', 'line') else _HIDE
-
-        # 1.4 — conditional dependents
-        range_vis = _HIDE if auto_range else _SHOW
-        legend_pos_vis = _SHOW if show_legend else _HIDE
-        has_grid_or_ticks = ('grid_x' in layout_opts or 'grid_y' in layout_opts
-                            or 'ticks' in layout_opts)
-        tick_grid_vis = _SHOW if has_grid_or_ticks else _HIDE
-
-        return (
-            header,
-            plot_type_vis,
-            raw_layout_vis,
-            theme_vis,
-            bar_vis,
-            line_vis,
-            marker_vis,
-            range_vis,
-            _HIDE if is_raw else _SHOW,
-            legend_pos_vis,
-            tick_grid_vis,
-        )
-
+    # 5. Panel visibility is clientside (see _register_clientside / panel_visibility).
 
     @app.callback(
         [Output('current-plot-settings', 'data', allow_duplicate=True),
@@ -587,7 +651,7 @@ def register_plot_settings_callbacks(app, data_manager):
          Output('pt-y-label', 'value', allow_duplicate=True),
          Output('x-label-input', 'value', allow_duplicate=True),
          Output('y1-label-input', 'value', allow_duplicate=True)],
-        [Input('main-plot', 'figure'), Input('pub-preview-graph', 'data'),
+        [Input('main-inspector-context', 'data'), Input('publication-inspector-context', 'data'),
          Input('active-plot-tab', 'data'), Input('pt-axis-labels-auto', 'n_clicks')],
         [State('plot-tabs', 'data'), State('current-plot-settings', 'data'),
          State('active-plot-context', 'data')],

@@ -102,10 +102,9 @@ tests/                  pytest suite (142 tests)
 
 ### Adding a New File Format
 
-1. Create a preset in `src/ingestion/presets/` implementing `sniff(path, header_lines)` and `parse(path)`
-2. Register it in `src/ingestion/stage_2_registry.py`
-3. Return a `StandardizedResult` with appropriate `ColumnRole` and `PlotHint` values
-4. The rest of the app handles it automatically: tab creation, plotting, peak detection, export
+Follow [Adding instrument formats](docs/ADDING_FORMATS.md) for the current adapter contract, validation workflow, and Shimadzu ASCII example. Coding agents can use the local `$geckoplotter-format` skill, which points to that guide.
+
+A preset implements `sniff(path, head_bytes, head_lines)` and `parse(path)`, and is registered in `src/ingestion/presets/__init__.py`. The pipeline builds `StandardizedResult` from the parsed fields. New data dimensions may also need shared data capabilities and visible controls; verify upload, analysis, and export together.
 
 ## Development
 

@@ -1,0 +1,78 @@
+[Header]
+Application Name	LabSolutions
+Version	5.141
+Output Date	7/30/2026
+Output Time	2:25:10 PM
+
+[Sample Information]
+Sample Name	Synthetic PDA standard
+Sample ID	fixture-001
+Acquired	7/30/2026 1:40:04 PM
+Vial#	11
+Injection Volume	0.5
+
+[Configuration]
+Instrument Name	Synthetic LC-PDA
+# of Channels	2
+
+[Original Files]
+Data File	C:\LabSolutions\synthetic.lcd
+Method File	C:\LabSolutions\synthetic.lcm
+
+[Peak Table(PDA-Ch1)]
+# of Peaks	1
+Peak#	R.Time	I.Time	F.Time	Area	Height	Name
+1	0.03333	0	0.06667	3000	250000	Synthetic compound
+
+[Peak Table(PDA-Ch2)]
+# of Peaks	0
+
+[LC Status Trace(Pump A Pressure)]
+# of Points	3
+Intensity Units	bar
+Intensity Multiplier	0.980665
+R.Time (min)	Intensity
+0	100
+0.03333	101
+0.06667	102
+
+[PDA Multi Chromatogram(Ch1)]
+# of Points	3
+Interval(msec)	2000
+Intensity Units	mAU
+Intensity Multiplier	1
+Type	MultiChrom
+Wavelength(nm)	250
+Bandwidth(nm)	4
+R.Time (min)	Intensity
+0	-1000
+0.03333	250000
+0.06667	2000
+
+[PDA Multi Chromatogram(Ch2)]
+# of Points	3
+Interval(msec)	2000
+Intensity Units	mAU
+Intensity Multiplier	1
+Type	MultiChrom
+Wavelength(nm)	600
+Bandwidth(nm)	4
+R.Time (min)	Intensity
+0	-500
+0.03333	5000
+0.06667	1000
+
+[PDA 3D]
+Interval(msec)	2000
+Start Wavelength(nm)	250
+End Wavelength(nm)	600
+# of Wavelength Axis Points	3
+# of Time Axis Points	3
+R.Time (min)
+     	24985	25115	60036
+0	-1000	-900	-500
+0.03333	250000	240000	5000
+0.06667	2000	1900	1000
+
+[Fraction Collection Report]
+# of Fractions	0

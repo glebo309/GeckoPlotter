@@ -13,15 +13,13 @@ def sections():
 import json
 import app
 from components.workspace_layout import walk
-inspector = next(n for n in walk(app.app.layout) if getattr(n,'id',None)=='plot-tools-container')
 result = {}
-for section in inspector.children:
-    if getattr(section,'className','') != 'inspector-section': continue
+for section in [n for n in walk(app.app.layout) if getattr(n,'className','') == 'inspector-section']:
     nodes = list(walk(section.children[1]))
-    result[section.children[0].children] = {
+    result.setdefault(section.children[0].children, {
         'ids':[n.id for n in nodes if isinstance(getattr(n,'id',None),str)],
         'nested':any(getattr(n,'className','')=='inspector-section' for n in nodes),
-        'texts':[n.children for n in nodes if isinstance(getattr(n,'children',None),str)]}
+        'texts':[n.children for n in nodes if isinstance(getattr(n,'children',None),str)]})
 print(json.dumps(result))
 '''
     result = subprocess.run([sys.executable, '-B', '-c', script], capture_output=True, text=True, check=True)
@@ -34,11 +32,12 @@ def test_signal_controls_and_figure_defaults_have_separate_flat_sections(section
     assert not {'pt-line-width','pt-trace-opacity','pt-smooth-window'} & set(sections['Signal style']['ids'])
     assert {'pt-line-width','pt-trace-opacity','pt-marker-size','pt-palette'} <= set(sections['Figure style']['ids'])
     assert {'pt-smooth-window','smooth-value'} <= set(sections['Smoothing']['ids'])
-    assert not any(section['nested'] for section in sections.values())
+    assert not any(section['nested'] for name, section in sections.items() if name in ('Signal style','Figure style','Smoothing'))
+    assert 'pt-theme' not in sections['Figure style']['ids'] and 'pt-theme-wrapper' not in sections['Signal style']['ids']
 
 
 def test_smoothing_explains_measurements_use_original_signal(sections):
-    assert 'Display only. Peak areas use the original signal.' in sections['Smoothing']['texts']
+    assert 'Display only · peak areas unchanged' in sections['Smoothing']['texts']
 
 
 @pytest.fixture(scope='module')
@@ -67,10 +66,10 @@ print(json.dumps({
 def test_analysis_views_have_direct_tabs_and_keep_panels_mounted(analysis_navigation):
     expected = {'data-overview':'Data','peak-analysis':'Peaks','metadata':'Metadata',
                 'across-samples':'Compare samples','calibration':'Calibration',
-                'ms-scan':'MS scan','ms-eic':'EIC','ms-peak-mass':'Peak mass spectrum'}
+                'ms-scan':'MS scan','ms-eic':'EIC','ms-peak-mass':'Peak mass spectrum','pda':'PDA'}
     assert {tab['value']:tab['label'] for tab in analysis_navigation['tabs']} == expected
     for tab in analysis_navigation['tabs']:
-        assert (tab['style'].get('display') == 'none') == tab['value'].startswith('ms-')
+        assert (tab['style'].get('display') == 'none') == (tab['value'].startswith('ms-') or tab['value']=='pda')
     assert not analysis_navigation['dropdown']
     assert analysis_navigation['scroll']
     assert analysis_navigation['keepMounted']

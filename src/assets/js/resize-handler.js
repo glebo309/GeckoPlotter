@@ -29,10 +29,10 @@
         window.__geckoResizeInitialized = true;
 
         // Default splits (only if not already set)
-        if (!leftColumn.style.width)  leftColumn.style.width  = '30%';
-        if (!rightColumn.style.width) rightColumn.style.width = '70%';
-        if (topLeft  && !topLeft.style.height)  topLeft.style.height  = '50%';
-        if (bottomLeft  && !bottomLeft.style.height)  bottomLeft.style.height  = '50%';
+        if (!leftColumn.style.width)  leftColumn.style.width  = '24%';
+        if (!rightColumn.style.width) rightColumn.style.width = '76%';
+        if (topLeft  && !topLeft.style.height)  topLeft.style.height  = '35%';
+        if (bottomLeft  && !bottomLeft.style.height)  bottomLeft.style.height  = '65%';
         if (topRight && !topRight.style.height) topRight.style.height = '60%';
         if (bottomRight && !bottomRight.style.height) bottomRight.style.height = '40%';
 
@@ -69,7 +69,7 @@
 
         function desiredAnalysisDock() {
             if (analysisDockOverride) return analysisDockOverride;
-            var mass = ['ms-scan', 'ms-eic', 'ms-peak-mass'].indexOf(analysisPanel) !== -1;
+            var mass = ['ms-scan', 'ms-eic', 'ms-peak-mass', 'pda'].indexOf(analysisPanel) !== -1;
             return mass && rightColumn.getBoundingClientRect().width >= 900 ? 'right' : 'below';
         }
 
@@ -102,8 +102,8 @@
         // Deterministic restore positions. Collapsed panels should reopen to the
         // familiar working layout, not to the last near-edge drag position.
         var defaults = {
-            leftCol: 30, rightCol: 70,
-            topLeft: 50, bottomLeft: 50,
+            leftCol: 24, rightCol: 76,
+            topLeft: 35, bottomLeft: 65,
             topRight: 60, bottomRight: 40
         };
 

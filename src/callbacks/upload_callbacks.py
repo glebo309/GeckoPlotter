@@ -1,6 +1,7 @@
 # Clean version of upload_callbacks.py with just the essential functions
 import logging
 import os
+from services.dataset_names import display_name
 
 from typing import List, Dict, Any
 import dash
@@ -124,11 +125,18 @@ def register_upload_callbacks(app: dash.Dash, data_manager) -> None:
                     raw_bytes = base64.b64decode(encoded)
 
                     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=f"_{fname}")
-                    tmp.write(raw_bytes)
-                    tmp.close()
-                    data_manager.temp_files.append(tmp.name)
-
-                    sr = ingest_file(tmp.name, fname)
+                    try:
+                        tmp.write(raw_bytes)
+                        tmp.close()
+                        sr = ingest_file(tmp.name, fname)
+                    finally:
+                        # Parsers read the whole file during ingestion and the original bytes stay in memory,
+                        # so the copy is not needed afterwards (it used to leak one full copy per upload).
+                        tmp.close()
+                        try:
+                            os.unlink(tmp.name)
+                        except OSError:
+                            pass
                     if sr is None:
                         log.warning(f"Pipeline could not parse {fname}")
                         failed_names.add(fname)
@@ -158,9 +166,15 @@ def register_upload_callbacks(app: dash.Dash, data_manager) -> None:
                 if bundle.bundle_type == BundleType.LCMS and len(bundle.component_list) > 1:
                     auto_layout_mode = 'stacked'
 
+            from services.channel_visibility import initialize_imported_channels, visible_component_id
+            initialize_imported_channels(data_manager, new_bundles)
             loaded_files = data_manager.get_loaded_files_list()
 
-            auto_active_file = last_bundle_id or dash.no_update
+            last_bundle = data_manager.get_bundle(last_bundle_id) if last_bundle_id else None
+            if last_bundle and last_bundle.bundle_type in (BundleType.CHROMATOGRAM, BundleType.LCMS):
+                auto_active_file = visible_component_id(data_manager, last_bundle) or dash.no_update
+            else:
+                auto_active_file = last_bundle_id or dash.no_update
             auto_table = dash.no_update
             table_editor = None
             pub_data = None
@@ -170,9 +184,10 @@ def register_upload_callbacks(app: dash.Dash, data_manager) -> None:
                 if file_data:
                     try:
                         from callbacks.viz_callbacks import create_data_table, create_bundle_data_table
-                        bundle = data_manager.get_bundle(auto_active_file)
+                        bundle = (data_manager.get_bundle(auto_active_file)
+                                  or data_manager.get_bundle_for_component(auto_active_file))
                         if bundle and bundle.bundle_type.value != 'generic':
-                            compat = data_manager.get_bundle_by_id(auto_active_file)
+                            compat = data_manager.get_bundle_by_id(bundle.bundle_id)
                             auto_table = create_bundle_data_table(compat, file_data, data_manager)
                         else:
                             auto_table = create_data_table(file_data)
@@ -346,13 +361,18 @@ def render_file_tree_with_bundles_selected(records: List[dict], data_manager, ac
         sort_dir = group_order.get('sort_dir', 'asc')
         sorted_items = _sort_group_items(group_info['items'], group_order)
 
+        collapsed = data_manager.collapse_state.get(tid) == 'collapsed'
         tree_items.append(_render_group_header(
-            group_info['label'], tid, is_active_group, sort_dir=sort_dir))
+            group_info['label'], tid, is_active_group, sort_dir=sort_dir, collapsed=collapsed))
 
         group_container_children = []
         for item in sorted_items:
             file_id = item.get('id')
-            if item.get('is_bundle'):
+            source_bundle = data_manager.get_bundle(file_id)
+            if source_bundle and source_bundle.bundle_type.value in ('chromatogram', 'lcms'):
+                rendered = _render_sample_item(source_bundle, data_manager, active_file_id,
+                                               dimmed=not is_active_group)
+            elif item.get('is_bundle'):
                 is_selected = active_file_id == file_id
                 rendered = render_bundle_item_selected(
                     item, is_selected, data_manager=data_manager,
@@ -370,6 +390,7 @@ def render_file_tree_with_bundles_selected(records: List[dict], data_manager, ac
             group_container_children,
             className='file-group-container',
             id={'type': 'file-group', 'index': tid},
+            style={'display': 'none' if collapsed else 'block'},
         ))
 
     for item in ungrouped:
@@ -385,11 +406,15 @@ def render_file_tree_with_bundles_selected(records: List[dict], data_manager, ac
     return tree_items
 
 
-def _render_group_header(label: str, group_id: str, is_active: bool, sort_dir: str = 'asc') -> html.Div:
+def _render_group_header(label: str, group_id: str, is_active: bool, sort_dir: str = 'asc', collapsed=False) -> html.Div:
     """Render a group header in the file tree with sort toggle."""
     arrow = '↑' if sort_dir == 'asc' else '↓'
     return html.Div([
-        html.Span(label, style={
+        html.Button([html.Span('▶' if collapsed else '▼', className='group-disclosure-indicator'),
+                     html.Span(label)], id={'type': 'group-collapse-btn', 'index': group_id},
+            n_clicks=0, className='group-disclosure-btn',
+            **{'aria-expanded': str(not collapsed).lower(), 'aria-label': 'Expand or collapse ' + label},
+            style={
             'fontWeight': '600' if is_active else '500',
             'fontSize': '11px',
             'textTransform': 'uppercase',
@@ -404,14 +429,79 @@ def _render_group_header(label: str, group_id: str, is_active: bool, sort_dir: s
                 'backgroundColor': 'white', 'color': '#888', 'cursor': 'pointer',
                 'marginLeft': '6px', 'verticalAlign': 'middle',
             }),
-    ], className='file-group-header active' if is_active else 'file-group-header',
+    ], className='file-group-header native-disclosure active' if is_active else 'file-group-header native-disclosure',
         style={
-            'padding': '6px 8px 3px 8px',
-            'marginTop': '6px',
+            'padding': '3px 6px 2px 6px',
+            'marginTop': '4px',
             'borderBottom': '1px solid #1a1a1a' if is_active else '1px solid #e0e0e0',
             'display': 'flex', 'alignItems': 'center', 'justifyContent': 'space-between',
         },
     )
+
+
+def _render_channel_controls(controls, group_id):
+    import json
+    return html.Div([
+        html.Button([html.Span('−' if c['state'] == 'mixed' else '✓' if c['state'] == 'true' else '',
+                               className='channel-check'), html.Span(c['label'])],
+                    id={'type': 'group-channel-btn', 'group': group_id, 'channel': c['key']},
+                    n_clicks=0, role='checkbox', className='group-channel-toggle',
+                    title=f"{c['label']}: {c['visible']} of {len(c['sources'])} shown",
+                    **{'aria-checked': c['state'], 'aria-label': c['label'],
+                       'data-channel-sources': json.dumps(c['sources']), 'data-channel-label': c['label']})
+        for c in controls
+    ], className='group-channel-controls', role='group', **{'aria-label': 'Detector channels'})
+
+
+def _render_channel_manager(controls, group_id):
+    import dash_mantine_components as dmc
+    return dmc.Popover([
+        dmc.PopoverTarget(html.Button('Channels…', className='plot-tool',
+            title='View and remove channels', **{'aria-label': 'Manage channels'})),
+        dmc.PopoverDropdown([
+            html.Div('Channels', style={'fontWeight':600, 'marginBottom':'8px'}),
+            *[html.Div([
+                html.Span(c['label']),
+                html.Span(f"{len(c['sources'])} sample" + ('s' if len(c['sources']) != 1 else ''),
+                          style={'color':'#777','fontSize':'11px','marginLeft':'auto'}),
+                html.Button(_icon('tabler:trash'),
+                    id={'type':'remove-channel-btn','group':group_id,'channel':c['key']},
+                    n_clicks=0, title=f"Remove {c['label']} channel from these samples",
+                    **{'aria-label': f"Remove {c['label']} channel"},
+                    style={'border':'none','background':'none','display':'flex',
+                           'padding':'5px','cursor':'pointer'})
+                ], style={'display':'flex','alignItems':'center','gap':'12px','minHeight':'32px'})
+              for c in controls]
+        ], style={'fontSize':'12px'})
+    ], width=260, position='bottom-start', shadow='md', withinPortal=True)
+
+
+def _render_sample_item(bundle, data_manager, active_file_id=None, dimmed=False):
+    from services.channel_visibility import visible_component_id
+    selected = visible_component_id(data_manager, bundle, active_file_id)
+    return html.Div([
+        html.Div([_icon('tabler:chart-line'),
+                  html.Span(display_name(bundle.name), className='dataset-name',
+                            **{'data-file-id': bundle.bundle_id})],
+                 id={'type': 'file-tree-item', 'index': selected}, n_clicks=0,
+                 className='file-tree-item sample-tree-content', role='button', tabIndex=0,
+                 title=display_name(bundle.name),
+                 **{'data-file-key': bundle.bundle_id,
+                    'data-sample-sources': __import__('json').dumps([c.component_id for c in bundle.component_list])}),
+        html.Div([_visibility_button(bundle.bundle_id, data_manager),
+                  html.Button(_icon('tabler:trash', width=12, height=12),
+                      id={'type': 'delete-btn', 'index': bundle.bundle_id}, n_clicks=0,
+                      title='Remove sample from workspace', className='tree-action-btn',
+                      style={'background': 'none', 'border': 'none', 'cursor': 'pointer',
+                             'padding': '0', 'fontSize': '11px',
+                             'width': '18px', 'height': '18px',
+                             'display': 'flex', 'alignItems': 'center', 'justifyContent': 'center'})],
+                 className='tree-action-group'),
+        # Existing legend interactions address the source eye. Keep their targets
+        # without presenting detector channels as separate files.
+        html.Div([_visibility_button(c.component_id, data_manager) for c in bundle.component_list],
+                 style={'display': 'none'}, **{'aria-hidden': 'true'}),
+    ], className='sample-tree-row', style={'opacity': .5 if dimmed else 1})
 
 
 def render_bundle_item(bundle_item: dict, data_manager=None, dimmed=False) -> html.Div:
@@ -456,10 +546,10 @@ def render_bundle_item_selected(bundle_item: dict, is_selected: bool = False, da
                         'background': 'none',
                         'border': 'none',
                         'cursor': 'pointer',
-                        'padding': '0 4px',
-                        'fontSize': '12px',
-                        'width': '20px',
-                        'height': '20px',
+                        'padding': '0',
+                        'fontSize': '10px',
+                        'width': '16px',
+                        'height': '18px',
                         'display': 'flex',
                         'alignItems': 'center',
                         'justifyContent': 'center'
@@ -469,7 +559,7 @@ def render_bundle_item_selected(bundle_item: dict, is_selected: bool = False, da
             
             # Bundle content (clickable for selection)
             html.Div([
-                html.Span(os.path.splitext(bundle_item.get('name', ''))[0], style={
+                html.Span(display_name(bundle_item.get('name', '')), className='dataset-name', **{'data-file-id': bundle_id}, style={
                     'fontWeight': '600', 'overflow': 'hidden', 'textOverflow': 'ellipsis',
                     'whiteSpace': 'nowrap', 'flex': '1',
                 }),
@@ -481,6 +571,8 @@ def render_bundle_item_selected(bundle_item: dict, is_selected: bool = False, da
             role='button', tabIndex=0,
             id={'type': 'file-tree-item', 'index': bundle_id},
             n_clicks=0,
+            title=display_name(bundle_item.get('name', '')),
+            **{'data-file-key': bundle_id},
             style={
                 'gridArea': 'content',
                 'display': 'flex',
@@ -515,12 +607,12 @@ def render_bundle_item_selected(bundle_item: dict, is_selected: bool = False, da
             })
         ], style={
             'display': 'grid',
-            'gridTemplateColumns': 'auto 1fr auto',
+            'gridTemplateColumns': 'auto minmax(0, 1fr) auto',
             'gridTemplateAreas': '"expand content buttons"',
             'alignItems': 'center',
-            'gap': '2px',
-            'padding': '2px',
-            'margin': '1px 0',
+            'gap': '1px',
+            'padding': '0 2px',
+            'margin': '0',
             'borderRadius': '3px',
             'transition': 'all 0.2s'
         }),
@@ -529,7 +621,7 @@ def render_bundle_item_selected(bundle_item: dict, is_selected: bool = False, da
         html.Div([
             render_individual_file_item(child, is_child=True, data_manager=data_manager)
             for child in bundle_item.get('children', [])
-        ], style={'marginLeft': '16px', 'display': children_display},
+        ], style={'marginLeft': '12px', 'display': children_display},
           id={'type': 'bundle-children', 'index': bundle_id})
     ], className='bundle-item', style={'opacity': opacity})
 
@@ -561,8 +653,16 @@ def render_individual_file_item_selected(item: dict, is_selected: bool = False, 
         'unknown': 'tabler:file-question',
     }
 
-    icon = _icon(TYPE_ICON_NAMES.get(item.get('type'), 'tabler:file-question'))
     file_id = item.get('id')
+    icon_type = item.get('type')
+    entry = data_manager.get_data_by_id(file_id) if data_manager else None
+    if entry and entry.get('standardized') is not None:
+        category = entry['standardized'].source_category.value
+        if category in ('chromatogram', 'lcms_ms'):
+            icon_type = 'chromatogram'
+        elif category in ('spectrum', 'lcms_uv'):
+            icon_type = 'spectrum'
+    icon = _icon(TYPE_ICON_NAMES.get(icon_type, 'tabler:file-question'))
 
     # Check if this item has children (like UV-Vis wells)
     children = []
@@ -593,30 +693,35 @@ def render_individual_file_item_selected(item: dict, is_selected: bool = False, 
             child_item = html.Div([
                 html.Div([
                     # No expand button for children
-                    html.Div(style={'gridArea': 'expand', 'width': '20px'}),
+                    html.Div(style={'gridArea': 'expand', 'width': '8px'}),
                     
                     # Child content (clickable for selection)
                     html.Div([
-                        html.Span(child_icon_symbol, style={'marginRight': '8px', 'display': 'inline-flex'}),
-                        html.Div([
-                            html.Div(os.path.splitext(child.get('name', ''))[0], style={'fontWeight': '500'}),
-                            html.Div(child_info, style={'fontSize': '12px', 'color': '#666'}),
-                        ], style={'flex': '1'})
+                        html.Span(child_icon_symbol, style={'marginRight': '4px', 'display': 'inline-flex', 'flexShrink': '0'}),
+                        html.Span(display_name(child.get('name', '')), className='dataset-name', **{'data-file-id': child_id}, style={
+                            'fontWeight': '500', 'overflow': 'hidden', 'textOverflow': 'ellipsis',
+                            'whiteSpace': 'nowrap', 'flex': '1',
+                        }),
+                        html.Span(child_info, style={
+                            'fontSize': '10px', 'color': '#666', 'marginLeft': '6px', 'flexShrink': '0',
+                        }),
                     ], 
                     className='file-tree-item',
             role='button', tabIndex=0,
                     id={'type': 'file-tree-item', 'index': child_id}, 
                     n_clicks=0,
+                    title=f"{display_name(child.get('name', ''))} · {child_info}" if child_info else display_name(child.get('name', '')),
+                    **{'data-file-key': child_id},
                     style={
                         'gridArea': 'content',
                         'display': 'flex',
                         'alignItems': 'center',
                         'cursor': 'pointer',
-                        'padding': '4px 8px',
-                        'borderRadius': '4px',
+                        'padding': '1px 6px',
+                        'borderRadius': '3px',
                         'backgroundColor': '#f8f9fa',
                         'border': '1px solid #e0e0e0',
-                        'transition': 'all 0.2s'
+                        'transition': 'all 0.15s'
                     }),
                     
                     # Control buttons for child items
@@ -631,11 +736,11 @@ def render_individual_file_item_selected(item: dict, is_selected: bool = False, 
                                 'background': 'none',
                                 'border': 'none',
                                 'cursor': 'pointer',
-                                'padding': '0 4px',
+                                'padding': '0',
                                 'fontSize': '14px',
                                 'color': '#dc3545',
-                                'width': '24px',
-                                'height': '24px',
+                                'width': '18px',
+                                'height': '18px',
                                 'display': 'flex',
                                 'alignItems': 'center',
                                 'justifyContent': 'center',
@@ -645,17 +750,17 @@ def render_individual_file_item_selected(item: dict, is_selected: bool = False, 
                     ], style={
                         'gridArea': 'buttons',
                         'display': 'flex',
-                        'gap': '2px',
+                        'gap': '0',
                         'alignItems': 'center'
                     })
                 ], style={
                     'display': 'grid',
-                    'gridTemplateColumns': 'auto 1fr auto',
+                    'gridTemplateColumns': 'auto minmax(0, 1fr) auto',
                     'gridTemplateAreas': '"expand content buttons"',
                     'alignItems': 'center',
-                    'gap': '2px',
-                    'padding': '2px',
-                    'margin': '1px 0',
+                    'gap': '1px',
+                    'padding': '0 2px',
+                    'margin': '0',
                     'borderRadius': '3px',
                     'transition': 'all 0.2s'
                 })
@@ -663,7 +768,7 @@ def render_individual_file_item_selected(item: dict, is_selected: bool = False, 
             children.append(child_item)
     
     # Add collapse button if has children
-    collapse_button_area = html.Div(style={'gridArea': 'expand', 'width': '20px'})
+    collapse_button_area = html.Div(style={'gridArea': 'expand', 'width': '16px'})
     if has_children:
         # Check stored collapse state for button icon
         initial_icon = '▶'  # Default collapsed
@@ -684,10 +789,10 @@ def render_individual_file_item_selected(item: dict, is_selected: bool = False, 
                     'background': 'none',
                     'border': 'none',
                     'cursor': 'pointer',
-                    'padding': '0 4px',
-                    'fontSize': '12px',
-                    'width': '20px',
-                    'height': '20px',
+                    'padding': '0',
+                    'fontSize': '10px',
+                    'width': '16px',
+                    'height': '18px',
                     'display': 'flex',
                     'alignItems': 'center',
                     'justifyContent': 'center'
@@ -702,8 +807,8 @@ def render_individual_file_item_selected(item: dict, is_selected: bool = False, 
             
             # File content (clickable for selection)
             html.Div([
-                html.Span(icon, style={'marginRight': '6px', 'flexShrink': '0', 'display': 'inline-flex'}),
-                html.Span(os.path.splitext(item.get('name', ''))[0], style={
+                html.Span(icon, style={'marginRight': '4px', 'flexShrink': '0', 'display': 'inline-flex'}),
+                html.Span(display_name(item.get('name', '')), className='dataset-name', **{'data-file-id': file_id}, style={
                     'overflow': 'hidden', 'textOverflow': 'ellipsis', 'whiteSpace': 'nowrap', 'flex': '1',
                     'fontWeight': '400',
                 }),
@@ -716,6 +821,7 @@ def render_individual_file_item_selected(item: dict, is_selected: bool = False, 
             id={'type': 'file-tree-item', 'index': file_id},
             n_clicks=0,
             title=item.get('original_filename') or f"{(item.get('type') or 'unknown').capitalize()} · {item.get('size_display', '')}",
+            **{'data-file-key': file_id},
             style={
                 'gridArea': 'content',
                 'display': 'flex',
@@ -750,11 +856,11 @@ def render_individual_file_item_selected(item: dict, is_selected: bool = False, 
             })
         ], style={
             'display': 'grid',
-            'gridTemplateColumns': 'auto 1fr auto',
+            'gridTemplateColumns': 'auto minmax(0, 1fr) auto',
             'gridTemplateAreas': '"expand content buttons"',
             'alignItems': 'center',
-            'padding': '2px',
-            'margin': '1px 0',
+            'padding': '0 2px',
+            'margin': '0',
             'borderRadius': '3px',
             'transition': 'all 0.2s'
         })
@@ -771,7 +877,7 @@ def render_individual_file_item_selected(item: dict, is_selected: bool = False, 
 
         return html.Div([
             main_item,
-            html.Div(children, style={'marginLeft': '20px', 'display': initial_display},
+            html.Div(children, style={'marginLeft': '12px', 'display': initial_display},
                     id={'type': 'file-children', 'index': file_id})
         ], style=dim_style)
     else:

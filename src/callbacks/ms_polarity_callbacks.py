@@ -33,6 +33,12 @@ def register_ms_polarity_callbacks(app, data_manager):
         options = polarity_options({'current': candidates})
         if not options:
             return hidden
+        from services.channel_visibility import group_bundle_ids, channel_controls
+        members = group_bundle_ids(data_manager, tab_id)
+        if channel_controls(data_manager, members):
+            # Detector toggles are the one visibility control for raw channels.
+            update = {**settings, 'ms_polarity':'both'} if settings.get('ms_polarity','both') != 'both' else no_update
+            return {'display':'none'}, options, 'both', context, update
         available = [option['value'] for option in options if not option['disabled']]
         current = settings.get('ms_polarity', 'both')
         shown = current if current in available else available[0]

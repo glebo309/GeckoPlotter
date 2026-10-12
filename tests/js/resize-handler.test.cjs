@@ -96,7 +96,7 @@ function dragRight(s,dx,dy=0) {
 
 test('mass analysis defaults right only with room; Data and Peaks stay below',()=>{
  const s=setup();wide(s);s.sync('raw-a',tabs);
- for(const panel of ['ms-scan','ms-eic','ms-peak-mass']) {
+ for(const panel of ['ms-scan','ms-eic','ms-peak-mass','pda']) {
    assert.equal(dock(s,panel)[0],'right');
    assert.equal(s.elements['right-column'].style.flexDirection,'row');
    assert.equal(s.elements['right-top-panel'].style.width,'60%');

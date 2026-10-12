@@ -49,3 +49,21 @@ def test_single_table_owner_keeps_multiwell_visibility_and_selected_well(monkeyp
         assert json.loads(data)['columns']==expected
 
     assert memories['target|B']['y1']['series'][0]['column_id'] == 'B'
+
+
+def test_stale_sample_row_selects_current_visible_channel(monkeypatch):
+    from test_chromatogram_bundle import multichannel
+    from services.bundling_service import assign_bundles
+    from services.data_store import DataStore
+    store = DataStore()
+    bundle, = assign_bundles([('run.txt', b'raw', multichannel())])
+    store.add_bundle(bundle)
+    primary, secondary = bundle.component_list
+    store.visibility_state[primary.component_id] = False
+    store.visibility_state[secondary.component_id] = True
+    app = App()
+    callbacks.register_viz_callbacks(app, store)
+    monkeypatch.setattr(dash, 'callback_context', SimpleNamespace(triggered=[{
+        'prop_id': json.dumps({'type': 'file-tree-item', 'index': primary.component_id}) + '.n_clicks', 'value': 1}]))
+    result = app.functions['handle_file_selection']([1], [], None, 'data-overview', {}, None)
+    assert result[1] == secondary.component_id

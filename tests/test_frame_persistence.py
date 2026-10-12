@@ -68,7 +68,7 @@ def test_default_frame_restores_neutral_visible_lines_from_inherited_white_axis_
     for axis in [result.layout.xaxis, result.layout.yaxis]:
         assert axis.showline is True
         assert axis.mirror is True
-        assert axis.linecolor == '#444'
+        assert axis.linecolor == '#1f2328'
 
 
 def test_theme_checklist_output_is_applied_when_color_and_checklist_arrive_together(monkeypatch):

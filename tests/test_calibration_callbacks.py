@@ -252,3 +252,17 @@ def test_field_edit_does_not_replace_uncommitted_table_input(monkeypatch):
     result = editor.run('cal-analyte-name')
     assert result[2] is dash.no_update
     assert all(value is dash.no_update for value in result[3:12])
+
+
+def test_editor_has_no_diagnostic_outputs_or_calculation_but_curve_keeps_r_squared(monkeypatch):
+    editor = Editor(monkeypatch)
+    monkeypatch.setattr(editor.dm.calibration_service, 'create_residual_figure',
+                        lambda *_: pytest.fail('Removed residual diagnostics must not be computed'))
+    result = editor.fitted()
+    assert len(result) == 17
+    assert 'fit_summary' not in editor.callbacks
+    assert any('R²' in annotation.text for annotation in result[12].layout.annotations)
+    app = dash.Dash(__name__)
+    register_calibration_callbacks(app, editor.dm)
+    assert not any(name in key for key in app.callback_map
+                   for name in ('cal-residual-graph','cal-results-info','cal-fit-summary'))

@@ -149,7 +149,7 @@ def _extract_xy_from_figure(fig_dict, source):
 def register_ms_context_menu_callbacks(app: dash.Dash, data_manager) -> None:
 
     @app.callback(
-        [Output('ms-plot-context-menu', 'opened'),
+        [Output('ms-plot-context-menu', 'hidden'),
          Output('ms-plot-context-menu-anchor', 'style')],
         Input('ms-plot-context-menu-store', 'data'),
         prevent_initial_call=True,
@@ -160,18 +160,17 @@ def register_ms_context_menu_callbacks(app: dash.Dash, data_manager) -> None:
         x = store.get('x', 0)
         y = store.get('y', 0)
         style = {**_ANCHOR_BASE, 'left': f'{x}px', 'top': f'{y}px'}
-        return True, style
+        return False, style
 
     @app.callback(
-        Output('ms-plot-context-menu', 'opened', allow_duplicate=True),
+        Output('ms-plot-context-menu', 'hidden', allow_duplicate=True),
         [Input('ms-plot-context-menu-close-store', 'data'),
-         Input('active-plot-tab', 'data'),
-         Input('active-tab', 'data'),
          Input('ms-ctx-open-new-plot', 'n_clicks')],
         prevent_initial_call=True,
     )
     def close_ms_menu(*_):
-        return False
+        # Switching plot/analysis tabs closes it too: clicking a tab is an outside pointerdown (menu-dismiss JS).
+        return True
 
     @app.callback(
         [Output('loaded-files', 'data', allow_duplicate=True),

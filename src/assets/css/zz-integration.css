@@ -1,0 +1,79 @@
+/* Integration inspector + status-bar removal notice. Loads after main.css and
+   zz-density.css (Dash serves assets alphabetically). Layout/class names only:
+   no component IDs, callbacks or behaviour are involved. Controls are >= 26px
+   high and keep visible keyboard focus rings. */
+
+/* ---- Panel: sections flow side by side when there is room ---------------- */
+#integration-container.integration-panel {
+  display:grid; grid-template-columns:repeat(auto-fit,minmax(220px,1fr));
+  gap:0 16px; align-content:start; align-items:start; padding:6px 10px 10px;
+}
+#integration-container.integration-panel > * { min-width:0; }
+#integration-container.integration-panel > .integration-target { grid-column:1 / -1; margin:2px 0 4px; font-size:12px; font-weight:600; color:#24282c; }
+#integration-container .integration-section { border-top:1px solid #e2e5e8; padding:7px 0 9px; margin:0; }
+#integration-container .integration-section:first-of-type { margin-top:0; }
+#integration-container .toolbox-section-title { margin:0 0 5px; font-size:12px; font-weight:600; color:#3a4046; line-height:1.3; }
+#integration-container .form-label,
+.integration-panel .mantine-InputWrapper-label { font-size:12px; font-weight:500; color:#4a5056; margin:0; }
+
+/* ---- Sensitivity: label left, live value right, slider, small end labels -- */
+.integration-field-head { display:flex; align-items:baseline; justify-content:space-between; gap:8px; margin:0 0 2px; }
+.integration-panel .integration-field-head .integration-help { margin:0; font-size:12px; color:#4a5056; font-variant-numeric:tabular-nums; white-space:nowrap; }
+.integration-panel .integration-slider { margin:6px 8px 3px; }
+.integration-panel .integration-slider .mantine-Slider-thumb:focus-visible { outline:2px solid #3b6ea5; outline-offset:2px; }
+.integration-panel .integration-slider-labels { font-size:10px; line-height:1.2; color:#6b7177; gap:8px; margin:0 0 2px; }
+
+/* ---- One uniform action row --------------------------------------------- */
+.integration-panel .integration-actions { gap:6px; margin-top:8px; }
+.integration-panel .integration-actions-row > .mantine-Button-root { flex:1 1 auto; }
+#integration-container .integration-actions .mantine-Button-root,
+#integration-container .integration-actions .btn {
+  height:28px; min-height:28px; padding:0 10px; font-size:12px; font-weight:500; line-height:1; white-space:nowrap; border-radius:5px;
+}
+.integration-panel .integration-actions:not(:has(> :not([style*="display: none"]))) { display:none; }
+
+/* ---- Display + matching on one line ------------------------------------- */
+.integration-inline-row { display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:6px 14px; }
+.integration-inline-row .mantine-CheckboxGroup-root { min-height:26px; display:flex; align-items:center; }
+.integration-panel .mantine-Checkbox-label { font-size:12px; }
+.integration-tolerance { display:inline-flex; align-items:center; gap:6px; }
+.integration-tolerance .form-label { white-space:nowrap; cursor:default; }
+.integration-tolerance-input { --input-height:26px; --input-height-xs:26px; width:84px; flex:0 0 84px; }
+.integration-tolerance-input .mantine-NumberInput-input { height:26px; min-height:26px; font-size:12px; padding-inline:8px; text-align:right; font-variant-numeric:tabular-nums; }
+
+/* ---- Baseline control --------------------------------------------------- */
+#integration-container .mantine-SegmentedControl-root { margin-top:1px; }
+#integration-container .mantine-SegmentedControl-label { min-height:26px; padding:3px 8px; font-size:12px; display:flex; align-items:center; justify-content:center; }
+
+/* ---- Deconvolution: collapses entirely until there is something to show -- */
+.integration-deconv:not(:has(#deconv-results-container > *)):not(:has(.integration-actions > :not([style*="display: none"]))) { display:none; }
+#deconv-results-container { overflow-x:auto; margin:0; }
+.integration-panel .integration-deconv .integration-actions { margin-top:6px; }
+
+/* Small inline note: replaces the large red error line. */
+.integration-note { display:flex; align-items:flex-start; gap:6px; font-size:12px; line-height:1.35; padding:3px 0; }
+.integration-note-icon {
+  flex:0 0 14px; width:14px; height:14px; margin-top:1px; box-sizing:border-box;
+  border:1.5px solid currentColor; border-radius:50%;
+  font-size:9px; font-weight:700; line-height:11px; text-align:center;
+}
+.integration-note-warn { color:#9a4a00; }
+.integration-note-muted { color:#60666d; }
+
+/* ---- Visible focus rings ------------------------------------------------ */
+#integration-container :is(button, input, [role="slider"], [role="tab"], [tabindex]):focus-visible {
+  outline:2px solid #3b6ea5; outline-offset:1px;
+}
+
+/* ---- Status bar: compact one-line removal notice, text-style undo -------- */
+.status-bar { flex-wrap:nowrap; white-space:nowrap; }
+.status-bar .workspace-status-message { flex:0 1 auto; max-width:60%; }
+.status-bar .file-removal-feedback { flex:0 0 auto; gap:6px; align-items:center; padding:0; white-space:nowrap; }
+.status-bar #undo-file-removal-btn {
+  background:none; border:0; border-radius:3px; box-shadow:none;
+  color:#9ec5ee; font-size:12px; font-weight:500; height:20px; min-height:0; padding:0 4px;
+  text-decoration:underline; text-underline-offset:2px; cursor:pointer;
+}
+.status-bar #undo-file-removal-btn:hover { background:none; color:#d3e6fb; }
+.status-bar #undo-file-removal-btn:focus-visible { outline:2px solid #9ec5ee; outline-offset:1px; }
+.status-bar #undo-file-removal-btn:disabled { display:none; }

@@ -51,7 +51,7 @@ test('the plain figure menu opens even when zoom/integration already prevented t
         {window,document,ArrayBuffer,Date,JSON});
     listeners.find(l=>l.name==='contextmenu' && !l.capture).fn({defaultPrevented:true,
         target:{closest:()=>gd},clientX:400,clientY:300,preventDefault(){}});
-    assert.ok(props.some(p=>p[0]==='figure-context-menu' && p[1].opened));
+    assert.ok(props.some(p=>p[0]==='figure-context-menu' && p[1].hidden===false));
 });
 
 test('publication is captured before the menu auto-closes and unmounts its Dash input', () => {

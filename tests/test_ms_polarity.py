@@ -145,49 +145,57 @@ def polarity_pipeline(monkeypatch):
     return store,app,hydrate,control,render
 
 
-def test_actual_controls_drive_both_positive_negative_and_restore_uv_without_mutation(monkeypatch):
+def test_independent_channel_toggles_keep_uv_and_raw_data_while_switching_ms(monkeypatch):
+    from services.channel_visibility import toggle_channel
     store,app,hydrate,control,render=polarity_pipeline(monkeypatch)
     settings=hydrate('first-positive')
+    originals = {c.component_id:c.dataframe.copy() for bundle in store.iter_bundles() for c in bundle.component_list}
     shown=control(None,settings,'first-positive','active-plot-tab')
+    assert shown[0] == {'display':'none'}
     assert shown[2]=='both'
     assert render(settings,'first-positive')=={'first-positive','first-negative','first-uv'}
-    for mode,ids in [('positive',{'first-positive','first-uv'}),
-                     ('negative',{'first-negative','first-uv'}),
-                     ('both',{'first-positive','first-negative','first-uv'})]:
-        out=control(mode,settings,'first-positive')
-        assert out[2]==mode and out[4] is not dash.no_update
-        settings=out[4]
-        assert render(settings,'first-positive')==ids
-    assert store.visibility_state=={}
+    for channel,ids in [('ms:negative',{'first-positive','first-uv'}),
+                        ('ms:positive',{'first-uv'}),
+                        ('ms:negative',{'first-negative','first-uv'}),
+                        ('ms:positive',{'first-positive','first-negative','first-uv'})]:
+        assert toggle_channel(store, ['first','second'], channel)
+        assert render(settings,'first-positive') == ids
     assert len(store.get_bundle('first').component_list)==3
+    assert all(store.get_data_by_id(cid)['data'].equals(frame) for cid,frame in originals.items())
 
 
-def test_polarity_is_saved_per_plot_tab_and_stale_control_hydration_cannot_overwrite_it(monkeypatch):
+def test_channel_choices_survive_plot_tab_navigation_and_stale_legacy_control(monkeypatch):
+    from services.channel_visibility import toggle_channel
     store,app,hydrate,control,render=polarity_pipeline(monkeypatch)
     first=hydrate('first-positive')
-    first=control('negative',first,'first-positive')[4]
-    app.functions['persist_plot_settings'](first,first['_context_key'])
+    toggle_channel(store, ['first','second'], 'ms:negative')
+    assert render(first,'first-positive')=={'first-positive','first-uv'}
+    visibility = dict(store.visibility_state)
     second=hydrate('second-positive')
-    assert control('negative',second,'second-positive','active-plot-tab')[2]=='both'
-    second=control('positive',second,'second-positive')[4]
-    app.functions['persist_plot_settings'](second,second['_context_key'])
-    first=hydrate('first-negative')
-    restored=control('positive',first,'first-negative','active-plot-tab',second['_context_key'])
-    assert restored[2]=='negative' and restored[4] is dash.no_update
-    assert render(first,'first-negative')=={'first-negative','first-uv'}
-    assert render(hydrate('second-negative'),'second-negative')=={'second-positive','second-uv'}
+    out=control('negative',second,'second-positive','active-plot-tab')
+    assert out[0] == {'display':'none'}
+    assert render(second,'second-positive')=={'second-positive','second-uv'}
+    restored=hydrate('first-negative')
+    stale=control('negative',restored,'first-negative','ms-polarity-control',second['_context_key'])
+    assert stale[0] == {'display':'none'} and stale[4] is dash.no_update
+    assert store.visibility_state == visibility
+    assert render(restored,'first-negative')=={'first-positive','first-uv'}
 
 
-def test_opening_peaks_results_keeps_same_raw_figure_polarity_context(monkeypatch):
+def test_opening_peaks_results_does_not_reset_independent_channel_choices(monkeypatch):
+    from services.channel_visibility import toggle_channel
     store,app,hydrate,control,render=polarity_pipeline(monkeypatch)
     first=hydrate('first-positive')
-    first=control('negative',first,'first-positive')[4]
+    toggle_channel(store, ['first','second'], 'ms:positive')
     app.functions['persist_plot_settings'](first,first['_context_key'])
     context=first['_context_key'];tab=context.removeprefix('shared:raw:')
+    visibility = dict(store.visibility_state)
     for panel in ('peak-analysis','data-overview','across-samples','metadata'):
-        result=app.functions['resolve_plot_context']('first-positive','raw',panel,tab,context)
-        assert result is dash.no_update, 'Opening a results pane must not reset the shown plot polarity/layout settings'
+        from callbacks.plot_settings_callbacks import resolve_plot_context
+        result=resolve_plot_context('first-positive','raw',panel,tab,context)
+        assert result is dash.no_update, 'Opening results must not reset the raw plot context'
         restored=hydrate('first-positive')
-        assert restored['ms_polarity']=='negative'
+        assert restored.get('ms_polarity','both')=='both'
         assert restored['layout_mode']==first['layout_mode']
+        assert store.visibility_state == visibility
     assert render(restored,'first-positive')=={'first-negative','first-uv'}

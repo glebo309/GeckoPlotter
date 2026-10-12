@@ -3,12 +3,12 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const vm = require('node:vm');
 
-function keyboard() {
+function keyboard(options = {}) {
     const events = {}, props = [], cancelled = [];
-    const window = {dash_clientside: {set_props: (id, value) => props.push([id, value])},
+    const window = {__geckoBaselineMode: options.mode, dash_clientside: {set_props: (id, value) => props.push([id, value])},
         GeckoPlotterManualIntegration: {cancelInteraction: id => cancelled.push(id)}};
     vm.runInNewContext(fs.readFileSync('src/assets/js/keyboard-delete.js', 'utf8'), {
-        window, document: {getElementById: () => null, addEventListener: (name, fn) => events[name] = fn}, Date
+        window, document: {getElementById: id => (options.buttons || {})[id] || null, addEventListener: (name, fn) => events[name] = fn}, Date
     });
     return {events, props, cancelled};
 }
@@ -39,4 +39,23 @@ test('native selects and contenteditable fields retain typing shortcuts', () => 
         events.keydown({key: 's', target});
     }
     assert.equal(props.length, 0);
+});
+
+test('Enter accepts and X cancels only the active deconvolution preview', () => {
+    const clicked=[];
+    const buttons={
+        'deconv-accept-btn':{click:()=>clicked.push('accept')},
+        'deconv-cancel-btn':{click:()=>clicked.push('cancel')}
+    };
+    const {events,props}=keyboard({mode:'deconvolve',buttons});
+    const key=key=>({key,target:{tagName:'DIV'},preventDefault(){},stopPropagation(){}});
+    events.keydown(key('Enter'));events.keydown(key('x'));events.keydown(key('X'));
+    assert.deepEqual(clicked,['accept','cancel','cancel']);
+    for (const extra of [{target:{tagName:'INPUT'}},{ctrlKey:true},{metaKey:true},{altKey:true},{repeat:true}]) {
+        events.keydown({...key('Enter'),...extra});events.keydown({...key('x'),...extra});
+    }
+    buttons['deconv-accept-btn'].disabled=true;
+    events.keydown(key('Enter'));
+    assert.deepEqual(clicked,['accept','cancel','cancel']);
+    assert.equal(props.length,0);
 });

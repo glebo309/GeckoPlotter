@@ -19,7 +19,7 @@ def active_axis_figure(main, publication, tab, tabs):
 def register_axis_inspector_callbacks(app):
     @app.callback(
         Output('axis-inspector-cards', 'children'),
-        Input('main-plot', 'figure'), Input('pub-preview-graph', 'data'),
+        Input('main-inspector-context', 'data'), Input('publication-inspector-context', 'data'),
         Input('active-plot-tab', 'data'), Input('current-plot-settings', 'data'),
         State('plot-tabs', 'data'), State('active-plot-context', 'data'),
     )

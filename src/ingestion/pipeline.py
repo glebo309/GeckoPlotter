@@ -47,6 +47,9 @@ class IngestionPipeline:
                 )
             except Exception as e:
                 log.debug(f"Stage 2 preset {preset.name} failed for {original_name}: {e}")
+                if getattr(preset, "strict", False):
+                    log.warning("Rejected %s export %s: %s", preset.name, original_name, e)
+                    return None
 
         raw = heuristic_parse(path, extension)
         if raw is not None:

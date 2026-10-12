@@ -35,9 +35,8 @@ def register_figure_actions_callbacks(app):
         return next_tabs, tab_id, next_figures, 'plot-tools', 'Publication figure created'
 
     app.clientside_callback(
-        'function() { return false; }',
-        Output('figure-context-menu', 'opened', allow_duplicate=True),
-        [Input('active-plot-tab', 'data'), Input('active-tab', 'data'),
-         Input('figure-context-close', 'data')],
+        'function() { return true; }',
+        Output('figure-context-menu', 'hidden', allow_duplicate=True),
+        Input('figure-context-close', 'data'),
         prevent_initial_call=True,
     )

@@ -26,7 +26,7 @@
         var dc = window.dash_clientside ||
             (window.parent && window.parent !== window ? window.parent.dash_clientside : null);
         if (!dc || typeof dc.set_props !== 'function') return;
-        dc.set_props('ms-plot-context-menu', { opened: false });
+        dc.set_props('ms-plot-context-menu', { hidden: true });
         dc.set_props('ms-plot-context-menu-close-store', { data: Date.now() });
     }
 
@@ -52,8 +52,8 @@
 
     // Dismiss on outside click
     document.addEventListener('mousedown', function (e) {
-        var dropdown = document.getElementById('ms-plot-context-dropdown');
-        if (!dropdown || dropdown.offsetParent === null) return;
+        var dropdown = document.getElementById('ms-plot-context-menu');
+        if (!dropdown || dropdown.hidden || dropdown.offsetParent === null) return;
         if (!dropdown.contains(e.target)) bumpClose();
     }, true);
 

@@ -9,15 +9,14 @@ import plotly.graph_objects as go
 import pandas as pd
 from typing import Dict, Any
 
+from services.plot_settings_service import COLOR_PALETTES
+
 
 class PlotManager:
     """Manages plot creation for different data types."""
 
     def __init__(self):
-        self.default_colors = [
-            '#E69F00', '#56B4E9', '#009E73', '#F0E442',
-            '#0072B2', '#D55E00', '#CC79A7',
-        ]
+        self.default_colors = list(COLOR_PALETTES['muted'])
 
     def create_empty_plot(self, message: str = "Select a file to view data") -> go.Figure:
         fig = go.Figure()
@@ -125,6 +124,12 @@ class PlotManager:
         'other': 'Other',
     }
 
+    @staticmethod
+    def _vertical_spacing(rows: int, requested: float) -> float:
+        # Plotly requires total gaps < 1. Reserve at least half the figure for
+        # the actual data panes when many channels are visible.
+        return min(max(0.02, requested), 0.5 / max(1, rows - 1))
+
     def _create_grouped_plot(self, groups: dict, layout_mode: str, subplot_spacing: float = 0.08) -> go.Figure:
         """Each data-type group gets its own subplot row with its own legend."""
         from plotly.subplots import make_subplots
@@ -134,7 +139,7 @@ class PlotManager:
 
         fig = make_subplots(
             rows=n, cols=1, shared_xaxes=False,
-            vertical_spacing=max(0.02, subplot_spacing),
+            vertical_spacing=self._vertical_spacing(n, subplot_spacing),
         )
 
         for row_idx, key in enumerate(group_keys, start=1):
@@ -199,7 +204,7 @@ class PlotManager:
         n = len(files)
         fig = make_subplots(
             rows=n, cols=1, shared_xaxes=True,
-            vertical_spacing=max(0.02, subplot_spacing),
+            vertical_spacing=self._vertical_spacing(n, subplot_spacing),
         )
         trace_idx = 0
         for i, (name, file_data) in enumerate(files):
@@ -257,6 +262,12 @@ class PlotManager:
             return color_offset
 
         file_id = file_data.get('record', {}).get('id', '')
+        trace_meta = {'file_id': file_id}
+        metadata = file_data.get('metadata', {})
+        if (getattr(sr.source_category, 'value', None) in ('chromatogram', 'lcms_uv', 'lcms_ms')
+                and metadata.get('parent_bundle_id')):
+            trace_meta.update(rename_file_id=metadata['parent_bundle_id'],
+                              rename_label=metadata.get('parent_bundle_name', ''))
 
         df = sr.data
         x_cols = sr.x_columns
@@ -290,7 +301,7 @@ class PlotManager:
                     x=xs, y=ys, mode='lines',
                     name=label,
                     line=dict(color=color, width=1),
-                    meta={'file_id': file_id},
+                    meta={**trace_meta, 'y_column': y_col},
                 ))
             else:
                 fig.add_trace(trace_cls(
@@ -299,7 +310,7 @@ class PlotManager:
                     mode="lines",
                     name=label,
                     line=dict(color=color, width=2),
-                    meta={'file_id': file_id},
+                    meta={**trace_meta, 'y_column': y_col},
                 ))
             idx += 1
 

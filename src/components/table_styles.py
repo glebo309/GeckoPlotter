@@ -15,25 +15,25 @@ TABLE_STYLE_TABLE = {
 }
 
 TABLE_STYLE_CELL = {
-    'textAlign': 'center',
-    'padding': '6px 10px',
+    'textAlign': 'right',
+    'padding': '6px 8px',
     'fontSize': '12px',
-    'fontFamily': 'ui-monospace, "SF Mono", Menlo, Consolas, monospace',
+    'fontFamily': '-apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif',
     'minWidth': '80px',
     'whiteSpace': 'normal',
     'color': '#1d1d1f',
 }
 
 TABLE_STYLE_HEADER = {
-    'backgroundColor': '#1d1d1f',
-    'color': '#fff',
+    'backgroundColor': '#f2f3f4',
+    'color': '#454a50',
     'fontWeight': '600',
-    'fontSize': '10px',
-    'letterSpacing': '0.05em',
-    'textTransform': 'uppercase',
-    'padding': '7px 10px',
+    'fontSize': '11px',
+    'letterSpacing': 'normal',
+    'textTransform': 'none',
+    'padding': '7px 8px',
     'cursor': 'pointer',
-    'borderBottom': '1px solid #000',
+    'borderBottom': '1px solid #d8dce0',
     'fontFamily': '-apple-system, "SF Pro Text", "Segoe UI", Roboto, sans-serif',
 }
 

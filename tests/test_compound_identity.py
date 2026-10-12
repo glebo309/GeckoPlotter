@@ -144,3 +144,40 @@ class TestCompoundGrouping:
         assert p1.group_id != p2.group_id
         ps.group_peaks_across_samples(rt_window=0.5)
         assert p1.group_id == p2.group_id
+
+
+def test_new_peak_matches_nearest_existing_compound_without_recoloring(ps):
+    early = _add_peak(ps, 'a', 7.10)
+    late = _add_peak(ps, 'a', 7.30)
+    ps.group_peaks_across_samples()
+    originals = {p.peak_id: (p.group_id, p.color) for p in (early, late)}
+    matched = _add_peak(ps, 'b', 7.29)
+    ps.group_peaks_across_samples()
+    assert matched.group_id == late.group_id
+    assert matched.color == late.color
+    assert {p.peak_id: (p.group_id, p.color) for p in (early, late)} == originals
+    ps.remove_peak('a', late.peak_id)
+    ps.group_peaks_across_samples()
+    assert matched.color == originals[late.peak_id][1]
+    assert matched.group_id != early.group_id
+    extra = _add_peak(ps, 'b', 3.0)
+    ps.group_peaks_across_samples()
+    ps.remove_peak('b', extra.peak_id)
+    ps.group_peaks_across_samples()
+    assert matched.color == originals[late.peak_id][1]
+
+
+def test_new_compounds_do_not_restart_palette_for_each_file(ps):
+    a = _add_imported_peak(ps, 'a', 7.3, OKABE_ITO_PALETTE[0])
+    ps.group_peaks_across_samples()
+    b = _add_imported_peak(ps, 'b', 2.0, OKABE_ITO_PALETTE[0])
+    ps.group_peaks_across_samples()
+    assert a.color != b.color
+    original = a.color
+    ps.remove_peak('a', a.peak_id)
+    restored = PeakService()
+    restored.deserialize(ps.serialize())
+    match = _add_peak(restored, 'c', 7.31)
+    restored.group_peaks_across_samples()
+    assert match.color == original
+    assert match.group_id == a.group_id

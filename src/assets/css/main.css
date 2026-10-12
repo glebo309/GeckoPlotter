@@ -505,6 +505,16 @@ body {
     font-weight: 600 !important;
 }
 
+/* Finder-style multi-selection (Cmd/Ctrl-click, Shift-click range) */
+.file-tree-item.multi-selected {
+    background-color: rgba(0, 0, 0, 0.09) !important;
+    border-left: 2px solid #1d1d1f !important;
+}
+
+.file-tree-item.multi-selected:hover {
+    background-color: rgba(0, 0, 0, 0.13) !important;
+}
+
 .file-hidden {
     opacity: 0.3 !important;
 }
@@ -626,10 +636,10 @@ body {
 }
 
 .file-tree-item {
-    padding: 3px 8px;
+    padding: 1px 6px;
     cursor: pointer;
-    border-radius: 6px;
-    margin: 1px 0;
+    border-radius: 4px;
+    margin: 0;
     transition: background-color 0.15s ease;
     color: #1d1d1f;
     display: flex;
@@ -665,16 +675,18 @@ body {
 
 #file-tree button[id*="visibility-btn"],
 #file-tree button[id*="delete-btn"] {
-    width: 32px !important;
-    height: 32px !important;
-    padding: 6px !important;
+    width: 22px !important;
+    height: 22px !important;
+    padding: 3px !important;
     flex-shrink: 0;
-    border-radius: 5px;
+    border-radius: 4px;
     color: #444;
 }
 
-#file-tree button[id*="delete-btn"]:hover {
-    background: #fce8e6 !important;
+#file-tree button[id*="visibility-btn"] img,
+#file-tree button[id*="delete-btn"] img {
+    width: 14px !important;
+    height: 14px !important;
 }
 
 #file-tree button:focus-visible {
@@ -683,8 +695,17 @@ body {
 }
 
 #file-tree .file-tree-item {
-    min-height: 32px;
+    min-height: 22px;
     min-width: 0;
+    user-select: none;
+}
+
+/* Long names truncate with an ellipsis; the row title carries the full name. */
+#file-tree .file-tree-item .dataset-name {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .bundle-item:hover > div > .tree-action-group,
@@ -983,7 +1004,7 @@ button[id*="collapse-btn"]:active {
 }
 .plot-tool:hover { background: #ededf0; }
 .plot-tool.active { background: #e4ebe4; border-color: #9aac9a; color: #245c30; }
-.plot-tool:focus-visible { outline: 2px solid #476c98; outline-offset: 2px; }
+.plot-tool:focus-visible { outline: 2px solid #1d1d1f; outline-offset: 2px; }
 .figure-editor-actions {
     display: flex; gap: 6px; flex-wrap: wrap;
     padding-top: 10px; margin-top: 10px; border-top: 1px solid #ddd;
@@ -1089,7 +1110,7 @@ button[id*="collapse-btn"]:active {
 /* DataTable */
 .dash-spreadsheet-container .dash-spreadsheet-inner {
     border-radius: 6px;
-    overflow: hidden;
+    overflow: visible;
 }
 
 .dash-spreadsheet-container .column-header--sort {
@@ -1252,14 +1273,7 @@ button[id*="collapse-btn"]:active {
     border-color: rgba(0, 0, 0, 0.4) !important;
 }
 
-/* Button primary (DMC) → black */
-.mantine-Button-root {
-    background-color: #1d1d1f !important;
-}
-
-.mantine-Button-root:hover {
-    background-color: #333 !important;
-}
+/* Mantine supplies variant-aware button colors, including hover and disabled states. */
 
 /* Contextual workspace: the figure remains the visual focus. */
 :root { --workspace-accent:#355f49; --workspace-border:#dedfe2; --workspace-muted:#666b72; }
@@ -1280,7 +1294,7 @@ button[id*="collapse-btn"]:active {
 .inspector-section[open] > summary::before { transform:rotate(90deg); }
 .inspector-section > summary::-webkit-details-marker { display:none; }
 .inspector-section > summary:hover { color:var(--workspace-accent); }
-.inspector-section > summary:focus-visible { outline:2px solid #476c98; outline-offset:2px; }
+.inspector-section > summary:focus-visible { outline:2px solid #1d1d1f; outline-offset:2px; }
 .inspector-section-content { padding:0 0 12px; }
 .inspector-section .inspector-section { border:0; margin-top:4px; }
 .inspector-section .inspector-section > summary { color:var(--workspace-muted); font-weight:500; }
@@ -1289,6 +1303,15 @@ button[id*="collapse-btn"]:active {
 .inspector-note,.inspector-empty { font-size:11px; line-height:1.5; color:var(--workspace-muted); padding:6px 0; }
 .inspector-reset { font-size:11px; margin:3px 0 6px; }
 .slider-exact-value { width:88px; margin:9px 0 12px auto; }
+.smoothing-controls { padding:0 8px 22px; }
+.smoothing-value-row { display:flex; align-items:center; justify-content:space-between; gap:8px; margin-bottom:12px; }
+.smoothing-value-row .form-label { margin:0; }
+#pub-plotter-container, #export-container { padding:0 12px 16px !important; max-height:none !important; overflow:visible !important; }
+.inspector-actions { display:flex; flex-wrap:wrap; gap:6px; }
+#pub-plotter-container .btn { min-height:30px; padding:0 10px; font-size:12px; border-radius:5px; }
+#pub-plotter-container .inspector-section-content { min-width:0; }
+.toolbox-tabs > .mantine-Tabs-list { overflow-x:auto; flex-shrink:0; }
+.toolbox-tabs > .mantine-Tabs-list > .mantine-Tabs-tab { flex-shrink:0; }
 .axis-inspector-card { border:1px solid #e2e4e6; border-radius:7px; padding:10px; background:#fff; }
 .axis-inspector-heading { display:flex; justify-content:space-between; align-items:baseline; gap:8px; margin-bottom:8px; }
 .axis-inspector-name { font-weight:600; font-size:12px; overflow-wrap:anywhere; }
@@ -1302,7 +1325,9 @@ button[id*="collapse-btn"]:active {
 .plot-toolbar-group:first-child { border:1px solid #d7dadb; border-radius:6px; padding:2px; background:#eff1f1; }
 .plot-toolbar-group:first-child .plot-tool { height:27px; }
 .plot-tool.active { background:#fff; border-color:#c9cecb; box-shadow:0 1px 2px #0000000c; color:#254d36; }
-#plot-tool-integrate.active { background:#e5eee8; box-shadow:inset 0 0 0 1px #69947a; }
+#plot-tool-integrate.active, #plot-tool-integrate.momentary-active { background:#e5eee8; box-shadow:inset 0 0 0 1px #69947a; }
+.plot-tool.plot-tool-icon { width:32px; height:32px; padding:4px; display:inline-flex; align-items:center; justify-content:center; border:1px solid #cdd1d5; background-color:#fff; flex-shrink:0; }
+.integration-tool-icon { width:22px; height:22px; background:currentColor; mask:url('/assets/icons/integrate-peak.svg') center / contain no-repeat; -webkit-mask:url('/assets/icons/integrate-peak.svg') center / contain no-repeat; }
 .toolbar-spacer { flex:1; min-width:0; }
 .plot-tool-primary { background:#253e30; color:#fff; border-color:#253e30; }
 .plot-tool-primary:hover { background:#355f49; }
@@ -1317,7 +1342,7 @@ button[id*="collapse-btn"]:active {
 .file-removal-feedback { gap:8px; align-items:center; padding:8px 12px; border-top:1px solid #dce6df; background:#f1f6f3; font-size:12px; flex-shrink:0; }
 .tree-disclosure-btn { min-width:28px; min-height:28px; display:inline-flex; align-items:center; justify-content:center; border:0; background:transparent; cursor:pointer; }
 .tree-disclosure-btn:hover { background:#ecefee; border-radius:4px; }
-.file-tree-item:focus-visible,.tree-action-btn:focus-visible { outline:2px solid #476c98; outline-offset:1px; }
+.file-tree-item:focus-visible,.tree-action-btn:focus-visible { outline:2px solid #1d1d1f; outline-offset:1px; }
 .results-navigation { display:flex; gap:12px; align-items:center; justify-content:space-between; padding:0 6px; border-bottom:1px solid var(--workspace-border); flex-shrink:0; min-height:44px; }
 .results-navigation .mantine-Tabs-list { border:0; flex-wrap:nowrap; }
 .results-navigation .mantine-Tabs-tab { padding:12px 14px; }
@@ -1344,7 +1369,7 @@ button[id*="collapse-btn"]:active {
 .status-bar #file-removal-message { display:none; }
 .status-bar #undo-file-removal-btn { background:transparent; border-color:#777; color:#eee; font-size:10px; padding:1px 7px; height:22px; }
 .status-bar #undo-file-removal-btn:disabled { display:none; }
-.file-group-header:focus-visible { outline:2px solid #476c98; outline-offset:1px; }
+.file-group-header:focus-visible { outline:2px solid #1d1d1f; outline-offset:1px; }
 /* Figure export shares the global status area rather than duplicating banners. */
 #pub-export-status, #exp-fig-status { display:none; }
 
@@ -1357,3 +1382,83 @@ button[id*="collapse-btn"]:active {
 .analysis-graph-content > .analysis-graph {
     min-width: 0;
 }
+
+/* Shared workspace density and readable scientific tables. */
+.results-navigation { min-height:36px; gap:8px; }
+.results-navigation .mantine-Tabs-tab { padding:9px 12px; font-size:12px; }
+.toolbox-tabs .mantine-Tabs-tab { padding:8px 11px; }
+.inspector-section > summary { padding:9px 0; }
+.axis-inspector-card { padding:8px; }
+.axis-inspector-heading { margin-bottom:6px; }
+.plot-toolbar { gap:8px; }
+.analysis-group-actions { margin:9px 0; padding-top:8px; gap:8px; }
+.analysis-group-actions button { font-weight:500; height:30px; min-height:30px; }
+.analysis-group-actions .mantine-TextInput-root { width:170px; }
+.analysis-group-actions input { height:30px; min-height:30px; }
+#peak-group-selector-wrapper > label { color:#555b62; font-weight:500 !important; }
+#peak-group-selector .Select-control { min-height:32px; }
+#retention-slider-wrapper { padding:8px 0 !important; margin-top:8px !important; background:transparent !important; }
+#retention-slider-wrapper > label { font-size:12px !important; font-weight:500 !important; color:#555b62; }
+#peak-table .dash-spreadsheet-inner, #cross-sample-table .dash-spreadsheet-inner { overflow:visible; }
+#peak-table .dash-spreadsheet-container, #cross-sample-table .dash-spreadsheet-container { border:1px solid #dfe2e5; border-radius:5px; }
+.dash-spreadsheet-container .dash-cell { font-variant-numeric:tabular-nums; }
+.dash-spreadsheet-container th { line-height:1.3; }
+.dash-spreadsheet-container th input[type=radio] { width:12px; height:12px; margin:0 4px 0 0; accent-color:#355f49; }
+.dash-spreadsheet-container td input[type=checkbox] { width:13px; height:13px; accent-color:#355f49; }
+.dash-spreadsheet-container td[data-dash-column="Sample"],
+.dash-spreadsheet-container td[data-dash-column="Peak Name"],
+.dash-spreadsheet-container td[data-dash-column="Group"],
+.dash-spreadsheet-container td[data-dash-column="Signal"] { text-align:left !important; }
+#peak-table .dash-header, #cross-sample-table .dash-header { white-space:normal; min-width:76px; }
+#peak-table .dash-header[data-dash-column="Concentration"],
+#cross-sample-table .dash-header[data-dash-column="Concentration"] { min-width:135px; }
+#peak-table .dash-select-header, #cross-sample-table .dash-select-header,
+#peak-table .dash-delete-header, #cross-sample-table .dash-delete-header,
+#peak-table .dash-select-cell, #cross-sample-table .dash-select-cell,
+#peak-table .dash-delete-cell, #cross-sample-table .dash-delete-cell { min-width:24px !important; width:24px !important; max-width:24px !important; padding:4px !important; }
+.dash-spreadsheet-container ::-webkit-scrollbar { height:10px; width:8px; }
+.dash-spreadsheet-container ::-webkit-scrollbar-thumb { background:#b9bec4; border:2px solid #f5f6f7; }
+
+/* Keep integration controls compact so the plots retain the working space. */
+#integration-container .toolbox-section-title { margin:8px 0 6px; padding:0 0 5px; font-size:12px; text-transform:none; letter-spacing:normal; }
+#integration-container .form-label { font-size:11px; margin-bottom:4px; }
+#integration-container .integration-target { font-size:12px; font-weight:600; margin:4px 0 8px; overflow-wrap:anywhere; }
+#integration-container .mantine-Button-root { height:30px; font-weight:500; }
+
+/* Integration follows the inspector's compact, grouped control pattern. */
+#integration-container.integration-panel { padding:12px; overflow-y:auto; }
+.integration-panel .integration-section { border-top:1px solid #dfe2e5; padding:10px 0; }
+.integration-panel .integration-section:first-of-type { margin-top:8px; }
+#integration-container .toolbox-section-title { display:block; margin:0 0 7px; padding:0; border:0; font-size:12px; font-weight:600; }
+.integration-panel .integration-help { font-size:11px; color:#60666d; line-height:1.45; margin:6px 0 0; }
+.integration-panel .integration-help:empty { display:none; }
+.integration-panel .integration-actions { display:flex; gap:8px; flex-wrap:wrap; margin-top:8px; }
+.integration-panel .integration-actions:has(> :first-child:last-child[style*="display: none"]) { display:none; }
+.integration-panel .integration-actions .btn,
+.integration-panel .integration-actions .mantine-Button-root { min-height:30px; height:30px; padding:0 11px; font-size:12px; font-weight:500; border-radius:5px; }
+.integration-panel .integration-actions .btn { background:white; color:#24282c; border:1px solid #cdd1d5; }
+.integration-panel .integration-actions .btn:hover { background:#f0f2f3; }
+.integration-panel .integration-actions .btn.active { background:#e6eee9; color:#294734; border-color:#9bac9f; }
+.integration-panel .mantine-InputWrapper-label { font-size:11px; font-weight:500; margin-bottom:4px; }
+.integration-panel .mantine-CheckboxGroup-root + .mantine-NumberInput-root { margin-top:9px; }
+.integration-panel .mantine-Checkbox-label { font-size:12px; }
+
+.integration-slider-labels { display:flex; justify-content:space-between; font-size:11px; color:#60666d; gap:12px; }
+
+#plot-tool-edit-text.active { background:#e5eee8; box-shadow:inset 0 0 0 1px #69947a; }
+.gecko-text-edit-mode .dataset-name,
+.gecko-text-edit-mode .gtitle,
+.gecko-text-edit-mode [class$="title"],
+.gecko-text-edit-mode .legendtoggle { cursor:text !important; }
+.gecko-text-edit-mode .dataset-name:hover { text-decoration:underline; text-decoration-style:dotted; text-underline-offset:3px; }
+
+/* Popup menus (plain HTML; see components/popup_menu.py). The fixed anchor places them at the pointer. */
+.gecko-menu { position: absolute; left: 0; top: 2px; z-index: 4000; min-width: 170px; padding: 4px;
+  background: #fff; border: 1px solid #d9dce0; border-radius: 8px; box-shadow: 0 6px 20px rgba(0,0,0,.14);
+  pointer-events: auto; font-size: 14px; }
+.gecko-menu[hidden] { display: none; }
+.gecko-menu-item { display: block; width: 100%; text-align: left; padding: 7px 12px; border: 0; border-radius: 5px;
+  background: none; color: #202124; font: inherit; cursor: pointer; white-space: nowrap; }
+.gecko-menu-item:hover:not(:disabled), .gecko-menu-item:focus-visible { background: rgba(0,0,0,.06); outline: none; }
+.gecko-menu-item:disabled { color: #a0a4a8; cursor: default; }
+.gecko-menu-divider { height: 1px; margin: 4px 0; background: #e6e8eb; }

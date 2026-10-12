@@ -1,7 +1,7 @@
 import dash
 import pytest
 
-from callbacks.plot_settings_callbacks import register_plot_settings_callbacks, _save_settings
+from callbacks.plot_settings_callbacks import register_plot_settings_callbacks, resolve_plot_context, _save_settings
 from callbacks.lcms_callbacks import register_lcms_callbacks
 from services.data_store import Bundle, BundleType, Component, ComponentRole, DataStore
 
@@ -17,9 +17,8 @@ def settings_callbacks():
     app = dash.Dash(__name__)
     register_plot_settings_callbacks(app, store)
     hydrate = next(cb['callback'].__wrapped__ for cb in app.callback_map.values()
-                   if cb['inputs'] == [{'id': 'active-plot-context', 'property': 'data'}])
-    resolve = app.callback_map['active-plot-context.data']['callback'].__wrapped__
-    return store, hydrate, resolve
+                   if cb.get('callback') and cb['callback'].__wrapped__.__name__ == 'hydrate_plot_settings')
+    return store, hydrate, resolve_plot_context
 
 
 def test_saved_overlay_survives_selecting_another_bundle_component(settings_callbacks):

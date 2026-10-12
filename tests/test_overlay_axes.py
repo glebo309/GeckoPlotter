@@ -42,7 +42,7 @@ def test_overlay_shares_axes_by_measurement_unit_without_rescaling_raw_data():
     assert 'yaxis3' not in fig.layout.to_plotly_json()
     PlotSettingsService.apply_to_figure(fig, PlotSettingsService.from_dict({}))
     apply_axis_linking(fig, True, False)
-    assert fig.layout.yaxis2.tickfont.color == '#444'
+    assert fig.layout.yaxis2.tickfont.color == '#1f2328'
     assert fig.layout.yaxis2.matches is None
     apply_axis_linking(fig, True, True)
     assert fig.layout.yaxis2.matches is None
@@ -66,4 +66,4 @@ def test_overlay_axes_stay_neutral_when_each_unit_has_only_one_trace():
         assert axis.title.font.color == '#444'
     PlotSettingsService.apply_to_figure(fig, PlotSettingsService.from_dict({}))
     apply_axis_linking(fig)
-    assert fig.layout.yaxis.color == fig.layout.yaxis2.color == '#444'
+    assert fig.layout.yaxis.color == fig.layout.yaxis2.color == '#1f2328'

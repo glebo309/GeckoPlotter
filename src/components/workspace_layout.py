@@ -31,6 +31,53 @@ def arrange_workspace(root):
     legacy_axes = html.Div([c[9],c[11],c[12]],style={'display':'none'})
     old_header = c[0]
     old_header.style = {'display':'none'}
+    # Match the working sequence: prepare data, integrate, format, export.
+    inspector_nav = nodes['toolbox-tabs'].children[0]
+    inspector_order = ['pub-plotter', 'integration', 'plot-tools', 'export']
+    inspector_nav.children = sorted(inspector_nav.children,
+                                    key=lambda tab: inspector_order.index(tab.value))
+    # Data tools and figure appearance have separate homes. Smoothing remains
+    # a reversible display transform; moving its control must not alter areas.
+    smoothing = dmc.Slider(id='pt-smooth-window', min=0, max=151, step=1, value=0,
+        updatemode='mouseup', size='sm', thumbSize=16, thumbLabel='Smoothing window in points',
+        marks=[{'value':0, 'label':'Off'}, {'value':151, 'label':'151'}])
+    nodes['pt-smooth-window'] = smoothing
+    smoothing_controls = html.Div([
+        html.Div([
+            html.Label('Window (points)', className='form-label', htmlFor='smooth-value'),
+            dmc.NumberInput(id='smooth-value',value=0,min=0,max=151,step=1,
+                debounce=True,clampBehavior='blur',size='xs',allowDecimal=False,
+                **{'aria-label':'Smoothing window in points'},style={'width':'88px'}),
+        ], className='smoothing-value-row'),
+        smoothing,
+    ], className='smoothing-controls')
+    mapper = nodes['pub-plotter-container'].children
+    m = list(mapper.children)
+    m[0].className = 'inspector-actions'
+    m[0].style = {}
+    for id_, label in [('transpose-data','Transpose'), ('add-row','Add row'),
+                       ('add-column','Add column'), ('add-y1-series','Add series'),
+                       ('remove-y1-series','Remove series'), ('clear-x','Clear X'),
+                       ('clear-y1','Clear Y'), ('clear-y2','Clear Y₂'),
+                       ('save-mapping','Save mapping'), ('load-mapping','Load mapping'),
+                       ('clear-all','Clear mapping')]:
+        nodes[id_].children = label
+        nodes[id_].className = 'btn btn-secondary'
+        nodes[id_].style = {}
+    m[8].style = m[20].style = {'display':'flex','gap':'6px','flexWrap':'wrap','alignItems':'center'}
+    m[2].children = 'X values'
+    m[6].children = 'Y values'
+    m[12].children[0].children = 'Secondary Y values'
+    mapper.children = [
+        section('Smoothing', [
+            smoothing_controls,
+            html.Div('Display only · peak areas unchanged', className='inspector-note',
+                     title='Savitzky–Golay smoothing of plotted signals in the current figure. Imported values and peak calculations use the original signal.')], True),
+        section('Table editing', [m[0]], True),
+        section('Plot mapping', [*m[1:10], section('Statistics', [m[10]]), m[11],
+            *m[12:18], m[18], section('Saved mappings', [m[20]])], True),
+        *m[21:],
+    ]
     settings.children = [
         old_header,
         html.Div([html.Div('Figure',className='inspector-eyebrow'),
@@ -38,6 +85,7 @@ def arrange_workspace(root):
                   html.Div('Import data to begin.',id='inspector-figure-summary')],className='inspector-target'),
         section('Axes', [axis_inspector(), legacy_axes,c[10]],True),
         section('Signal style', [
+            dcc.Store(id='main-inspector-context'), dcc.Store(id='publication-inspector-context'),
             dcc.Store(id='signal-inspector-owner'), dcc.Store(id='signal-inspector-options',data=[]),
             dmc.Select(id='signal-inspector-select',label='Edit signal',data=[],placeholder='Select a signal',size='xs',allowDeselect=False),
             html.Div([
@@ -49,25 +97,24 @@ def arrange_workspace(root):
             html.Div(id='signal-inspector-note',className='inspector-note'),
             html.Button('Use figure defaults',id='signal-reset-btn',n_clicks=0,className='btn btn-secondary inspector-reset'),
         ],True),
-        section('Smoothing', [c[6],
-            html.Div('Display only. Peak areas use the original signal.', className='inspector-note')]),
+        # Defaults for every signal, including the colour palette, in one visible section.
+        section('Figure style', [
+            html.Div('Applies to all signals. Override a single signal above.', className='inspector-note'),
+            c[14],c[17],c[18],c[19],c[20]],True),
         section('Labels & legend',[c[22],c[23],
             html.Button('Use data labels', id='pt-axis-labels-auto', n_clicks=0,
                         className='btn btn-secondary inspector-reset',
                         title='Restore axis names and units from the source data'),
             c[24],c[30],c[31]]),
-        section('Figure style', [
-            html.Div('Shared defaults for signals without individual overrides.',className='inspector-note'),
-            c[14],c[17],c[18],c[19],c[20],c[13],c[15],c[26],c[27],c[28],c[33],c[34]]),
         section('Layout & size',[layout_controls,c[4],c[7]],False,id='inspector-layout-section'),
+        section('Appearance', [c[13],c[15],c[26],c[27],c[28],c[33],c[34]]),
     ]
     # Exact values accompany sliders; their original callbacks remain authoritative.
-    pairs = [('pt-smooth-window','smooth-value',0,0,151,1,''),
-             ('pt-subplot-spacing','spacing-value',8,2,25,1,' %'),
+    pairs = [('pt-subplot-spacing','spacing-value',8,2,25,1,' %'),
              ('pt-trace-opacity','opacity-value',100,10,100,1,' %')]
     for slider_id,number_id,value,lo,hi,step,suffix in pairs:
         slider = nodes[slider_id]
-        for parent in walk(settings):
+        for parent in walk(root):
             children=getattr(parent,'children',None)
             if isinstance(children,list) and any(child is slider for child in children):
                 parent.children=[*children,dmc.NumberInput(id=number_id,value=value,min=lo,max=hi,step=step,
@@ -75,6 +122,11 @@ def arrange_workspace(root):
                     **{'aria-label':{'smooth-value':'Smoothing window','spacing-value':'Subplot spacing percent','opacity-value':'Opacity percent'}[number_id]},
                     className='slider-exact-value')]
                 break
+    # Keep deconvolution with the other peak creation/editing tools. Matching
+    # and display preferences come after the analysis actions.
+    integration = nodes['integration-container']
+    parts = list(integration.children)
+    integration.children = [*parts[:4], parts[5], parts[4]]
     # Hide diagnostic reset from the everyday workspace.
     nodes['clear-cache-btn'].style={'display':'none'}
     status_bar = next(n for n in walk(root) if getattr(n, 'className', '') == 'status-bar')
@@ -97,13 +149,16 @@ def arrange_workspace(root):
     nav = tabs.children[0]
     labels = {'data-overview':'Data', 'peak-analysis':'Peaks', 'metadata':'Metadata',
               'across-samples':'Compare samples', 'calibration':'Calibration',
-              'ms-scan':'MS scan', 'ms-eic':'EIC', 'ms-peak-mass':'Peak mass spectrum'}
+              'pda':'PDA', 'ms-scan':'MS scan', 'ms-eic':'EIC', 'ms-peak-mass':'Peak mass spectrum'}
     for tab in nav.children:
         tab.children = labels.get(getattr(tab, 'value', None), tab.children)
         tab.style = {'flexShrink':0, 'whiteSpace':'nowrap'}
-        if getattr(tab, 'value', None) in ('ms-scan','ms-eic','ms-peak-mass'):
+        if getattr(tab, 'value', None) in ('ms-scan','ms-eic','ms-peak-mass','pda'):
             tab.id = 'analysis-nav-' + tab.value
             tab.style['display'] = 'none'
+    analysis_order = ['data-overview','peak-analysis','across-samples','calibration',
+                      'pda','ms-scan','ms-peak-mass','ms-eic','metadata']
+    nav.children = sorted(nav.children, key=lambda tab: analysis_order.index(tab.value))
     nav.style = {'flexWrap':'nowrap', 'width':'max-content', 'minWidth':'100%'}
     tabs.children[0] = html.Div([
         html.Div(nav, style={'overflowX':'auto', 'overflowY':'hidden', 'minWidth':0, 'flex':1}),
@@ -120,6 +175,7 @@ def arrange_workspace(root):
         id='peak-analysis-empty', className='inspector-empty', role='status'))
     # A single, discoverable primary figure action pair.
     toolbar=nodes['plot-toolbar']
+    toolbar.children.insert(3, html.Div(id='plot-channel-controls'))
     toolbar.children.append(create_ms_polarity_control())
     toolbar.children += [html.Div(className='toolbar-spacer'),
         html.Button('Publication',id='plot-tool-publication',className='plot-tool',title='Create an editable publication copy of this figure',
@@ -136,6 +192,19 @@ def arrange_workspace(root):
     if session_start is not None:
         nodes['export-container'].children = [*export_children[:session_start],
             html.Div(export_children[session_start:], style={'display':'none'})]
+    # Figure export first; table/peak/calibration downloads form their own group.
+    export_children = nodes['export-container'].children
+    data_start = next(i for i, child in enumerate(export_children)
+                      if getattr(child, 'children', None) == 'Data Export')
+    nodes['exp-open-pub-btn'].children = 'Create publication copy'
+    nodes['exp-open-pub-btn'].style = {'width':'100%', 'marginBottom':'6px'}
+    for id_, label in [('exp-fig-btn','Export figure'),('exp-data-btn','Export table'),
+                       ('exp-peaks-btn','Export peaks'),('exp-cal-btn','Export calibration')]:
+        nodes[id_].children = label
+    nodes['export-container'].children = [
+        section('Figure', export_children[1:data_start], True),
+        section('Data & results', export_children[data_start+1:], True),
+    ]
     nodes['export-container'].children.insert(0,html.Div('Exports the figure currently shown.',className='inspector-note'))
     nodes['export-container'].children.append(html.Div(id='exp-fig-status',role='status',className='workspace-feedback'))
     root.children.append(dcc.Store(id='figure-export-request'))

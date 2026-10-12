@@ -61,7 +61,7 @@
                 label:label,origin:'quick',ts:Date.now()}});
         }
         ['context-menu', 'ms-plot-context-menu', 'figure-context-menu'].forEach(function (id) {
-            dc.set_props(id, {opened: false});
+            dc.set_props(id, {hidden: true});
         });
         ['axis', 'legend', 'trace', 'title', 'label'].forEach(function (name) {
             var panel = document.getElementById(name + '-context-panel');
@@ -75,7 +75,6 @@
         var gd = event.target.closest && event.target.closest('.js-plotly-plot');
         if (gd) sourcePlot = gd;
     }, true);
-    // Mantine closes and unmounts MenuItems during their React click handler.
     // Capture the action first, while its target and source figure still exist.
     document.addEventListener('click', function (event) {
         var current = event.target.closest && event.target.closest('[data-current-figure-action]');
@@ -106,12 +105,24 @@
             left: Math.min(event.clientX, window.innerWidth - 240) + 'px',
             top: Math.min(event.clientY, window.innerHeight - 100) + 'px',
             width: '1px', height: '1px', zIndex: 4000, pointerEvents: 'none'}});
-        dc.set_props('figure-context-menu', {opened: true});
+        dc.set_props('figure-context-menu', {hidden: false});
     });
     window.GeckoFigureActions = {run: run, snapshot:snapshot, activePlot:activePlot};
     var dc = window.dash_clientside = window.dash_clientside || {};
     dc.geckoFigureActions = {
         exportRequest: exportRequest,
+        packageRequest: function(clicks,preset,width,height,dpi) {
+            if (!clicks) return dc.no_update;
+            var gd=activePlot();
+            if (!gd) return {error:'Select a figure before exporting.',ts:Date.now()};
+            var rect=gd.getBoundingClientRect(), layout=gd._fullLayout || {}, meta=(gd.layout || {}).meta || {};
+            var rw=layout.width || rect.width, rh=layout.height || rect.height;
+            if (preset==='single-col') {width=84;height=63;}
+            else if (preset==='full-width') {width=174;height=104;}
+            else if (preset==='presentation') {width=254;height=143;}
+            else if (preset==='current' || !preset) {width=meta.gecko_width_mm || 174;height=meta.gecko_height_mm || width*rh/rw;}
+            return {figure:snapshot(gd),width_mm:width,height_mm:height,dpi:dpi,render_width:rw,ts:Date.now()};
+        },
         dispatch: function (clicks) {
             var triggered = dc.callback_context && dc.callback_context.triggered;
             if (!clicks || !clicks.some(function (value) { return value > 0; }) || !triggered || !triggered.length) {

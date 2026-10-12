@@ -34,6 +34,7 @@ class ComponentRole(str, Enum):
 
 class BundleType(str, Enum):
     CHROMELEON = "chromeleon"
+    CHROMATOGRAM = "chromatogram"
     LCMS = "lcms"
     PLATE_READER = "plate_reader"
     EXCEL = "excel"
@@ -53,6 +54,8 @@ class Component:
     source_category: SourceCategory = SourceCategory.GENERIC
     plot_hint: PlotHint = PlotHint.LINE
     standardized: Optional[StandardizedResult] = None
+    imported_csv: Optional[bytes] = None
+    imported_at: Optional[str] = None
 
 
 @dataclass
@@ -137,6 +140,8 @@ class Bundle:
         """Short display name for a bundle component."""
         role = component.role
         meta = component.metadata or {}
+        if meta.get('display_name'):
+            return meta['display_name']
         if role in (ComponentRole.MS_POSITIVE, ComponentRole.MS_NEGATIVE):
             label = "+TIC" if role == ComponentRole.MS_POSITIVE else "-TIC"
             if meta.get('mass_spectral_data'):
@@ -194,6 +199,9 @@ class DataStore:
 
     def __init__(self) -> None:
         self._bundles: Dict[str, Bundle] = {}
+        self.analysis_history = []
+        self.analysis_plot_settings = {}
+        self._analysis_previous = {}
         self._component_index: Dict[str, str] = {}
         self._file_index: Dict[str, str] = {}
         self.temp_files: List[str] = []
@@ -216,7 +224,8 @@ class DataStore:
         from .lcms_service import LCMSService
         from .persistence import ProjectPersistence
 
-        self.peak_service = PeakService(file_id_resolver=self.peak_owner_id)
+        self.peak_service = PeakService(file_id_resolver=self.peak_owner_id,
+                                        color_scope_resolver=self._peak_color_scope)
         self.calibration_service = CalibrationService()
         self.integration_service = IntegrationService()
         self.plot_settings_service = PlotSettingsService()
@@ -280,6 +289,34 @@ class DataStore:
         bundle_id = self._component_index.get(component_id)
         return self.get_bundle(bundle_id) if bundle_id else None
 
+    def rename_dataset(self, file_id: str, name: str) -> bool:
+        """Rename the displayed dataset, retaining IDs and original filenames."""
+        if not isinstance(name, str) or not name.strip():
+            return False
+        name = name.strip()
+        bundle = self.get_bundle(file_id) or self.get_bundle_for_component(file_id)
+        if bundle is None:
+            return False
+        if file_id == bundle.bundle_id or len(bundle.component_list) == 1:
+            if bundle.name == name:
+                return False
+            bundle.name = name
+            for component in bundle.component_list:
+                component.metadata['sample_name'] = name
+            if len(bundle.component_list) == 1:
+                bundle.primary.metadata['display_name'] = name
+        else:
+            component = next(c for c in bundle.component_list if c.component_id == file_id)
+            if Bundle.component_display_name(component) == name:
+                return False
+            component.metadata['display_name'] = name
+        for cache in self._render_caches:
+            cache.prune([])
+        for key in ('_last_processed_files', '_last_tree_items'):
+            if hasattr(self, key):
+                delattr(self, key)
+        return True
+
     def get_bundle_for_file(self, original_filename: str) -> Optional[Bundle]:
         bundle_id = self._file_index.get(original_filename)
         return self.get_bundle(bundle_id) if bundle_id else None
@@ -293,13 +330,18 @@ class DataStore:
         bundle = self.get_bundle(file_id) or self.get_bundle_for_component(file_id)
         if bundle is None or bundle.primary is None:
             return file_id
-        if bundle.bundle_type == BundleType.LCMS and len(bundle.component_list) > 1:
+        if bundle.bundle_type in (BundleType.CHROMATOGRAM, BundleType.LCMS):
             return bundle.primary.component_id if file_id == bundle.bundle_id else file_id
         if file_id == bundle.primary.component_id:
             return bundle.bundle_id
         return file_id
 
     def add_bundle(self, bundle: Bundle) -> None:
+        from .research_package import csv_bytes, now
+        for component in bundle.component_list:
+            if component.imported_at is None:
+                component.imported_at = now()
+                component.imported_csv = csv_bytes(component.dataframe) if component.dataframe is not None else None
         if bundle.bundle_id in self._bundles:
             self.remove_bundle(bundle.bundle_id)
 
@@ -347,11 +389,16 @@ class DataStore:
     def clear(self) -> None:
         self.file_removal_service.clear()
         self._bundles.clear()
+        self.analysis_history.clear()
+        self.analysis_plot_settings = {}
+        self._analysis_previous = {}
         self._component_index.clear()
         self._file_index.clear()
         self.file_ui_state.clear()
         self.visibility_state.clear()
         self.collapse_state.clear()
+        self.__dict__.pop("_channel_combine_modes", None)
+        self.__dict__.pop("_hidden_sample_channels", None)
         self.lcms_eic_overlays.clear()
         if hasattr(self, 'project'):
             self.project.clear()
@@ -360,7 +407,9 @@ class DataStore:
         return dict(self._bundles)
 
     def iter_bundles(self) -> Iterator[Bundle]:
-        return iter(self._bundles.values())
+        # Callbacks can remove/restore bundles while another callback records
+        # provenance. Freeze membership, retaining the original data references.
+        return iter(tuple(self._bundles.values()))
 
     def get_dataframe(self, bundle_id: str) -> Optional[pd.DataFrame]:
         bundle = self.get_bundle(bundle_id)
@@ -447,7 +496,7 @@ class DataStore:
             **component.metadata,
             'auto_x': component.metadata.get('auto_x', x_columns[0] if x_columns else None),
             'auto_y': component.metadata.get('auto_y', y_columns if y_columns else None),
-            'sample_name': component.standardized.sample_name if component.standardized and component.standardized.sample_name else bundle.sample_name,
+            'sample_name': component.metadata.get('sample_name') or (component.standardized.sample_name if component.standardized and component.standardized.sample_name else bundle.sample_name),
             'file_name': component.original_filename,
             'parent_bundle_id': bundle.bundle_id,
             'parent_bundle_name': bundle.name,
@@ -505,7 +554,7 @@ class DataStore:
         """Compat property: direct access pattern used by some callbacks."""
         result = {}
         for bid, bundle in self._bundles.items():
-            if bundle.bundle_type == BundleType.LCMS and len(bundle.component_list) > 1:
+            if bundle.bundle_type in (BundleType.CHROMATOGRAM, BundleType.LCMS):
                 for component in bundle.component_list:
                     entry = self._component_data_entry(bundle, component)
                     if entry:
@@ -641,6 +690,16 @@ class DataStore:
             if bundle.bundle_type == BundleType.LCMS and bundle.name == base_name:
                 return self.remove_bundle(bundle.bundle_id)
         return None
+
+    def _peak_color_scope(self, file_id: str) -> str:
+        """Match comparable signals across runs, independent of plot tabs/range."""
+        from callbacks.viz_callbacks import _get_overlay_group
+        entry = self.get_data_by_id(file_id) or {}
+        group = _get_overlay_group(entry.get('metadata', {}), entry,
+                                   file_id=file_id, dm=self)
+        # Source and axis distinguish, for example, chromatograms from spectra.
+        # Acquisition duration and the LC-MS run ID must not split compounds.
+        return repr(group[:2])
 
     def build_file_overlay_map(self) -> Dict[str, str]:
         """Build {file_id: overlay_group_key_string} for peak color scoping."""

@@ -11,7 +11,9 @@ import logging
 import sys
 
 import dash
-from dash import Input, Output, State, html
+from dash import Input, Output, State, html, ALL
+import dash_mantine_components as dmc
+import re
 from dash.exceptions import PreventUpdate
 import numpy as np
 
@@ -57,45 +59,53 @@ def _find_peak(data_manager, file_id, peak_id):
     return None, None
 
 
+def _component_apex(payload, component):
+    x = payload.get('render_x') or payload['x']
+    curve = component.get('render_curve') or component['curve']
+    return float(x[int(np.argmax(curve))])
+
+
+def _fitted_markers(payload, previous=()):
+    return [{'x': (previous[i]['x'] if i < len(previous) and previous[i].get('fixed')
+                   else _component_apex(payload, c)),
+             'y': float(np.interp(_component_apex(payload, c), payload['x'], payload['best_fit'])),
+             'fixed': bool(i < len(previous) and previous[i].get('fixed'))}
+            for i, c in enumerate(payload['components'])]
+
+
 def _build_results_display(payload):
-    """R² badge + per-component table for the Integration panel."""
+    """Compact fit summary and component table for the Integration panel."""
     if not payload:
         return html.Div()
 
     r2 = payload['r_squared']
-    color = '#2e7d32' if r2 > 0.99 else '#ef6c00' if r2 > 0.95 else '#c62828'
-    badge_style = {
-        'display': 'inline-block', 'padding': '2px 10px', 'borderRadius': '10px',
-        'fontSize': '11px', 'fontWeight': '600', 'color': 'white',
-        'backgroundColor': color, 'marginRight': '6px',
-    }
-
-    header = html.Div([
-        html.Span(f'R² = {r2:.4f}', style=badge_style),
-        html.Span(f'{len(payload["components"])} components',
-                  style={**badge_style, 'backgroundColor': '#607d8b'}),
-    ], style={'marginBottom': '6px'})
+    header = html.Div(f"R² = {r2:.4f} · {len(payload['components'])} components",
+                      style={'fontSize': '12px', 'color': '#60666d', 'marginBottom': '6px'})
 
     th = {'textAlign': 'left', 'padding': '3px 6px', 'borderBottom': '1px solid #ccc',
           'fontSize': '11px'}
     td = {'padding': '2px 6px', 'borderBottom': '1px solid #eee', 'fontSize': '11px'}
     rows = [html.Tr([
         html.Td(str(c['index'] + 1), style=td),
-        html.Td(f'{c["center"]:.3f}', style=td),
+        html.Td(f'{_component_apex(payload, c):.3f}', style=td),
         html.Td(f'{c["area"]:.1f}', style=td),
         html.Td(f'{c["sigma"]:.4f}', style=td),
         html.Td(f'{c["gamma"]:.4f}', style=td),
+        html.Td(dmc.ActionIcon('×', id={'type': 'deconv-remove', 'index': c['index']},
+            size='xs', variant='subtle', color='gray', disabled=len(payload['components']) <= 1,
+            **{'aria-label': f"Remove component {c['index'] + 1}"}), style=td),
     ]) for c in payload['components']]
 
     table = html.Table([
         html.Thead(html.Tr([
-            html.Th('#', style=th), html.Th('Center', style=th),
-            html.Th('Area', style=th), html.Th('σ', style=th), html.Th('γ', style=th),
+            html.Th('#', style=th), html.Th('Apex', style=th),
+            html.Th('Area', style=th), html.Th('σ', style=th), html.Th('γ', style=th), html.Th('', style=th),
         ])),
         html.Tbody(rows),
     ], style={'width': '100%', 'borderCollapse': 'collapse'})
 
-    return html.Div([header, table])
+    return html.Div([header, table, html.Div('Shift-click to add · Drag lines to adjust',
+        style={'fontSize': '11px', 'color': '#60666d', 'marginTop': '4px'})])
 
 
 def _extract_peak_region(data_manager, file_id, peak):
@@ -115,8 +125,8 @@ def _run_detect_and_fit(x_region, y_region):
     result = _svc.fit_peaks(x_region, y_region, centers)
     if result is None:
         return None, None
-    markers = [{'x': cx, 'y': cy} for cx, cy in centers]
     payload = serialize_result(result)
+    markers = _fitted_markers(payload)
     return markers, payload
 
 
@@ -147,6 +157,10 @@ def _apply_deconv(data_manager, result, active_file, selected_peak_id):
 def register_deconvolution_callbacks(app: dash.Dash, data_manager) -> None:
     """Register all deconvolution callbacks."""
 
+    @app.callback(Output('deconv-btn', 'disabled'), [Input('baseline-mode', 'data'), Input('pda-preview', 'data')])
+    def deconv_editor_active(mode, preview=None):
+        return mode == 'deconvolve' or bool(preview)
+
     # ── Deconvolute: toolbox button (preview) or right-click (auto-accept)
     @app.callback(
         [Output('baseline-mode', 'data', allow_duplicate=True),
@@ -156,7 +170,7 @@ def register_deconvolution_callbacks(app: dash.Dash, data_manager) -> None:
          Output('deconv-accept-btn', 'style', allow_duplicate=True),
          Output('deconv-cancel-btn', 'style', allow_duplicate=True),
          Output('selected-peak-idx', 'data', allow_duplicate=True),
-         Output('context-menu', 'opened', allow_duplicate=True),
+         Output('context-menu', 'hidden', allow_duplicate=True),
          Output('render-trigger', 'data', allow_duplicate=True),
          Output('peak-change-trigger', 'data', allow_duplicate=True)],
         [Input('deconv-btn', 'n_clicks'),
@@ -165,11 +179,13 @@ def register_deconvolution_callbacks(app: dash.Dash, data_manager) -> None:
          State('active-file', 'data'),
          State('context-menu-store', 'data'),
          State('render-trigger', 'data'),
-         State('peak-change-trigger', 'data')],
+         State('peak-change-trigger', 'data'), State('pda-preview', 'data')],
         prevent_initial_call=True,
     )
     def deconvolute(button_clicks, context_clicks, selected_peak_id, active_file,
-                    context_store, render_counter, peak_counter):
+                    context_store, render_counter, peak_counter, preview=None):
+        if preview:
+            raise PreventUpdate
         triggered = dash.callback_context.triggered_id
         from_context = triggered == 'ctx-deconvolve-item'
         if from_context:
@@ -182,11 +198,13 @@ def register_deconvolution_callbacks(app: dash.Dash, data_manager) -> None:
 
         peak_fid, peak = _find_peak(data_manager, active_file, selected_peak_id) if selected_peak_id else (None, None)
 
-        close_menu = False if from_context else dash.no_update
+        close_menu = True if from_context else dash.no_update  # hide the popup
         no = dash.no_update
 
         def fail(text, color='#c62828'):
-            msg = html.Div(text, style={'fontSize': '11px', 'color': color})
+            tone = 'integration-note-muted' if color == '#888' else 'integration-note-warn'
+            msg = html.Div([html.Span('!' if tone == 'integration-note-warn' else 'i', className='integration-note-icon', **{'aria-hidden': 'true'}),
+                            html.Span(text)], className=f'integration-note {tone}')
             return no, no, no, msg, _BTN_HIDE, _BTN_HIDE, no, close_menu, no, no
 
         if not selected_peak_id:
@@ -205,7 +223,9 @@ def register_deconvolution_callbacks(app: dash.Dash, data_manager) -> None:
             return fail('Fit failed — try a wider peak region.')
 
         if markers is None:
-            return fail('Could not detect multiple peaks in this region.')
+            return fail('Region looks like a single peak: no second maximum or shoulder found. Widen the selection if the overlap extends beyond it.', '#888')
+
+        payload.update(file_id=peak_fid, peak_id=selected_peak_id)
 
         # Right-click: auto-accept immediately, no preview step.
         if from_context:
@@ -229,41 +249,70 @@ def register_deconvolution_callbacks(app: dash.Dash, data_manager) -> None:
          Output('deconv-result', 'data', allow_duplicate=True),
          Output('deconv-results-container', 'children', allow_duplicate=True),
          Output('render-trigger', 'data', allow_duplicate=True)],
-        Input('deconv-marker-click-store', 'data'),
+        [Input('deconv-marker-click-store', 'data'),
+         Input('main-shape-relayout', 'data'),
+         Input({'type': 'deconv-remove', 'index': ALL}, 'n_clicks')],
         [State('deconv-markers', 'data'),
          State('active-file', 'data'),
          State('selected-peak-idx', 'data'),
          State('baseline-mode', 'data'),
-         State('render-trigger', 'data')],
+         State('render-trigger', 'data'),
+         State('deconv-result', 'data'),
+         State('main-plot', 'figure')],
         prevent_initial_call=True,
+        running=[(Output('deconv-accept-btn', 'disabled'), True, False),
+                 (Output('deconv-cancel-btn', 'disabled'), True, False)],
     )
-    def marker_click_and_refit(click, markers, active_file, selected_peak_id, mode, render_counter):
-        if mode != 'deconvolve' or not click or not selected_peak_id:
+    def marker_click_and_refit(click, relayout, remove_clicks, markers, active_file,
+                               selected_peak_id, mode, render_counter, payload, figure):
+        if mode != 'deconvolve' or not payload:
             raise PreventUpdate
-        clicked_x = click.get('x')
-        if clicked_x is None:
-            raise PreventUpdate
-
-        peak_fid, peak = _find_peak(data_manager, active_file, selected_peak_id)
+        peak_fid, peak = _find_peak(data_manager, payload.get('file_id', active_file),
+                                   payload.get('peak_id', selected_peak_id))
         if peak is None:
             raise PreventUpdate
-
         x_region, y_region = _extract_peak_region(data_manager, peak_fid, peak)
         if x_region is None:
             raise PreventUpdate
-
-        markers = list(markers or [])
-        tol = float(np.ptp(x_region)) * _SNAP_FRAC
-
-        # Click near existing marker → remove it
-        for i, m in enumerate(markers):
-            if abs(m['x'] - clicked_x) <= tol:
-                markers.pop(i)
-                break
-        else:
-            # Snap to nearest local max and add
-            apex_x, apex_y = _snap_to_local_max(x_region, y_region, clicked_x)
+        markers = [dict(m) for m in (markers or [])]
+        trigger = dash.callback_context.triggered_id
+        if isinstance(trigger, dict) and trigger.get('type') == 'deconv-remove':
+            index = trigger['index']
+            if len(markers) <= 1 or index >= len(markers) or not remove_clicks[index]:
+                raise PreventUpdate
+            markers.pop(index)
+        elif trigger == 'main-shape-relayout':
+            shapes = (figure or {}).get('layout', {}).get('shapes', [])
+            changes = {}
+            for key, value in (relayout or {}).items():
+                match = re.fullmatch(r'shapes\[(\d+)\]\.x[01]', key)
+                if not match:
+                    continue
+                shape_index = int(match.group(1))
+                if shape_index >= len(shapes):
+                    continue
+                name = shapes[shape_index].get('name', '')
+                if name.startswith('deconv:'):
+                    changes.setdefault(int(name.split(':')[1]), []).append(float(value))
+            if not changes:
+                raise PreventUpdate
+            for index, values in changes.items():
+                if index >= len(markers):
+                    continue
+                position = float(np.clip(np.mean(values), x_region[0], x_region[-1]))
+                markers[index] = {'x': position, 'y': float(np.interp(position, x_region, y_region)), 'fixed': True}
+        elif trigger == 'deconv-marker-click-store':
+            if not click or click.get('x') is None:
+                raise PreventUpdate
+            # Only explicit Shift-clicks are published by the browser.
+            if click['x'] < x_region[0] or click['x'] > x_region[-1]:
+                raise PreventUpdate
+            apex_x, apex_y = _snap_to_local_max(x_region, y_region, click['x'])
+            if any(abs(m['x'] - apex_x) <= np.ptp(x_region) * _SNAP_FRAC for m in markers):
+                raise PreventUpdate
             markers.append({'x': apex_x, 'y': apex_y})
+        else:
+            raise PreventUpdate
 
         # Auto-refit with updated markers
         if len(markers) < 1:
@@ -272,17 +321,19 @@ def register_deconvolution_callbacks(app: dash.Dash, data_manager) -> None:
 
         centers = [(m['x'], m['y']) for m in markers]
         try:
-            result = _svc.fit_peaks(x_region, y_region, centers)
+            result = _svc.fit_peaks(x_region, y_region, centers,
+                fixed_apices={i: m['x'] for i, m in enumerate(markers) if m.get('fixed')})
         except Exception:
             log.exception("Refit failed after marker adjustment")
-            return markers, None, html.Div('Fit failed — try different markers.',
-                   style={'fontSize': '11px', 'color': '#c62828'}), (render_counter or 0) + 1
+            return dash.no_update, dash.no_update, html.Div([_build_results_display(payload),
+                html.Small('Adjustment failed. Previous fit retained.')]), (render_counter or 0) + 1
 
         if result is None:
-            return markers, None, html.Div('Fit did not converge.',
-                   style={'fontSize': '11px', 'color': '#c62828'}), (render_counter or 0) + 1
+            return dash.no_update, dash.no_update, html.Div([_build_results_display(payload),
+                html.Small('Adjustment failed. Previous fit retained.')]), (render_counter or 0) + 1
 
-        payload = serialize_result(result)
+        payload = dict(serialize_result(result), file_id=peak_fid, peak_id=peak.peak_id)
+        markers = _fitted_markers(payload, markers)
         return markers, payload, _build_results_display(payload), (render_counter or 0) + 1
 
     # ── Accept: replace original peak with sub-peaks ─────────────────
@@ -308,15 +359,18 @@ def register_deconvolution_callbacks(app: dash.Dash, data_manager) -> None:
         if not n_clicks or not result_payload:
             raise PreventUpdate
 
-        peak_fid, _ = _find_peak(data_manager, active_file, selected_peak_id) if selected_peak_id else (active_file, None)
+        selected_peak_id = result_payload.get('peak_id', selected_peak_id)
+        active_file = result_payload.get('file_id', active_file)
+        peak_fid, peak = _find_peak(data_manager, active_file, selected_peak_id)
+        if peak is None:
+            raise PreventUpdate
         result = deserialize_result(result_payload)
         n = _apply_deconv(data_manager, result, peak_fid or active_file, selected_peak_id)
         if not n:
             raise PreventUpdate
         log.debug(f"accept: replaced peak {selected_peak_id} with {n} sub-peaks")
 
-        status = html.Div('Select a peak first.',
-                          style={'fontSize': '11px', 'color': '#888'})
+        status = html.Div()
         return ('navigate', [], None, status, _BTN_HIDE, _BTN_HIDE, None,
                 (peak_counter or 0) + 1, (render_counter or 0) + 1)
 
@@ -336,7 +390,6 @@ def register_deconvolution_callbacks(app: dash.Dash, data_manager) -> None:
     def cancel(n_clicks, render_counter):
         if not n_clicks:
             raise PreventUpdate
-        status = html.Div('Select a peak first.',
-                          style={'fontSize': '11px', 'color': '#888'})
+        status = html.Div()
         return ('navigate', [], None, status, _BTN_HIDE, _BTN_HIDE,
                 (render_counter or 0) + 1)

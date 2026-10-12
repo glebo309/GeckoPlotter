@@ -1,0 +1,124 @@
+/* File tree drag & drop (src/assets/js/file-sort.js) */
+
+body.file-drag-active,
+body.file-drag-active * {
+    cursor: grabbing !important;
+    user-select: none !important;
+    -webkit-user-select: none !important;
+}
+
+/* Dragged rows stay in place, dimmed */
+.draggable-file-item.file-drag-source {
+    opacity: 0.4 !important;
+}
+
+/* Small pill that follows the pointer (file name or "N files") */
+.file-drag-pill {
+    position: fixed;
+    left: 0;
+    top: 0;
+    z-index: 10000;
+    max-width: 180px;
+    padding: 2px 9px;
+    border-radius: 11px;
+    background: #1d1d1f;
+    color: #fff;
+    font-size: 11px;
+    line-height: 18px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    opacity: 0.92;
+    pointer-events: none;
+    box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+}
+
+/* Target figure: outlined header with a "Move to <figure>" label, tinted body */
+.file-group-header.file-drag-target {
+    position: relative;
+    outline: 2px solid #1d1d1f;
+    outline-offset: -2px;
+    background-color: rgba(0, 0, 0, 0.06) !important;
+}
+
+.file-group-header.file-drag-target::after {
+    content: attr(data-drop-label);
+    position: absolute;
+    right: 4px;
+    top: 50%;
+    transform: translateY(-50%);
+    max-width: 70%;
+    padding: 0 7px;
+    border-radius: 9px;
+    background: #1d1d1f;
+    color: #fff;
+    font-size: 10px;
+    font-weight: 600;
+    line-height: 16px;
+    text-transform: none;
+    letter-spacing: 0;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    pointer-events: none;
+}
+
+.file-group-container.file-drag-target-body {
+    outline: 2px solid #1d1d1f;
+    outline-offset: -2px;
+    background-color: rgba(0, 0, 0, 0.04);
+}
+
+/* Reorder insertion line (position: fixed, placed by JS) */
+.file-drag-line {
+    position: fixed;
+    display: none;
+    height: 2px;
+    z-index: 9999;
+    background: #1d1d1f;
+    border-radius: 1px;
+    pointer-events: none;
+}
+
+.file-drag-line::before {
+    content: '';
+    position: absolute;
+    left: -3px;
+    top: -2px;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: #1d1d1f;
+}
+
+.file-drag-line.file-drag-line-noop {
+    background: #b5b5b8;
+}
+
+.file-drag-line.file-drag-line-noop::before {
+    background: #b5b5b8;
+}
+
+/* "New figure" drop zone, pinned to the bottom of the file list while dragging */
+.file-drag-zone {
+    position: sticky;
+    bottom: 0;
+    z-index: 5;
+    margin: 6px 4px 4px;
+    padding: 12px 8px;
+    border: 2px dashed #b5b5b8;
+    border-radius: 6px;
+    background: rgba(255, 255, 255, 0.96);
+    color: #6e6e73;
+    font-size: 12px;
+    font-weight: 600;
+    text-align: center;
+    pointer-events: none;
+}
+
+.file-drag-zone.file-drag-zone-hot {
+    border-style: solid;
+    border-color: #1d1d1f;
+    background: #1d1d1f;
+    color: #fff;
+}

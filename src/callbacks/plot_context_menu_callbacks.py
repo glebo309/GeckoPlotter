@@ -11,7 +11,7 @@ import dash
 from dash import Input, Output, State, callback_context
 from dash.exceptions import PreventUpdate
 
-from services.plot_settings_service import DEFAULT_PLOT_SETTINGS
+from services.plot_settings_service import DEFAULT_PLOT_SETTINGS, DEFAULT_PALETTE
 
 
 _PANEL_BASE = {
@@ -102,7 +102,12 @@ def _active_axis(store):
 
 
 def register_plot_context_menu_callbacks(app: dash.Dash, data_manager) -> None:
-    """Register the right-click plot customization proof of concept."""
+    """Register the right-click plot customization proof of concept.
+
+    The panels mirror ``current-plot-settings`` only while open. ``plot-panel-sync``
+    (clientside gate) ticks on a settings change only when some panel is open, so
+    closed panels cost no server round trip when plots are switched.
+    """
 
     @app.callback(
         [Output('current-plot-settings','data',allow_duplicate=True),
@@ -137,12 +142,12 @@ def register_plot_context_menu_callbacks(app: dash.Dash, data_manager) -> None:
         ],
         [
             Input('axis-context-menu-store', 'data'),
-            Input('current-plot-settings', 'data'),
+            Input('plot-panel-sync', 'data'),
         ],
-        State('axis-context-panel', 'style'),
+        [State('current-plot-settings', 'data'), State('axis-context-panel', 'style')],
         prevent_initial_call=True,
     )
-    def open_or_sync_axis_panel(store, settings, panel_style):
+    def open_or_sync_axis_panel(store, _panel_sync, settings, panel_style):
         """Open the axis panel, or keep it synced while already open."""
         trig = _triggered_id()
         s = _settings(settings)
@@ -267,11 +272,11 @@ def register_plot_context_menu_callbacks(app: dash.Dash, data_manager) -> None:
             Output('pt-tick-dir', 'value', allow_duplicate=True),
             Output('pt-tick-length', 'value', allow_duplicate=True),
         ],
-        Input('current-plot-settings', 'data'),
-        State('axis-context-panel', 'style'),
+        Input('plot-panel-sync', 'data'),
+        [State('current-plot-settings', 'data'), State('axis-context-panel', 'style')],
         prevent_initial_call=True,
     )
-    def sync_toolbox_axis_controls(settings, panel_style):
+    def sync_toolbox_axis_controls(_panel_sync, settings, panel_style):
         """Mirror context-menu edits into the visible Plot Settings controls."""
         if not panel_style or panel_style.get('display') == 'none':
             raise PreventUpdate
@@ -292,19 +297,32 @@ def register_plot_context_menu_callbacks(app: dash.Dash, data_manager) -> None:
         )
 
     @app.callback(
+        Output('current-plot-settings', 'data', allow_duplicate=True),
+        Input('legend-position-edit', 'data'),
+        State('current-plot-settings', 'data'), prevent_initial_call=True,
+    )
+    def persist_legend_position(event, settings):
+        if not event or not event.get('legend', '').startswith('legend'):
+            raise PreventUpdate
+        updated = copy.deepcopy(_settings(settings))
+        updated.setdefault('legend_positions', {})[event['legend']] = event['position']
+        return updated
+
+    @app.callback(
         [
             Output('legend-context-panel', 'style'),
             Output('legend-ctx-show', 'checked'),
             Output('legend-ctx-pos', 'value'),
+            Output('legend-ctx-font-size', 'value'),
         ],
         [
             Input('legend-context-menu-store', 'data'),
-            Input('current-plot-settings', 'data'),
+            Input('plot-panel-sync', 'data'),
         ],
-        State('legend-context-panel', 'style'),
+        [State('current-plot-settings', 'data'), State('legend-context-panel', 'style')],
         prevent_initial_call=True,
     )
-    def open_or_sync_legend_panel(store, settings, panel_style):
+    def open_or_sync_legend_panel(store, _panel_sync, settings, panel_style):
         """Open the legend panel, or keep it synced while already open."""
         trig = _triggered_id()
         s = _settings(settings)
@@ -312,7 +330,7 @@ def register_plot_context_menu_callbacks(app: dash.Dash, data_manager) -> None:
         if trig == 'legend-context-menu-store':
             if not store:
                 raise PreventUpdate
-            style = _axis_panel_style(store, panel_h=160)
+            style = _axis_panel_style(store, panel_h=310)
         else:
             if not panel_style or panel_style.get('display') == 'none':
                 raise PreventUpdate
@@ -322,6 +340,7 @@ def register_plot_context_menu_callbacks(app: dash.Dash, data_manager) -> None:
             style,
             bool(s.get('show_legend', True)),
             s.get('legend_pos', 'top-right'),
+            s.get('legend_font_size') or s.get('font_size', 10),
         )
 
     @app.callback(
@@ -345,6 +364,7 @@ def register_plot_context_menu_callbacks(app: dash.Dash, data_manager) -> None:
         [
             Input('legend-ctx-show', 'checked'),
             Input('legend-ctx-pos', 'value'),
+            Input('legend-ctx-font-size', 'value'),
         ],
         [
             State('current-plot-settings', 'data'),
@@ -353,7 +373,7 @@ def register_plot_context_menu_callbacks(app: dash.Dash, data_manager) -> None:
         ],
         prevent_initial_call=True,
     )
-    def edit_legend_from_context(show_legend, legend_pos, current_settings,
+    def edit_legend_from_context(show_legend, legend_pos, font_size, current_settings,
                                  panel_style, render_counter):
         """Write legend context edits into the same store as Plot Settings."""
         if not panel_style or panel_style.get('display') == 'none':
@@ -363,6 +383,9 @@ def register_plot_context_menu_callbacks(app: dash.Dash, data_manager) -> None:
         new_settings = copy.deepcopy(s)
         new_settings['show_legend'] = bool(show_legend)
         new_settings['legend_pos'] = legend_pos or 'top-right'
+        new_settings['legend_font_size'] = max(6, min(48, float(font_size or 10)))
+        if _triggered_id() == 'legend-ctx-pos' and legend_pos != s.get('legend_pos'):
+            new_settings['legend_positions'] = {}
 
         if new_settings == s:
             return dash.no_update, dash.no_update
@@ -374,11 +397,11 @@ def register_plot_context_menu_callbacks(app: dash.Dash, data_manager) -> None:
             Output('pt-show-legend', 'checked', allow_duplicate=True),
             Output('pt-legend-pos', 'value', allow_duplicate=True),
         ],
-        Input('current-plot-settings', 'data'),
-        State('legend-context-panel', 'style'),
+        Input('plot-panel-sync', 'data'),
+        [State('current-plot-settings', 'data'), State('legend-context-panel', 'style')],
         prevent_initial_call=True,
     )
-    def sync_toolbox_legend_controls(settings, panel_style):
+    def sync_toolbox_legend_controls(_panel_sync, settings, panel_style):
         """Mirror legend context-menu edits into Plot Settings controls."""
         if not panel_style or panel_style.get('display') == 'none':
             raise PreventUpdate
@@ -406,7 +429,7 @@ def register_plot_context_menu_callbacks(app: dash.Dash, data_manager) -> None:
     def _trace_current_color(s, trace_name):
         """Get the current color assigned to a trace by palette position."""
         from services.plot_settings_service import PlotSettingsService
-        palette = PlotSettingsService.get_color_palette(s.get('palette', 'okabe_ito'))
+        palette = PlotSettingsService.get_color_palette(s.get('palette', DEFAULT_PALETTE))
         overrides = s.get('trace_overrides') or {}
         ov = overrides.get(trace_name, {})
         if 'color' in ov:
@@ -436,12 +459,12 @@ def register_plot_context_menu_callbacks(app: dash.Dash, data_manager) -> None:
         ],
         [
             Input('trace-context-menu-store', 'data'),
-            Input('current-plot-settings', 'data'),
+            Input('plot-panel-sync', 'data'),
         ],
-        State('trace-context-panel', 'style'),
+        [State('current-plot-settings', 'data'), State('trace-context-panel', 'style')],
         prevent_initial_call=True,
     )
-    def open_or_sync_trace_panel(store, settings, panel_style):
+    def open_or_sync_trace_panel(store, _panel_sync, settings, panel_style):
         trig = _triggered_id()
         s = _settings(settings)
         overrides = s.get('trace_overrides') or {}
@@ -461,7 +484,7 @@ def register_plot_context_menu_callbacks(app: dash.Dash, data_manager) -> None:
         defaults = _trace_defaults(s)
 
         from services.plot_settings_service import PlotSettingsService
-        palette = PlotSettingsService.get_color_palette(s.get('palette', 'okabe_ito'))
+        palette = PlotSettingsService.get_color_palette(s.get('palette', DEFAULT_PALETTE))
         curve_number = store.get('curve_number', 0)
         palette_color = palette[curve_number % len(palette)] if palette else '#E69F00'
 
@@ -606,12 +629,12 @@ def register_plot_context_menu_callbacks(app: dash.Dash, data_manager) -> None:
         ],
         [
             Input('title-context-menu-store', 'data'),
-            Input('current-plot-settings', 'data'),
+            Input('plot-panel-sync', 'data'),
         ],
-        State('title-context-panel', 'style'),
+        [State('current-plot-settings', 'data'), State('title-context-panel', 'style')],
         prevent_initial_call=True,
     )
-    def open_or_sync_title_panel(store, settings, panel_style):
+    def open_or_sync_title_panel(store, _panel_sync, settings, panel_style):
         trig = _triggered_id()
         s = _settings(settings)
 
@@ -698,12 +721,12 @@ def register_plot_context_menu_callbacks(app: dash.Dash, data_manager) -> None:
         ],
         [
             Input('label-context-menu-store', 'data'),
-            Input('current-plot-settings', 'data'),
+            Input('plot-panel-sync', 'data'),
         ],
-        State('label-context-panel', 'style'),
+        [State('current-plot-settings', 'data'), State('label-context-panel', 'style')],
         prevent_initial_call=True,
     )
-    def open_or_sync_label_panel(store, settings, panel_style):
+    def open_or_sync_label_panel(store, _panel_sync, settings, panel_style):
         trig = _triggered_id()
         s = _settings(settings)
 
@@ -785,4 +808,5 @@ def register_plot_context_menu_callbacks(app: dash.Dash, data_manager) -> None:
             return dash.no_update, dash.no_update
 
         return new_settings, (render_counter or 0) + 1
+
 

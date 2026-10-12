@@ -1,0 +1,102 @@
+/* Density pass. Loads after main.css (Dash serves assets alphabetically), so
+   these rules only tighten spacing and let controls flow into the width that
+   is available. IDs, callbacks and behaviour are untouched. Touch targets stay
+   >= 24px, text >= 12px, focus outlines are not removed. */
+
+/* ---- Panel chrome ------------------------------------------------------ */
+.panel-header { padding:4px 10px; min-height:0; }
+#left-bottom-panel .panel-header { padding:4px 10px; }
+.panel-header .btn { min-height:24px; min-width:24px !important; padding:1px 7px !important; line-height:1 !important; }
+#left-top-panel .panel-content { padding:2px 4px; }
+#file-tree.file-tree { padding:2px 4px; }
+#drop-zone > .panel-content { padding:2px 4px; }
+
+/* ---- Plot toolbar: one slim row ---------------------------------------- */
+.plot-toolbar { gap:4px 8px; padding:3px 8px; min-height:34px; }
+.plot-toolbar-group { gap:2px; }
+.plot-toolbar-label { margin-right:2px; }
+.plot-tool { height:26px; padding:0 9px; }
+.plot-toolbar-group:first-child { padding:1px; }
+.plot-toolbar-group:first-child .plot-tool { height:24px; }
+.plot-tool.plot-tool-icon { width:28px; height:28px; padding:3px; }
+.plot-tool-icon svg { width:18px; height:18px; }
+.integration-tool-icon { width:18px; height:18px; }
+.gesture-help > summary { width:24px; height:24px; line-height:22px; }
+.gesture-help-content { top:30px; }
+#plot-channel-controls { min-width:0; flex:0 1 auto; }
+#plot-channel-controls .group-channel-controls { gap:2px 8px; }
+.plot-toolbar .toolbar-spacer { flex:1 1 0; min-width:8px; }
+.workspace-feedback { padding:4px 10px; }
+
+/* ---- Analysis tab row --------------------------------------------------- */
+.results-navigation { min-height:30px; gap:4px; padding:0 4px; }
+.results-navigation .mantine-Tabs-tab { padding:5px 12px; }
+/* Tabs share the row instead of leaving it empty; capped so a short list does not look stretched. */
+.results-navigation .mantine-Tabs-list > .mantine-Tabs-tab { flex-grow:1; max-width:200px; justify-content:center; }
+.results-navigation > div:last-child { padding:2px 6px !important; }
+#data-overview-content { padding:6px 8px !important; }
+.calibration-workspace { padding:8px 10px; }
+
+/* ---- Data table: columns size to content, rows compact ------------------ */
+/* No width rules here: content-sized (fit-content / auto) table widths feed back into DataTable's own width
+   measurement and froze the page in a layout loop. */
+#pub-table td.dash-cell, #pub-table th.dash-header { padding:3px 8px !important; line-height:18px; }
+#pub-table td.dash-cell div.dash-cell-value, #pub-table td.dash-cell input.dash-cell-value { line-height:18px; }
+#peak-table td.dash-cell, #cross-sample-table td.dash-cell { padding-top:3px !important; padding-bottom:3px !important; }
+#peak-table th.dash-header, #cross-sample-table th.dash-header { padding-top:4px !important; padding-bottom:4px !important; }
+.dash-spreadsheet-container .previous-next-container, .dash-spreadsheet-container .dash-pagination-container { margin:2px 0; }
+.dash-spreadsheet-container .page-number, .dash-spreadsheet-container .current-page { font-size:12px; }
+
+/* ---- Inspector ---------------------------------------------------------- */
+.toolbox-tabs .mantine-Tabs-tab { padding:6px 10px; }
+#plot-tools-container, #pub-plotter-container, #export-container { padding:0 8px 10px !important; }
+#integration-container.integration-panel { padding:8px 10px; }
+.inspector-target { padding:7px 0; }
+.inspector-section > summary { padding:6px 0; gap:6px; min-height:24px; box-sizing:border-box; }
+.inspector-section-content { padding:0 0 8px; }
+.inspector-section .inspector-section { margin-top:2px; }
+.inspector-section .toolbox-section-title { margin:6px 0 4px; }
+.inspector-fields-grid { grid-template-columns:repeat(auto-fit,minmax(150px,1fr)); gap:6px 8px; margin-top:6px; }
+.inspector-note, .inspector-empty { padding:3px 0; }
+.inspector-actions { gap:4px; }
+.axis-inspector-card { padding:6px 8px; }
+.axis-inspector-heading { margin-bottom:4px; }
+.axis-inspector-card .mantine-SegmentedControl-root { margin-bottom:4px; }
+.axis-inspector-card .mantine-Select-root { margin-top:4px; }
+.smoothing-controls { padding:0 6px 14px; }
+.smoothing-value-row { margin-bottom:6px; }
+.slider-exact-value { margin:4px 0 6px auto; }
+.figure-editor-actions { padding-top:6px; margin-top:6px; }
+.integration-panel .integration-section { padding:6px 0; }
+.integration-panel .integration-actions { gap:6px; margin-top:6px; }
+.analysis-group-actions { margin:6px 0; padding-top:6px; gap:6px; }
+
+/* Figure inspector: single controls flow into as many columns as fit; rows that
+   already lay out several fields (inline flex/grid), headings, notes and
+   buttons keep the full width. Scoped to the figure inspector, whose children
+   are self-contained fields. */
+#plot-tools-container > .inspector-section > .inspector-section-content {
+  display:grid; grid-template-columns:repeat(auto-fill,minmax(190px,1fr)); gap:6px 10px; align-items:start;
+}
+#plot-tools-container > .inspector-section > .inspector-section-content > * { min-width:0; margin-bottom:0 !important; }
+#plot-tools-container > .inspector-section > .inspector-section-content > .toolbox-section-title,
+#plot-tools-container > .inspector-section > .inspector-section-content > .inspector-note,
+#plot-tools-container > .inspector-section > .inspector-section-content > .inspector-reset,
+#plot-tools-container > .inspector-section > .inspector-section-content > .inspector-field-error,
+#plot-tools-container > .inspector-section > .inspector-section-content > .axis-inspector,
+#plot-tools-container > .inspector-section > .inspector-section-content > .inspector-section,
+#plot-tools-container > .inspector-section > .inspector-section-content > .inspector-fields-grid,
+#plot-tools-container > .inspector-section > .inspector-section-content > button,
+#plot-tools-container > .inspector-section > .inspector-section-content > [style*="display: flex"],
+#plot-tools-container > .inspector-section > .inspector-section-content > [style*="display: grid"],
+#plot-tools-container > .inspector-section > .inspector-section-content > [id$="-wrapper"],
+#plot-tools-container > .inspector-section > .inspector-section-content > #inspector-separate-controls,
+#plot-tools-container > .inspector-section > .inspector-section-content > .smoothing-controls { grid-column:1 / -1; }
+/* X and Y axis cards sit side by side when the panel is wide enough. */
+#axis-inspector-cards { display:grid; grid-template-columns:repeat(auto-fit,minmax(200px,1fr)); gap:6px 10px; }
+#axis-inspector-cards > .axis-inspector-card { margin-bottom:0 !important; min-width:0; }
+.axis-inspector-bounds { gap:6px !important; }
+
+/* ---- Status bar --------------------------------------------------------- */
+.status-bar { height:auto; min-height:22px; padding:0 10px; gap:8px; font-size:12px; }
+.status-bar #undo-file-removal-btn { height:20px; font-size:12px; padding:0 7px; }

@@ -34,7 +34,7 @@ def test_send_to_publication_preserves_layout_and_axis_assignments(layout_mode, 
     send = next(cb['callback'].__wrapped__ for cb in app.callback_map.values()
                 if cb['inputs'] == [{'id': 'figure-action-event', 'property': 'data'}])
     hydrate = next(cb['callback'].__wrapped__ for cb in app.callback_map.values()
-                   if cb['inputs'] == [{'id': 'active-plot-context', 'property': 'data'}])
+                   if cb.get('callback') and cb['callback'].__wrapped__.__name__ == 'hydrate_plot_settings')
     preview = app.callback_map['pub-preview-graph.data']['callback'].__wrapped__
     figure = {'data': [{'x': [0, 1], 'y': [0, 5e6], 'name': 'TIC', 'yaxis': 'y'},
                        {'x': [0, 1], 'y': [0, 250], 'name': 'UV', 'yaxis': 'y2'}],

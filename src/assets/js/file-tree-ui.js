@@ -8,6 +8,132 @@
     });
 
     // -----------------------------------------------------------------------
+    // 0. Finder-style multi-selection (client-side only, published to the
+    //    'file-multi-selection' store so eye/trash callbacks can act on all rows)
+    // -----------------------------------------------------------------------
+    // Pure selection logic. `order` is the visible row keys top to bottom;
+    // mods is {toggle, range}. Plain click selects just the clicked key.
+    function computeSelection(state, order, key, mods) {
+        var keys = (state && state.keys) || [];
+        var anchor = state && state.anchor;
+        mods = mods || {};
+        if (mods.range) {
+            var from = order.indexOf(anchor != null ? anchor : (keys.length ? keys[0] : key));
+            var to = order.indexOf(key);
+            if (from < 0) from = to;
+            if (to < 0) return {keys: keys.slice(), anchor: anchor};
+            var span = order.slice(Math.min(from, to), Math.max(from, to) + 1);
+            var base = mods.toggle ? keys.filter(function(k) { return span.indexOf(k) < 0; }) : [];
+            // The anchor stays put so repeated shift-clicks pivot around it.
+            return {keys: base.concat(span), anchor: order[from]};
+        }
+        if (mods.toggle) {
+            var at = keys.indexOf(key);
+            return {keys: at >= 0 ? keys.filter(function(k) { return k !== key; }) : keys.concat([key]), anchor: key};
+        }
+        return {keys: [key], anchor: key};
+    }
+    window._geckoComputeSelection = computeSelection;
+
+    var selection = {keys: [], anchor: null};
+    var lastActiveSeen;
+
+    function rowKey(row) {
+        var key = row.getAttribute && row.getAttribute('data-file-key');
+        if (key) return key;
+        try { return row.id && row.id.charAt(0) === '{' ? JSON.parse(row.id).index : null; } catch (_) { return null; }
+    }
+
+    function treeRows() {
+        return Array.prototype.slice.call(document.querySelectorAll('.file-tree-item'));
+    }
+
+    // Rows in on-screen order; rows inside a collapsed group/bundle are skipped.
+    function visibleRowKeys(rows) {
+        return rows.filter(function(r) { return r.offsetParent !== null; }).map(rowKey).filter(Boolean);
+    }
+
+    function publishSelection() {
+        if (window.dash_clientside && window.dash_clientside.set_props) {
+            window.dash_clientside.set_props('file-multi-selection', {data: selection.keys.slice()});
+        }
+    }
+
+    function paintSelection(rows) {
+        var chosen = {};
+        selection.keys.forEach(function(k) { chosen[k] = true; });
+        rows.forEach(function(row) {
+            var key = rowKey(row);
+            if (key && chosen[key]) row.classList.add('multi-selected');
+            else row.classList.remove('multi-selected');
+        });
+    }
+
+    function setSelection(next) {
+        selection = next;
+        paintSelection(treeRows());
+        publishSelection();
+    }
+
+    // The active file may be a component of a sample row; resolve it to that row's key.
+    function activeRowKey(rows, fileId) {
+        for (var i = 0; i < rows.length; i++) {
+            var id = null, sources = [];
+            try { id = rows[i].id && rows[i].id.charAt(0) === '{' ? JSON.parse(rows[i].id).index : null; } catch (_) {}
+            try { sources = JSON.parse(rows[i].getAttribute('data-sample-sources') || '[]'); } catch (_) {}
+            if (fileId && (id === fileId || sources.indexOf(fileId) >= 0)) return rowKey(rows[i]);
+        }
+        return null;
+    }
+
+    // Re-apply after the tree re-renders; forget rows that no longer exist.
+    window._geckoApplyMultiSelection = function() {
+        if (!selection.keys.length) return;
+        var rows = treeRows();
+        var present = {};
+        rows.forEach(function(r) { present[rowKey(r)] = true; });
+        var kept = selection.keys.filter(function(k) { return present[k]; });
+        paintSelection(rows);
+        if (kept.length !== selection.keys.length) {
+            selection = {keys: kept, anchor: present[selection.anchor] ? selection.anchor : null};
+            paintSelection(rows);
+            publishSelection();
+        }
+    };
+
+    window._geckoGetFileSelection = function() { return selection.keys.slice(); };
+
+    // Cmd/Ctrl-click toggles and Shift-click selects a range without activating the file
+    // (Dash never sees the click); a plain click keeps the optimistic highlight below and
+    // also resets the selection to that single row. The server's selection arrives a few
+    // hundred ms later and agrees.
+    document.addEventListener('click', function(event) {
+        var target = event.target;
+        if (!target || !target.closest) return;
+        var row = target.closest('.file-tree-item');
+        if (!row || target.closest('button, a, input, [id*="delete-btn"], [id*="visibility-btn"]')) return;
+        var key = rowKey(row);
+        var toggle = !!(event.metaKey || event.ctrlKey), range = !!event.shiftKey;
+        if (key && (toggle || range)) {
+            event.preventDefault();
+            event.stopPropagation();
+            var rows = treeRows();
+            var state = selection;
+            if (!state.keys.length) {
+                // Nothing picked yet: the highlighted active file is the implicit first selection.
+                var seed = activeRowKey(rows, window.__geckoActiveFile);
+                if (seed) state = {keys: [seed], anchor: seed};
+            }
+            setSelection(computeSelection(state, visibleRowKeys(rows), key, {toggle: toggle, range: range}));
+            return;
+        }
+        var id = null;
+        try { id = row.id && row.id.charAt(0) === '{' ? JSON.parse(row.id).index : null; } catch (_) {}
+        if (key) setSelection({keys: [key], anchor: key});
+        if (id && window._geckoApplyActiveFile) window._geckoApplyActiveFile(id);
+    }, true);
+
+    // -----------------------------------------------------------------------
     // 1. File tree visual state — called by Dash clientside callback
     //    (MutationObservers on dcc.Store don't work in Dash 3.x)
     // -----------------------------------------------------------------------
@@ -21,12 +147,23 @@
                     elId = JSON.parse(raw).index;
                 }
             } catch(_) {}
-            if (elId && elId === fileId) {
+            var belongsToSample = false;
+            try { belongsToSample = JSON.parse(el.getAttribute('data-sample-sources') || '[]').indexOf(fileId) >= 0; } catch (_) {}
+            if (elId && (elId === fileId || belongsToSample)) {
                 el.classList.add('selected');
             } else {
                 el.classList.remove('selected');
             }
         });
+        // A *changed* active file outside the multi-selection (tab switch, upload, ...) ends it.
+        // Re-applying the same active file after a re-render must not.
+        if (fileId !== lastActiveSeen) {
+            lastActiveSeen = fileId;
+            if (selection.keys.length) {
+                var activeKey = activeRowKey(treeRows(), fileId);
+                if (activeKey && selection.keys.indexOf(activeKey) < 0) setSelection({keys: [], anchor: null});
+            }
+        }
     };
 
     window._geckoApplyHiddenFiles = function(hiddenIds) {
@@ -82,7 +219,7 @@
 
     function initGroupCollapse() {
         document.querySelectorAll('.file-group-header').forEach(function(header) {
-            if (header._collapseInit) return;
+            if (header._collapseInit || (header.classList && header.classList.contains('native-disclosure'))) return;
             header._collapseInit = true;
             header.style.cursor = 'pointer';
             header.style.userSelect = 'none';
@@ -248,6 +385,7 @@
         initCrossGroupDrop();
         window._geckoApplyActiveFile(window.__geckoActiveFile);
         window._geckoApplyHiddenFiles(window.__geckoHiddenFiles);
+        window._geckoApplyMultiSelection();
     });
     observer.observe(document.body, { childList: true, subtree: true });
     document.addEventListener('DOMContentLoaded', function() {

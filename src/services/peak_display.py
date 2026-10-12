@@ -1,5 +1,6 @@
 """Peak display geometry follows the rendered signal; measurements stay immutable."""
 import numpy as np
+from services.plot_arrays import numeric_plot_array
 
 
 def peak_id_for_trace(trace):
@@ -24,6 +25,11 @@ def register_peak_geometry(fig, peak):
     meta = dict(fig.layout.meta or {})
     geometry = dict(meta.get('gecko_peak_geometry', {}))
     geometry[peak.peak_id] = {'file_id': peak.file_id, 'bounds':[min(peak.poly_x), max(peak.poly_x)], 'baseline':baseline}
+    if peak.source == 'deconvolved':
+        geometry[peak.peak_id]['fitted_polygon'] = [list(peak.poly_x), list(peak.poly_y)]
+    if peak.source == 'detected':
+        n = len(peak.poly_x) // 2
+        geometry[peak.peak_id]['baseline_points'] = [peak.poly_x[n:][::-1], peak.poly_y[n:][::-1]]
     fig.layout.meta = {**meta, 'gecko_peak_geometry':geometry}
 
 
@@ -44,8 +50,8 @@ def refresh_peak_display(fig):
         scored = []
         for source in candidates:
             try:
-                x = np.asarray(source.x, dtype=float)
-                y = np.asarray(source.meta.get('gecko_original_y', source.y), dtype=float)
+                x = numeric_plot_array(source.x)
+                y = numeric_plot_array(source.meta.get('gecko_original_y', source.y))
                 order = np.argsort(x)
                 score = np.mean((np.asarray(trace.y[:n])-np.interp(trace.x[:n], x[order], y[order])) ** 2)
                 if np.isfinite(score):
@@ -65,8 +71,13 @@ def refresh_peak_display(fig):
             continue
         source = sources[spec['file_id']]
         trace.xaxis, trace.yaxis = source.xaxis or 'x', source.yaxis or 'y'
+        if spec.get('fitted_polygon'):
+            if trace.fill == 'toself':
+                trace.x, trace.y = spec['fitted_polygon']
+                trace.customdata = [peak_id] * len(trace.x)
+            continue
         try:
-            x, y = np.asarray(source.x, dtype=float), np.asarray(source.y, dtype=float)
+            x, y = numeric_plot_array(source.x), numeric_plot_array(source.y)
         except (TypeError, ValueError):
             continue
         if x.ndim != 1 or y.ndim != 1 or len(x) != len(y):
@@ -84,7 +95,8 @@ def refresh_peak_display(fig):
             (x0, y0), (x1, y1) = spec['baseline']
             if x1 == x0:
                 continue
-            baseline = y0 + (y1-y0) * (xs-x0) / (x1-x0)
+            baseline = (np.interp(xs, *spec['baseline_points']) if spec.get('baseline_points')
+                        else y0 + (y1-y0) * (xs-x0) / (x1-x0))
             trace.x = np.r_[xs, xs[::-1]].tolist()
             trace.y = np.r_[ys, np.minimum(baseline, ys)[::-1]].tolist()
             trace.customdata = [peak_id] * len(trace.x)

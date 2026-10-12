@@ -105,6 +105,7 @@
                 entry.gd.__geckoPublicationSize = null;
                 await window.Plotly.react(entry.gd,copy.data || [],copy.layout || {},
                     {responsive:false,staticPlot:false,displayModeBar:false,displaylogo:false,scrollZoom:false,doubleClick:'reset+autosize'});
+                if (window.GeckoLegendVisibility) window.GeckoLegendVisibility.bind(entry.gd);
                 if (version !== updateVersion) return '';
             }
         }
