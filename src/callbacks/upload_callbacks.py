@@ -75,6 +75,42 @@ def _visibility_button(file_id, data_manager=None):
 
 
 
+def build_active_file_views(data_manager, file_id):
+    """Metadata table, table editor and publication data of one file, as shown right after an import or restore.
+
+    Returns ``(metadata_children, table_editor, pub_data_json)``; the first is ``dash.no_update`` when the file
+    has no data.
+    """
+    auto_table, table_editor, pub_data = dash.no_update, None, None
+    file_data = data_manager.get_data_by_id(file_id)
+    if not file_data:
+        return auto_table, table_editor, pub_data
+    try:
+        from callbacks.viz_callbacks import create_data_table, create_bundle_data_table
+        bundle = (data_manager.get_bundle(file_id)
+                  or data_manager.get_bundle_for_component(file_id))
+        if bundle and bundle.bundle_type.value != 'generic':
+            compat = data_manager.get_bundle_by_id(bundle.bundle_id)
+            auto_table = create_bundle_data_table(compat, file_data, data_manager)
+        else:
+            auto_table = create_data_table(file_data)
+    except Exception:
+        log.exception("Error building metadata table")
+
+    from callbacks.viz_callbacks import prepare_table_data
+    from components.data_table_editor import create_data_table_editor
+
+    table_data = prepare_table_data(file_data, file_id=file_id)
+    sheet_names = file_data.get('metadata', {}).get('sheet_names')
+    active_sheet = file_data.get('metadata', {}).get('active_sheet')
+    table_editor = create_data_table_editor(
+        table_data, table_id='pub-table',
+        sheet_names=sheet_names, active_sheet=active_sheet,
+    )
+    pub_data = table_data.to_json(orient='split') if table_data is not None else None
+    return auto_table, table_editor, pub_data
+
+
 log = logging.getLogger(__name__)
 
 def register_upload_callbacks(app: dash.Dash, data_manager) -> None:
@@ -88,7 +124,8 @@ def register_upload_callbacks(app: dash.Dash, data_manager) -> None:
          Output('table-editor-container', 'children', allow_duplicate=True),
          Output('pub-data-store', 'data', allow_duplicate=True),
          Output('render-trigger', 'data', allow_duplicate=True),
-         Output('pt-layout-mode', 'value', allow_duplicate=True)],
+         Output('pt-layout-mode', 'value', allow_duplicate=True),
+         Output('session-upload-handoff', 'data', allow_duplicate=True)],
         Input('upload-button', 'contents'),
         [State('upload-button', 'filename'),
          State('upload-button', 'last_modified'),
@@ -107,7 +144,17 @@ def register_upload_callbacks(app: dash.Dash, data_manager) -> None:
         4. Auto-import peaks from Integration.txt components
         """
         if not contents_list or not filenames:
-            return (dash.no_update,) * 8
+            return (dash.no_update,) * 9
+
+        # A project file (.gecko) is never ingested as data: hand it to the Open flow (callbacks/session_callbacks.py).
+        from services.session_files import is_session_filename, stash_session_upload
+        project = next(((c, f) for c, f in zip(contents_list, filenames) if is_session_filename(f)), None)
+        if project is not None:
+            try:
+                return (dash.no_update,) * 8 + (stash_session_upload(*project),)
+            except Exception:
+                log.exception("Could not read the project file %s", project[1])
+                return (dash.no_update,) * 9
 
         try:
             import base64
@@ -148,7 +195,7 @@ def register_upload_callbacks(app: dash.Dash, data_manager) -> None:
                     failed_names.add(fname)
 
             if not parsed_files:
-                return (dash.no_update,) * 8
+                return (dash.no_update,) * 9
 
             new_bundles = assign_bundles(parsed_files)
 
@@ -175,47 +222,20 @@ def register_upload_callbacks(app: dash.Dash, data_manager) -> None:
                 auto_active_file = visible_component_id(data_manager, last_bundle) or dash.no_update
             else:
                 auto_active_file = last_bundle_id or dash.no_update
-            auto_table = dash.no_update
-            table_editor = None
-            pub_data = None
-
+            auto_table, table_editor, pub_data = dash.no_update, None, None
             if auto_active_file and auto_active_file != dash.no_update:
-                file_data = data_manager.get_data_by_id(auto_active_file)
-                if file_data:
-                    try:
-                        from callbacks.viz_callbacks import create_data_table, create_bundle_data_table
-                        bundle = (data_manager.get_bundle(auto_active_file)
-                                  or data_manager.get_bundle_for_component(auto_active_file))
-                        if bundle and bundle.bundle_type.value != 'generic':
-                            compat = data_manager.get_bundle_by_id(bundle.bundle_id)
-                            auto_table = create_bundle_data_table(compat, file_data, data_manager)
-                        else:
-                            auto_table = create_data_table(file_data)
-                    except Exception:
-                        log.exception("Error building metadata table")
-
-                    from callbacks.viz_callbacks import prepare_table_data
-                    from components.data_table_editor import create_data_table_editor
-
-                    table_data = prepare_table_data(file_data, file_id=auto_active_file)
-                    sheet_names = file_data.get('metadata', {}).get('sheet_names')
-                    active_sheet = file_data.get('metadata', {}).get('active_sheet')
-                    table_editor = create_data_table_editor(
-                        table_data, table_id='pub-table',
-                        sheet_names=sheet_names, active_sheet=active_sheet,
-                    )
-                    pub_data = table_data.to_json(orient='split') if table_data is not None else None
+                auto_table, table_editor, pub_data = build_active_file_views(data_manager, auto_active_file)
 
             tree_items = render_file_tree_with_bundles_selected(
                 loaded_files, data_manager, auto_active_file)
 
             log.debug(f"Upload complete: {len(new_bundles)} bundles from {len(parsed_files)} files")
             return (loaded_files, tree_items, auto_active_file, auto_table,
-                    table_editor, pub_data, (render_counter or 0) + 1, auto_layout_mode)
+                    table_editor, pub_data, (render_counter or 0) + 1, auto_layout_mode, dash.no_update)
 
         except Exception as e:
             log.exception(f"Upload failed: {str(e)}")
-            return (dash.no_update,) * 8
+            return (dash.no_update,) * 9
 
     @app.callback(
         [Output('loaded-files', 'data', allow_duplicate=True),
@@ -225,7 +245,8 @@ def register_upload_callbacks(app: dash.Dash, data_manager) -> None:
          Output('table-editor-container', 'children', allow_duplicate=True),
          Output('pub-data-store', 'data', allow_duplicate=True),
          Output('render-trigger', 'data', allow_duplicate=True),
-         Output('pt-layout-mode', 'value', allow_duplicate=True)],
+         Output('pt-layout-mode', 'value', allow_duplicate=True),
+         Output('session-upload-handoff', 'data', allow_duplicate=True)],
         Input('drop-zone', 'contents'),
         [State('drop-zone', 'filename'),
          State('drop-zone', 'last_modified'),
@@ -235,7 +256,7 @@ def register_upload_callbacks(app: dash.Dash, data_manager) -> None:
     )
     def handle_drop_upload(contents_list, filenames, last_modified_list, existing_files, render_counter):
         if not contents_list or not filenames:
-            return (dash.no_update,) * 8
+            return (dash.no_update,) * 9
         return handle_file_upload(contents_list, filenames, last_modified_list, existing_files, render_counter)
 
     @app.callback(
@@ -246,7 +267,8 @@ def register_upload_callbacks(app: dash.Dash, data_manager) -> None:
          Output('table-editor-container', 'children', allow_duplicate=True),
          Output('pub-data-store', 'data', allow_duplicate=True),
          Output('render-trigger', 'data', allow_duplicate=True),
-         Output('pt-layout-mode', 'value', allow_duplicate=True)],
+         Output('pt-layout-mode', 'value', allow_duplicate=True),
+         Output('session-upload-handoff', 'data', allow_duplicate=True)],
         Input('global-drop-zone', 'contents'),
         [State('global-drop-zone', 'filename'),
          State('global-drop-zone', 'last_modified'),
@@ -256,7 +278,7 @@ def register_upload_callbacks(app: dash.Dash, data_manager) -> None:
     )
     def handle_global_drop_upload(contents_list, filenames, last_modified_list, existing_files, render_counter):
         if not contents_list or not filenames:
-            return (dash.no_update,) * 8
+            return (dash.no_update,) * 9
         return handle_file_upload(contents_list, filenames, last_modified_list, existing_files, render_counter)
 
 

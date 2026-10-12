@@ -1,8 +1,8 @@
 # Session files (`.gecko`)
 
 Engine: `src/services/session_service.py` (no Dash imports). Tests: `tests/test_session_service.py`,
-`tests/test_session_real_data.py`. Status: **engine done, GUI (Save / Open buttons, autosave timer,
-"restore last session?") pending** and meant to be built on the API below.
+`tests/test_session_real_data.py`. Status: **engine and GUI done** (header Save / Open, autosave, "restore last
+session?"; see "GUI" at the end).
 
 A session is a project file the user can reopen months later and keep working in: same samples, same peaks,
 same calibrations, same names, same figure settings. It is also the state an AI agent can load, change and save.
@@ -31,7 +31,7 @@ A ZIP (deflate) with extension `.gecko`:
 | `manifest.json` | `format` (`"geckoplotter-session"`), `schema_version` (int), `app` (name, version, python/numpy/pandas/scipy/plotly/dash versions), `created_at`, `saved_at` (UTC ISO), `project_name`, `counts` (bundles, components, peaks, calibrations, files, edited_tables), `samples` (bundle names), `raw_embedded`, `raw_limit_bytes`, `files` (see below), `tables`, `has_client_state`, `notes`. Human-readable (indented). |
 | `state.json` | All server-side state (see "What is saved"). Compact JSON. |
 | `client_state.json` | Opaque dict from the GUI layer. The engine stores it and hands it back. |
-| `raw/<sha256>/<original name>` | Original instrument files, deduplicated by SHA-256. Only when embedded. |
+| `raw/<sha256>/<original name>` | Original instrument files, deduplicated by SHA-256. Only when embedded (not in autosaves, see "Autosave and the raw cache"). |
 | `edited/<component id>.csv` | Table of a component the user changed after import (see below). |
 | `tables/<component id>.csv` | Table of a component that cannot be rebuilt from a file (see below). |
 
@@ -131,16 +131,17 @@ SCHEMA_VERSION = 1
 MIGRATIONS: dict[int, Callable[[dict], dict]]
 
 build_session(store, client_state=None, *, project_name=None, embed_raw=True,
-              raw_limit_bytes=400_000_000, source_paths=None) -> bytes
+              raw_limit_bytes=400_000_000, source_paths=None, raw_cache=None) -> bytes
 save_session(store, path, client_state=None, *, project_name=None, embed_raw=True,
-             raw_limit_bytes=400_000_000, source_paths=None) -> Path        # atomic
+             raw_limit_bytes=400_000_000, source_paths=None, raw_cache=None) -> Path   # atomic
 inspect_session(data_or_path) -> SessionInfo                                # manifest only
 restore_session(store, data_or_path, *, search_dirs=(), relocate=None) -> SessionReport
 remap_ids(obj, mapping) -> obj
 migrate_session(session, *, target=None, migrations=None) -> session
 autosave_dir(create=True) -> Path          # $GECKO_AUTOSAVE_DIR or ~/Documents/GeckoPlotter/Autosave
 latest_autosave() -> Path | None           # newest *.gecko, never creates the folder
-save_autosave(store, client_state=None, *, keep=5, **build_kwargs) -> Path
+raw_cache_dir(create=False) -> Path        # <autosave_dir>/raw
+save_autosave(store, client_state=None, *, keep=5, raw_cache=True, **build_kwargs) -> Path
 class SessionFormatError(ValueError); class SessionVersionError(SessionFormatError)
 ```
 
@@ -166,8 +167,23 @@ Side effects on the store: `save_session` remembers `store.session_meta` (`proje
   session?" *after* that point (e.g. from a button/interval), not before.
 * Show `report.warnings`, `report.errors` and, for `missing_files`, a "locate file" step that calls
   `restore_session(..., relocate=...)` or `search_dirs=[...]` again.
-* Autosave with `embed_raw=False` is cheap for big sets but then needs original paths (`source_paths`);
-  otherwise autosave embeds and costs one compression of the originals per save (about 0.4 s for 35 MB).
+* Autosave no longer embeds: see "Autosave and the raw cache" (an autosave of an 85 MB workspace takes about
+  60 ms after the first one, which also writes the originals once).
+
+## Autosave and the raw cache
+
+`save_autosave` (default `raw_cache=True`) writes a *state-only* `.gecko`: nothing under `raw/` in the zip,
+`manifest.raw_cache = true`, `files[].embedded = false`. Each original is written once, atomically, to
+`<autosave_dir>/raw/<sha256>` (content-addressed, so identical files are shared and never rewritten). SHA-256 of an
+original is computed once per component (remembered on the component object), so a repeated autosave only
+serialises the state (measured: 85 MB of CSV, first autosave 2.6 s, later ones 0.06 s).
+
+`restore_session` looks for a cached original in `<folder of the .gecko>/raw/<sha256>` and then in
+`<autosave_dir>/raw/<sha256>` before the stored path / search folders, so an autosave still opens after the folder
+was moved or copied together with its `raw/` sub-folder. A cache file that is gone is reported like any other
+missing original (`missing_files`, "Locate folder"). Rotation (`keep`, default 5) deletes cached originals that no
+remaining autosave lists. `inspect_session(...).raw_cache` tells which kind a file is. An explicit Save
+(`save_session` / `build_session` without `raw_cache`) always stays self-contained, with embedded originals.
 
 ## Not saved
 
@@ -203,3 +219,96 @@ package, so build it with `embed_raw=False` and `source_paths` pointing at the p
 accept a session through the same `restore_session` for "re-run this analysis". The manifest's SHA-256 list is the
 same hash the package manifest records, so the two can be cross-checked. Nothing in the package format needs to
 change for that; it is intentionally not wired yet.
+
+## GUI
+
+Server glue: `src/callbacks/session_callbacks.py` (4 server callbacks, 9 clientside), helpers without Dash in
+`src/services/session_files.py`, layout in `src/components/session_controls.py`, browser behaviour in
+`src/assets/js/session-io.js`, styling in `src/assets/css/zz-project.css`. Tests: `tests/test_session_gui.py`,
+`tests/js/session-io.test.cjs`.
+
+### What the user sees
+
+* Right end of the dark header: **project name** (click to rename; empty = "Untitled project"), a tiny **status**
+  ("Unsaved changes", "Autosaved 12:03", "Saved 12:03", "Opened 12:03"), **Open** (+ a small caret menu with
+  "Open file..." and the last five autosaves) and **Save**. Plain HTML buttons and the plain-HTML popup menu, no
+  Mantine Menu/Tooltip, neutral charcoal/grey.
+* **Save** (button or Cmd/Ctrl+S, the browser's own Save is suppressed) downloads `<name>.gecko`, sanitised
+  (`My run: 1/2` -> `My run_ 1_2.gecko`), built with `build_session` (originals embedded, same as the engine
+  default). With no name yet a small dialog asks for one. Save clears the unsaved flag.
+* **Open** (button, caret menu, Cmd/Ctrl+O, or dropping a `.gecko` anywhere) replaces the workspace. A `.gecko`
+  dropped on any of the three file-import zones, or chosen with the "+" picker, is recognised by extension in
+  `upload_callbacks.handle_file_upload` (and shown as "Opening ..." at once by `session-io.js`) and handed to the
+  Open callback through the `session-upload-handoff` store instead of being ingested. Other files in the same drop are
+  ignored.
+* **Restore banner** at the top of the plot area on page load: "Restore last session? 5 samples, saved 12 min ago"
+  with **Restore** / **Start fresh** (hides the banner, deletes nothing). Shown only if the newest autosave is at
+  most 14 days old, readable by this version, and the workspace is empty. The default stays a clean workspace.
+* Warnings and errors of an open appear in a dismissible message under the banner. **Missing originals** open a dialog
+  listing them with a "Locate folder..." field and **Retry** (calls `restore_session` again with `search_dirs`), or
+  "Continue without them".
+
+### Server round trips
+
+Save, Open (incl. Retry / banner / recent / drop handoff), autosave, and one check at page load. Everything else is
+clientside. `start_empty_workspace_on_reload` only runs on `GET /_dash-layout`; restore happens after the page loaded
+and replaces the workspace in place, so it does not interfere.
+
+### client_state (what is captured)
+
+Collected as `State` by Save and autosave; keys are the component id (`id.property` when not `data`):
+
+`plot-tabs`, `active-plot-tab`, `active-file`, `hidden-files`, `file-order`, `zoom-state`, `tab-zoom-memory`,
+`tab-panel-memory`, `tab-file-memory`, `current-plot-settings`, `plot-settings-cache`, `pda-colormap`,
+`analysis-tabs.value`, `analysis-dock.value`, `custom-plot-figures`, `custom-plot-counter`, `toolbox-tab`,
+`integration-baseline.value`, `int-display-opts.value`. `None` values are left out. Ids inside are valid after
+restore (the engine re-keys to the saved ids and remaps `client_state` if it ever could not).
+
+Not captured: `file-multi-selection` (transient), `rendered-plot-tabs` and every figure (recomputed),
+selected-peak / context-menu / trigger / undo stores, `view-mode` (derived from the active plot tab), the integration
+sensitivity slider (restoring it would re-run peak detection and overwrite the saved peaks). Layout mode
+(overlay/separate) comes with `current-plot-settings.layout_mode` and is also written to `pt-layout-mode`.
+
+Restore writes the stores back as Outputs of the Open callback (all `allow_duplicate`). A key missing from the file
+resets that store to its default (so nothing of the previous workspace survives) except the pure view settings
+(`pda-colormap`, `analysis-*`, `toolbox-tab`, integration controls), which stay as the user has them.
+`hidden-files` and `active-file` are derived from the restored server state (and validated) instead of being copied.
+`plot-settings-cache` is applied late (see below).
+
+After the callback returns, many existing callbacks react to the new stores (tab sync, file tree, settings
+hydration). `session-io.js` waits until the browser has been quiet for 0.5 s, then (a) re-applies the saved active
+plot tab (a custom/publication tab would otherwise be switched away by the "select file -> show its tab" callback),
+(b) merges the saved settings cache with what the browser rebuilt (the browser wins; its own flush on `loaded-files`
+would otherwise erase it), (c) if the plot context did not change, writes it to `plot-settings-miss` so the server
+re-hydrates the controls from the restored settings (otherwise the controls would show stale values and the next
+edit would overwrite the restored settings), and (d) clears the unsaved flag.
+
+### Unsaved flag and autosave
+
+* `session-dirty` is set clientside by changes of `loaded-files`, `peak-change-trigger`, `current-plot-settings`,
+  `file-order`, `plot-tabs`, `cal-revision` and `hidden-files` (the minimal set that covers data, peaks/integration,
+  calibration, figure settings, layout of the tree and tabs, visibility). Selecting files or switching plots is not a
+  change, and a `current-plot-settings` rewrite is only an edit when the content of an already seen plot context
+  changed (hydration echoes are ignored). Changes during a restore are ignored. An empty workspace is never dirty.
+* Autosave is debounced in the browser (`setTimeout`, 20 s after the last change, no `dcc.Interval`) and writes
+  `session-autosave-fire`, which runs the server autosave: no threads or processes, its own request, skipped when
+  the workspace is empty, failures only show as "Autosave failed" in the status. Status shows "Autosaved hh:mm"
+  only if that autosave started after the last change.
+* `beforeunload` asks for confirmation only while `session-dirty` is true (an autosave does not clear it; only
+  Save or Open does).
+
+### Decisions taken without asking
+
+* The legacy placeholder "Save Session / Load Session" buttons and their stub callbacks in the Export tab were removed.
+* No `~/.gecko/recent.json`: a browser download has no known path, so a "recent projects" list could not open
+  anything. The Open caret menu lists the last five **autosaves** instead (they live on the server and restore by path).
+* Uploaded `.gecko` files are kept as a temp copy (`<tmp>/geckoplotter-sessions/`) only while originals are missing, so
+  Retry does not upload again; the copy is deleted when the open is complete (copies older than a day are swept).
+* Opening replaces the workspace without a confirmation prompt (the autosave is at most 20 s old).
+* A project name equal to "Autosave" (the engine's default for unnamed autosaves) is shown as Untitled project.
+
+### Known gaps
+
+Opening while there are unsaved changes does not warn. The browser behaviour (store cascade after a restore, late
+step, drop routing, keyboard) is covered by unit tests of the functions and of the layout/callback wiring, not by a
+running browser; the first manual check should be: save, reload the page, press Restore, compare plots and tabs.

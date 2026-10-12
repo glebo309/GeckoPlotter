@@ -90,6 +90,7 @@ class SessionInfo:
     files: List[Dict[str, Any]] = field(default_factory=list)
     samples: List[str] = field(default_factory=list)
     raw_embedded: bool = True
+    raw_cache: bool = False  # originals live in the autosave cache folder, not in the file
     has_client_state: bool = False
     size_bytes: Optional[int] = None
     compatible: bool = True
@@ -414,6 +415,7 @@ def _info_from_manifest(manifest: dict, archive: Optional[_Archive] = None) -> S
         files=[dict(f) for f in manifest.get('files') or []],
         samples=list(manifest.get('samples') or []),
         raw_embedded=bool(manifest.get('raw_embedded', True)),
+        raw_cache=bool(manifest.get('raw_cache')),
         has_client_state=bool(manifest.get('has_client_state')),
         size_bytes=archive.size if archive is not None else None,
         notes=list(manifest.get('notes') or []),
@@ -494,8 +496,48 @@ def _read_table(data: bytes, dtypes: Mapping[str, str]) -> pd.DataFrame:
         return pd.read_csv(io.BytesIO(data))
 
 
+def _raw_digest(component) -> str:
+    """SHA-256 of a component's original bytes, remembered on the component.
+
+    The bytes object never changes once imported, so hashing a 100 MB workspace is paid once, not per save.
+    """
+    raw = component.raw_bytes
+    cached = getattr(component, '_raw_digest', None)
+    if cached is not None and cached[0] is raw:
+        return cached[1]
+    digest = _sha256(raw)
+    try:
+        component._raw_digest = (raw, digest)
+    except AttributeError:
+        pass
+    return digest
+
+
+def _store_raw(cache_dir: Path, sha: str, data: bytes) -> Path:
+    """Write one original into the content-addressed cache (once; atomic)."""
+    target = cache_dir / sha
+    try:
+        if target.is_file() and target.stat().st_size == len(data):
+            return target
+    except OSError:
+        pass
+    cache_dir.mkdir(parents=True, exist_ok=True)
+    fd, tmp_name = tempfile.mkstemp(prefix='.' + sha[:12] + '.', suffix='.tmp', dir=cache_dir)
+    try:
+        with os.fdopen(fd, 'wb') as handle:
+            handle.write(data)
+        os.replace(tmp_name, target)
+    except BaseException:
+        try:
+            os.unlink(tmp_name)
+        except OSError:
+            pass
+        raise
+    return target
+
+
 def _build_parts(store, client_state, project_name, embed_raw, raw_limit_bytes,
-                 source_paths) -> _Parts:
+                 source_paths, raw_cache: Optional[Path] = None) -> _Parts:
     from .research_package import csv_bytes, _dataframe_sha256
 
     previous = dict(getattr(store, 'session_meta', None) or {})
@@ -508,7 +550,7 @@ def _build_parts(store, client_state, project_name, embed_raw, raw_limit_bytes,
 
     def register(component) -> Tuple[str, str]:
         name = component.original_filename
-        key = (_sha256(component.raw_bytes), name)
+        key = (_raw_digest(component), name)
         if key not in files:
             files[key] = {
                 'name': name, 'size': len(component.raw_bytes), 'sha256': key[0],
@@ -592,8 +634,8 @@ def _build_parts(store, client_state, project_name, embed_raw, raw_limit_bytes,
         })
 
     unique_bytes = sum({e['sha256']: e['size'] for e in files.values()}.values())
-    embedded = bool(embed_raw) and unique_bytes <= raw_limit_bytes
-    if bool(embed_raw) and not embedded:
+    embedded = bool(embed_raw) and raw_cache is None and unique_bytes <= raw_limit_bytes
+    if bool(embed_raw) and raw_cache is None and not embedded:
         notes.append(f'Original files total {unique_bytes} bytes, above the {raw_limit_bytes} byte '
                      f'limit: stored as name, size, SHA-256 and path only.')
     raw: Dict[str, bytes] = {}
@@ -602,6 +644,8 @@ def _build_parts(store, client_state, project_name, embed_raw, raw_limit_bytes,
         path = f'raw/{sha}/{_safe_zip_name(name)}'
         if embedded:
             raw[path] = entry['_data']
+        elif raw_cache is not None:
+            _store_raw(raw_cache, sha, entry['_data'])
         manifest_files.append({'name': name, 'size': entry['size'], 'sha256': sha,
                                'embedded': embedded, 'path': path if embedded else None,
                                'original_path': entry['original_path']})
@@ -652,6 +696,7 @@ def _build_parts(store, client_state, project_name, embed_raw, raw_limit_bytes,
         },
         'samples': [b['name'] for b in bundles_state],
         'raw_embedded': embedded,
+        'raw_cache': raw_cache is not None,
         'raw_limit_bytes': raw_limit_bytes,
         'files': manifest_files,
         'tables': sorted(tables),
@@ -676,7 +721,8 @@ def _write_archive(fileobj, parts: _Parts) -> None:
 
 def build_session(store, client_state: Optional[dict] = None, *, project_name: Optional[str] = None,
                   embed_raw: bool = True, raw_limit_bytes: int = DEFAULT_RAW_LIMIT_BYTES,
-                  source_paths: Optional[Mapping[str, Any]] = None) -> bytes:
+                  source_paths: Optional[Mapping[str, Any]] = None,
+                  raw_cache: Optional[Path] = None) -> bytes:
     """Serialise the workspace of *store* into ``.gecko`` bytes.
 
     ``client_state`` is an opaque JSON-able dict from the GUI layer (plot tabs,
@@ -686,8 +732,11 @@ def build_session(store, client_state: Optional[dict] = None, *, project_name: O
     path are stored. ``source_paths`` optionally maps file name or SHA-256 to the
     path the file was loaded from (the app itself only knows uploaded bytes).
     ``project_name`` defaults to the name the workspace was last saved/opened under.
+    ``raw_cache`` (a folder) is what autosave uses: nothing is embedded, every original is written once to
+    ``<raw_cache>/<sha256>`` and the session only references it (manifest ``raw_cache: true``).
     """
-    parts = _build_parts(store, client_state, project_name, embed_raw, raw_limit_bytes, source_paths)
+    parts = _build_parts(store, client_state, project_name, embed_raw, raw_limit_bytes, source_paths,
+                         raw_cache=Path(raw_cache) if raw_cache is not None else None)
     buffer = io.BytesIO()
     _write_archive(buffer, parts)
     return buffer.getvalue()
@@ -695,7 +744,8 @@ def build_session(store, client_state: Optional[dict] = None, *, project_name: O
 
 def save_session(store, path, client_state: Optional[dict] = None, *, project_name: Optional[str] = None,
                  embed_raw: bool = True, raw_limit_bytes: int = DEFAULT_RAW_LIMIT_BYTES,
-                 source_paths: Optional[Mapping[str, Any]] = None) -> Path:
+                 source_paths: Optional[Mapping[str, Any]] = None,
+                 raw_cache: Optional[Path] = None) -> Path:
     """Write the workspace to *path* atomically (temp file in the same folder, then rename).
 
     A missing ``.gecko`` extension is added. Parent folders are created.
@@ -707,7 +757,8 @@ def save_session(store, path, client_state: Optional[dict] = None, *, project_na
         target = target.with_suffix(EXTENSION)
     if project_name is None and not (getattr(store, 'session_meta', None) or {}).get('project_name'):
         project_name = target.stem
-    parts = _build_parts(store, client_state, project_name, embed_raw, raw_limit_bytes, source_paths)
+    parts = _build_parts(store, client_state, project_name, embed_raw, raw_limit_bytes, source_paths,
+                         raw_cache=Path(raw_cache) if raw_cache is not None else None)
     target.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp_name = tempfile.mkstemp(prefix='.' + target.name + '.', suffix='.tmp', dir=target.parent)
     try:
@@ -753,8 +804,47 @@ def latest_autosave() -> Optional[Path]:
     return max(candidates, key=lambda p: p.stat().st_mtime, default=None)
 
 
-def save_autosave(store, client_state: Optional[dict] = None, *, keep: int = 5, **kwargs) -> Path:
-    """Save to a new ``autosave-<timestamp>.gecko`` and keep only the newest *keep* of them."""
+RAW_CACHE_NAME = 'raw'
+
+
+def raw_cache_dir(create: bool = False) -> Path:
+    """Content-addressed store of original files used by autosaves (``<autosave_dir>/raw/<sha256>``)."""
+    folder = autosave_dir(create=create) / RAW_CACHE_NAME
+    if create:
+        folder.mkdir(parents=True, exist_ok=True)
+    return folder
+
+
+def _prune_raw_cache(folder: Path, keep_files: Sequence[Path]) -> None:
+    """Delete cached originals that no remaining autosave refers to."""
+    cache = folder / RAW_CACHE_NAME
+    if not cache.is_dir():
+        return
+    wanted = set()
+    for path in keep_files:
+        try:
+            info = inspect_session(path)
+        except Exception:  # an unreadable autosave must not make us delete what it might need
+            return
+        wanted.update(f['sha256'] for f in info.files if f.get('sha256'))
+    try:
+        for entry in cache.iterdir():
+            if entry.is_file() and not entry.name.startswith('.') and entry.name not in wanted:
+                entry.unlink()
+    except OSError:
+        pass
+
+
+def save_autosave(store, client_state: Optional[dict] = None, *, keep: int = 5, raw_cache: bool = True,
+                  **kwargs) -> Path:
+    """Save to a new ``autosave-<timestamp>.gecko`` and keep only the newest *keep* of them.
+
+    By default the originals are not embedded: each is written once to ``<autosave_dir>/raw/<sha256>`` and the
+    autosave only references it, so repeated autosaves of a large workspace cost the state files only (the
+    first one also writes the originals). Such a file restores through :func:`restore_session` as long as the
+    cache folder is next to it (or is the default autosave folder). Cached originals no remaining autosave
+    refers to are deleted. ``raw_cache=False`` embeds like :func:`save_session`.
+    """
     folder = autosave_dir()
     stamp = datetime.now().strftime('%Y%m%d-%H%M%S')
     path = folder / f'autosave-{stamp}{EXTENSION}'
@@ -764,6 +854,8 @@ def save_autosave(store, client_state: Optional[dict] = None, *, keep: int = 5, 
         path = folder / f'autosave-{stamp}-{counter}{EXTENSION}'
     if kwargs.get('project_name') is None:
         kwargs['project_name'] = (getattr(store, 'session_meta', None) or {}).get('project_name') or 'Autosave'
+    if raw_cache:
+        kwargs['raw_cache'] = folder / RAW_CACHE_NAME
     written = save_session(store, path, client_state, **kwargs)
     # Autosaves are not "the" project file: do not make future Save default to them.
     meta = getattr(store, 'session_meta', None)
@@ -776,6 +868,8 @@ def save_autosave(store, client_state: Optional[dict] = None, *, keep: int = 5, 
             stale.unlink()
         except OSError:
             pass
+    if raw_cache:
+        _prune_raw_cache(folder, old[:max(keep, 1)])
     return written
 
 
@@ -790,6 +884,11 @@ class _RawResolver:
         self.archive, self.relocate, self.report = archive, relocate, report
         self.entries = {(f['sha256'], f['name']): f for f in manifest.get('files') or []}
         self.dirs = [Path(d).expanduser() for d in search_dirs or ()]
+        self.cache_dirs: List[Path] = []
+        if manifest.get('raw_cache'):
+            if archive.path is not None:
+                self.cache_dirs.append(archive.path.parent / RAW_CACHE_NAME)
+            self.cache_dirs.append(raw_cache_dir(create=False))
         self.cache: Dict[Tuple[str, str], Optional[bytes]] = {}
         self.users: Dict[Tuple[str, str], List[str]] = {}
 
@@ -822,6 +921,17 @@ class _RawResolver:
             return data
         searched: List[str] = []
         mismatched: Optional[Tuple[Path, bytes]] = None
+        for folder in self.cache_dirs:
+            cached = folder / entry['sha256']
+            searched.append(str(cached))
+            try:
+                data = cached.read_bytes()
+            except OSError:
+                continue
+            if _sha256(data) == entry['sha256']:
+                return data
+            if mismatched is None:
+                mismatched = (cached, data)
         for candidate in self._candidates(entry, searched):
             try:
                 data = candidate.read_bytes()

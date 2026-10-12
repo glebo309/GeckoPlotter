@@ -53,6 +53,7 @@ from services.plot_settings_service import DEFAULT_PALETTE, palette_options
 from callbacks.research_export_callbacks import register_research_export_callbacks, register_provenance_capture
 from components.paper_mock import create_paper_mock
 from callbacks.publication_preview_callbacks import register_publication_preview_callbacks
+from components.session_controls import create_session_header_controls, create_session_banner, create_session_support
 
 # App setup
 app = dash.Dash(__name__, suppress_callback_exceptions=True, assets_folder='src/assets', update_title=None)
@@ -232,6 +233,7 @@ _layout_body = html.Div(
         html.Div(id='clear-transient-shapes-output', style={'display': 'none'}),
         html.Div(id='selected-shapes-sync-output', style={'display': 'none'}),
         html.Div(id='dummy-output', style={'display': 'none'}),  # For clientside callbacks
+        create_session_support(),  # project (.gecko) stores, download target, dialogs
 
         html.Div(
             id='main-container',
@@ -257,6 +259,7 @@ _layout_body = html.Div(
                         html.Button('Analysis Plot', id='analysis-mode-btn', style={'display': 'none'}, n_clicks=0),
                         # Hidden Dev View button (kept for callback compatibility)
                         html.Button('Dev View', id='toggle-dev-panel', style={'display': 'none'}),
+                        create_session_header_controls(),
                     ],
                 ),
 
@@ -833,15 +836,6 @@ _layout_body = html.Div(
                                                         html.Button('Export Calibration', id='exp-cal-btn', className='btn btn-secondary',
                                                                     style={'width': '100%', 'marginBottom': '10px'}),
                                                         dcc.Download(id='exp-data-download'),
-                                                        html.Div('Session', className='toolbox-section-title'),
-                                                        html.Button('Save Session', id='exp-session-btn', className='btn btn-secondary',
-                                                                    style={'width': '100%', 'marginBottom': '6px'}),
-                                                        html.Div(id='exp-session-status',
-                                                                 style={'fontSize': '11px', 'color': '#777', 'marginBottom': '6px'}),
-                                                        dcc.Upload(html.Button('Load Session', className='btn btn-secondary',
-                                                                               style={'width': '100%'}),
-                                                                   id='exp-session-upload', style={'width': '100%', 'marginBottom': '6px'}),
-                                                        dcc.Download(id='exp-session-download'),
                                                     ],
                                                 ),
                                             ]),
@@ -950,6 +944,7 @@ _layout_body = html.Div(
                                                     'height':'0px', 'width':'18px', 'borderLeft':'2px dotted #111',
                                                     'zIndex':30, 'pointerEvents':'none', 'cursor':'col-resize'}),
                                                 create_paper_mock(),
+                                                create_session_banner(),
                                             ],
                                         ),
                                     ],
@@ -1859,6 +1854,8 @@ from callbacks.workspace_callbacks import register_workspace_callbacks
 register_workspace_callbacks(app, data_manager)
 from callbacks.ms_polarity_callbacks import register_ms_polarity_callbacks
 register_ms_polarity_callbacks(app, data_manager)
+from callbacks.session_callbacks import register_session_callbacks
+register_session_callbacks(app, data_manager)
 
 # Toolbox tabs (DMC) <-> toolbox-tab store, kept in sync both ways.
 # dmc.Tabs owns the visible panel; the store stays the source of truth for

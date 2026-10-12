@@ -533,3 +533,93 @@ def test_no_temp_files_are_left_behind_by_restore(tmp_path, monkeypatch):
     monkeypatch.setattr('tempfile.tempdir', str(tmp_path))
     ss.restore_session(DataStore(), data)
     assert list(tmp_path.iterdir()) == []
+
+
+# ---------------------------------------------------------------------------
+# Autosave with the content-addressed raw cache
+# ---------------------------------------------------------------------------
+
+def _names(path):
+    with zipfile.ZipFile(path) as archive:
+        return archive.namelist()
+
+
+def test_autosave_references_the_raw_cache_instead_of_embedding(tmp_path, monkeypatch):
+    monkeypatch.setenv('GECKO_AUTOSAVE_DIR', str(tmp_path / 'auto'))
+    store, a, b = synthetic_store()
+    path = ss.save_autosave(store, {'tab': 1})
+    assert not [n for n in _names(path) if n.startswith('raw/')]           # nothing embedded
+    info = ss.inspect_session(path)
+    assert info.raw_cache and not info.raw_embedded
+    cache = tmp_path / 'auto' / 'raw'
+    assert sorted(p.name for p in cache.iterdir()) == sorted({f['sha256'] for f in info.files})
+    fresh = DataStore()
+    report = ss.restore_session(fresh, path)
+    assert report.ok, report.warnings
+    assert report.client_state == {'tab': 1}
+    assert [x.bundle_id for x in fresh.iter_bundles()] == [a.bundle_id, b.bundle_id]
+    assert peaks_of(fresh) == peaks_of(store)
+
+
+def test_second_autosave_does_not_hash_or_write_the_originals_again(tmp_path, monkeypatch):
+    monkeypatch.setenv('GECKO_AUTOSAVE_DIR', str(tmp_path / 'auto'))
+    store, a, b = synthetic_store()
+    ss.save_autosave(store)
+    cache = tmp_path / 'auto' / 'raw'
+    before = {p.name: (p.stat().st_ino, p.stat().st_mtime_ns) for p in cache.iterdir()}
+    raw_ids = {id(c.raw_bytes) for bundle in store.iter_bundles() for c in bundle.component_list if c.raw_bytes}
+    hashed = []
+    real = ss._sha256
+    monkeypatch.setattr(ss, '_sha256', lambda data: (hashed.append(id(data)), real(data))[1])
+    ss.save_autosave(store)
+    assert not raw_ids & set(hashed)                                       # digests remembered on the components
+    assert {p.name: (p.stat().st_ino, p.stat().st_mtime_ns) for p in cache.iterdir()} == before
+
+
+def test_autosave_cache_is_pruned_with_rotation_and_survives_a_moved_folder(tmp_path, monkeypatch):
+    auto = tmp_path / 'auto'
+    monkeypatch.setenv('GECKO_AUTOSAVE_DIR', str(auto))
+    store, a, b = synthetic_store(extra_state=False)
+    first = ss.save_autosave(store, keep=1)
+    os.utime(first, (1_000_000, 1_000_000))
+    both = {p.name for p in (auto / 'raw').iterdir()}
+    assert len(both) == 2
+    store.file_removal_service.remove_all(active_file=None)                # workspace now holds nothing
+    only_b = DataStore()
+    load_files(only_b, [(B_NAME, chromatogram_csv([3.05, 6.1], amplitude=70.0))])
+    second = ss.save_autosave(only_b, keep=1)
+    assert not first.exists()
+    kept = {f['sha256'] for f in ss.inspect_session(second).files}
+    assert {p.name for p in (auto / 'raw').iterdir()} == kept and len(kept) == 1
+    # Copy the folder elsewhere: the cache next to the file is found even though the env var points away.
+    moved = tmp_path / 'moved'
+    moved.mkdir()
+    target = moved / second.name
+    target.write_bytes(second.read_bytes())
+    (moved / 'raw').mkdir()
+    for p in (auto / 'raw').iterdir():
+        (moved / 'raw' / p.name).write_bytes(p.read_bytes())
+    monkeypatch.setenv('GECKO_AUTOSAVE_DIR', str(tmp_path / 'elsewhere'))
+    report = ss.restore_session(DataStore(), target)
+    assert report.ok and report.restored['bundles'] == 1
+
+
+def test_autosave_with_missing_cache_reports_the_missing_file(tmp_path, monkeypatch):
+    auto = tmp_path / 'auto'
+    monkeypatch.setenv('GECKO_AUTOSAVE_DIR', str(auto))
+    store, a, b = synthetic_store(extra_state=False)
+    path = ss.save_autosave(store)
+    for p in (auto / 'raw').iterdir():
+        p.unlink()
+    report = ss.restore_session(DataStore(), path)
+    assert not report.ok and {m['name'] for m in report.missing_files} == {A_NAME, B_NAME}
+
+
+def test_autosave_can_still_embed_and_explicit_save_always_does(tmp_path, monkeypatch):
+    monkeypatch.setenv('GECKO_AUTOSAVE_DIR', str(tmp_path / 'auto'))
+    store, *_ = synthetic_store(extra_state=False)
+    embedded = ss.save_autosave(store, raw_cache=False)
+    assert [n for n in _names(embedded) if n.startswith('raw/')] and not (tmp_path / 'auto' / 'raw').exists()
+    explicit = ss.save_session(store, tmp_path / 'p.gecko')
+    assert [n for n in _names(explicit) if n.startswith('raw/')]
+    assert not ss.inspect_session(explicit).raw_cache

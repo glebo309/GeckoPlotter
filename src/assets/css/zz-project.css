@@ -1,0 +1,55 @@
+/* Project (.gecko) controls: header bar, restore banner, message. Loads after main.css / zz-density.css.
+   Neutral charcoal and grey only. No fit-content / content-sized widths on tables. */
+
+/* ---- Header: name, status, Open, Save ---------------------------------- */
+.session-bar { display:flex; align-items:center; gap:8px; margin-left:14px; flex:0 0 auto; min-width:0; }
+.session-name { background:none; border:1px solid transparent; border-radius:5px; color:rgba(255,255,255,.88);
+  font-size:12px; font-weight:500; line-height:20px; font-family:inherit; padding:1px 8px; max-width:220px; overflow:hidden;
+  text-overflow:ellipsis; white-space:nowrap; cursor:text; }
+.session-name:hover { border-color:rgba(255,255,255,.25); }
+.session-name:focus-visible { outline:2px solid rgba(255,255,255,.7); outline-offset:1px; }
+.session-name-edit { width:200px; height:24px; padding:0 8px; border-radius:5px; border:1px solid rgba(255,255,255,.45);
+  background:#2b2b2e; color:#fff; font-size:12px; font-weight:500; line-height:20px; font-family:inherit; outline:none; }
+.session-status { color:rgba(255,255,255,.5); font-size:11px; white-space:nowrap; min-width:0; overflow:hidden;
+  text-overflow:ellipsis; max-width:190px; }
+.session-btn { height:24px; padding:0 10px; border:1px solid rgba(255,255,255,.25); border-radius:6px; background:transparent;
+  color:rgba(255,255,255,.9); font-size:12px; font-weight:500; line-height:1; font-family:inherit; cursor:pointer; }
+.session-btn:hover { background:rgba(255,255,255,.12); border-color:rgba(255,255,255,.42); }
+.session-btn:focus-visible { outline:2px solid rgba(255,255,255,.7); outline-offset:1px; }
+.session-open-group { position:relative; display:flex; align-items:center; }
+.session-open-upload { display:inline-block; }
+.session-open-upload .session-btn { border-top-right-radius:0; border-bottom-right-radius:0; }
+.session-menu-btn { padding:0 6px; margin-left:-1px; border-top-left-radius:0; border-bottom-left-radius:0; }
+.session-open-group .gecko-menu { top:calc(100% + 6px); right:0; left:auto; min-width:280px; color:#202124; }
+.session-menu-title { padding:4px 12px 2px; font-size:11px; color:#777b80; text-transform:uppercase; letter-spacing:.06em; }
+.session-menu-empty { padding:6px 12px 8px; font-size:12px; color:#8a8e93; }
+.session-recent-list .gecko-menu-item { font-size:13px; }
+
+/* ---- Overlays at the top of the plot area ------------------------------ */
+.session-overlays { position:absolute; top:8px; left:50%; transform:translateX(-50%); z-index:60; display:flex;
+  flex-direction:column; align-items:center; gap:6px; width:max-content; max-width:min(680px, calc(100% - 24px));
+  pointer-events:none; }
+.session-overlays > * { pointer-events:auto; }
+.session-banner, .session-message { background:#2a2a2d; color:#f2f2f3; border-radius:8px;
+  box-shadow:0 4px 16px rgba(0,0,0,.22); font-size:13px; }
+.session-banner[hidden], .session-message[hidden] { display:none; }
+.session-banner { display:flex; align-items:center; gap:10px; padding:7px 8px 7px 14px; }
+.session-banner-text { flex:1 1 auto; min-width:0; }
+.session-banner-btn { height:26px; padding:0 12px; border:1px solid rgba(255,255,255,.28); border-radius:6px; background:transparent;
+  color:#f2f2f3; font-size:12px; font-weight:500; line-height:1; font-family:inherit; cursor:pointer; white-space:nowrap; }
+.session-banner-btn:hover { background:rgba(255,255,255,.12); }
+.session-banner-btn:focus-visible, .session-message-close:focus-visible { outline:2px solid rgba(255,255,255,.7); outline-offset:1px; }
+.session-banner-primary { background:#f2f2f3; color:#1d1d1f; border-color:#f2f2f3; }
+.session-banner-primary:hover { background:#fff; }
+.session-message { padding:8px 10px 8px 14px; max-height:40vh; overflow:auto; }
+.session-message-head { display:flex; align-items:center; gap:10px; justify-content:space-between; }
+.session-message-title { font-weight:600; }
+.session-message-close { border:0; background:none; color:rgba(255,255,255,.7); font-size:18px; line-height:1; cursor:pointer; padding:0 4px; }
+.session-message-close:hover { color:#fff; }
+.session-message-body { font-size:12px; color:rgba(255,255,255,.82); }
+.session-message-list { margin:6px 0 2px; padding-left:18px; }
+
+/* ---- Missing-files dialog ----------------------------------------------- */
+.session-modal-note { font-size:13px; color:#555b62; margin-bottom:8px; }
+.session-missing-list { margin:0 0 12px; padding-left:18px; font-size:13px; max-height:220px; overflow:auto; }
+.session-missing-path { font-size:11px; color:#777b80; word-break:break-all; }
