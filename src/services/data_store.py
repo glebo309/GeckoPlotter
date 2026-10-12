@@ -215,6 +215,11 @@ class DataStore:
         self.collapse_state: Dict[str, str] = {}
         self.lcms_eic_overlays: Dict[str, List[Dict[str, Any]]] = {}
 
+        # Provenance of the loaded workspace when it came from / went to a
+        # .gecko session file (project_name, created_at, path, ...). See
+        # services/session_service.py. Empty for a workspace never saved.
+        self.session_meta: Dict[str, Any] = {}
+
         # Domain services
         from .peak_service import PeakService
         from .calibration_service import CalibrationService
@@ -356,6 +361,94 @@ class DataStore:
         for component in bundle.component_list:
             self._component_index[component.component_id] = bundle.bundle_id
             self._file_index[component.original_filename] = bundle.bundle_id
+
+    def rekey_bundle(self, bundle_id: str, new_bundle_id: Optional[str] = None,
+                     component_ids: Optional[Dict[str, str]] = None) -> Dict[str, str]:
+        """Give a loaded bundle (and/or some of its components) new ids.
+
+        Every index and every id-keyed state map follows the change, so nothing
+        silently detaches: ``_bundles``, ``_component_index``, ``_file_index``
+        (and therefore ``loaded_data``), visibility/collapse/file-UI state,
+        group overrides, LC-MS EIC overlays, peaks and the PDA / source
+        pointers inside component metadata.
+
+        ``component_ids`` maps old component id -> new component id. Returns the
+        complete ``{old_id: new_id}`` mapping that was applied (empty when
+        nothing changed). Raises ``KeyError`` for an unknown bundle and
+        ``ValueError`` for unknown components or ids that are already in use.
+        Used by session restore to give freshly ingested data the ids that the
+        saved analysis refers to.
+        """
+        bundle = self._bundles.get(bundle_id)
+        if bundle is None:
+            raise KeyError(bundle_id)
+        new_bundle_id = new_bundle_id or bundle_id
+        mapping = {old: new for old, new in (component_ids or {}).items() if old != new}
+        own = {c.component_id for c in bundle.component_list}
+        unknown = set(mapping) - own
+        if unknown:
+            raise ValueError(f"Not components of bundle {bundle_id!r}: {sorted(unknown)}")
+        if new_bundle_id != bundle_id:
+            mapping[bundle_id] = new_bundle_id
+        if not mapping:
+            return {}
+        new_ids = list(mapping.values())
+        if len(set(new_ids)) != len(new_ids):
+            raise ValueError("New ids must be unique.")
+        in_use = (set(self._bundles) - {bundle_id}) | {
+            cid for cid, bid in self._component_index.items() if bid != bundle_id}
+        clash = set(new_ids) & in_use
+        if clash:
+            raise ValueError(f"Ids already in use: {sorted(clash)}")
+
+        pointer_keys = ('pda_source_id', 'source_file_id')
+        seen = set()
+        for component in bundle.component_list:
+            for meta in (component.metadata, getattr(component.standardized, 'metadata', None)):
+                if not isinstance(meta, dict) or id(meta) in seen:
+                    continue
+                seen.add(id(meta))
+                for key in pointer_keys:
+                    if meta.get(key) in mapping:
+                        meta[key] = mapping[meta[key]]
+            component.component_id = mapping.get(component.component_id, component.component_id)
+        bundle.bundle_id = new_bundle_id
+
+        self._bundles = {(new_bundle_id if key == bundle_id else key): value
+                         for key, value in self._bundles.items()}
+        for old in [k for k, v in self._component_index.items() if v == bundle_id]:
+            self._component_index.pop(old)
+        for component in bundle.component_list:
+            self._component_index[component.component_id] = new_bundle_id
+        for name, value in list(self._file_index.items()):
+            if value == bundle_id:
+                self._file_index[name] = new_bundle_id
+
+        for attr in ('visibility_state', 'collapse_state', 'lcms_eic_overlays',
+                     'group_overrides', '_dataframe_digests'):
+            current = self.__dict__.get(attr)
+            if current:
+                renamed = {_rekey_key(k, mapping): v for k, v in current.items()}
+                current.clear()
+                current.update(renamed)
+        renamed = {}
+        for key, value in self.file_ui_state.items():
+            new_key = _rekey_key(key, mapping)
+            if isinstance(value, dict) and value.get('file_id') in mapping:
+                value = {**value, 'file_id': mapping[value['file_id']]}
+            renamed[new_key] = value
+        self.file_ui_state.clear()
+        self.file_ui_state.update(renamed)
+        masks = self.__dict__.get('_hidden_sample_channels')
+        if masks:
+            renamed = {_rekey_key(k, mapping): {_rekey_key(s, mapping): v for s, v in inner.items()}
+                       for k, inner in masks.items()}
+            masks.clear()
+            masks.update(renamed)
+        self.peak_service.rekey_files(mapping)
+        for cache in self._render_caches:
+            cache.prune([])
+        return mapping
 
     def remove_bundle(self, bundle_id: str) -> Optional[Bundle]:
         bundle = self._bundles.pop(bundle_id, None)
@@ -784,6 +877,16 @@ class DataStore:
                 ]
             items.append(item)
         return items
+
+
+def _rekey_key(key: Any, mapping: Dict[str, str]) -> Any:
+    """Map an id-keyed state key; ``"<id>|<well>"`` keys follow their id."""
+    if not isinstance(key, str):
+        return key
+    if key in mapping:
+        return mapping[key]
+    head, sep, tail = key.partition('|')
+    return mapping[head] + sep + tail if sep and head in mapping else key
 
 
 class _BundleManagerCompat:

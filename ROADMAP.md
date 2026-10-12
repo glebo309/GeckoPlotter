@@ -22,7 +22,8 @@ The May/June notes below are historical. The current UI and source are ahead of 
 
 ### Still open or deferred
 
-- [ ] Full session save/restore. The current save callback explicitly reports that it is not implemented.
+- [x] Session save/restore **engine** (`.gecko` project files: originals + parameters, ids preserved, schema versions + migrations, large-file relocation, autosave helpers). See docs/SESSION_FORMAT.md, `src/services/session_service.py`.
+- [ ] Session **GUI**: Save / Open buttons, autosave timer, "restore last session?" prompt, missing-file locator, client-state (plot tabs, zoom, ...) capture and re-apply. The old save callback still says it is not implemented; build it on `session_service`.
 - [ ] Named figure styles: Prism Classic, Nature, ACS, Angewandte, Presentation, Dark. Existing paper/slide size presets do not fulfill this style-preset request.
 - [ ] Advanced calibration: weighted regression, internal-standard normalization, LOD/LOQ. Force-through-zero is already implemented.
 - [ ] Clarify the historical "HMS analysis" item. The old roadmap never defines the acronym and no current implementation was found. Do not treat it as a scoped feature until identified.
@@ -36,7 +37,7 @@ The May/June notes below are historical. The current UI and source are ahead of 
 ### Decisions that supersede older proposals
 
 - Keep Fit diagnostics removed; do not reintroduce the old diagnostics table/residual section as unfinished work.
-- Refresh starts a clean workspace. Explicit session saving is a separate future feature.
+- Refresh starts a clean workspace. Explicit session saving (`.gecko`) is separate; the engine exists, the GUI is pending.
 - Pan, zoom-to-region, reset view, and undo/redo toolbar buttons were suggested on October 12; they are proposals, not committed new features. Existing gestures/shortcuts remain available.
 
 ## Current State
@@ -159,7 +160,7 @@ Goal: make it feel like a pro figure-editing tool with contextual controls.
 - Priority: **MEDIUM**
 
 ### Session management
-- Save/recall full sessions (partially wired in export_callbacks)
+- Engine done (2026-10-13): `services/session_service.py`, format in docs/SESSION_FORMAT.md. GUI pending (Save/Open, autosave, restore prompt).
 - Priority: **MEDIUM**
 
 ### Polish & animations

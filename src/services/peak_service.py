@@ -1276,17 +1276,39 @@ class PeakService:
     # ------------------------------------------------------------------
 
     def serialize(self) -> dict:
-        """Serialize all peak data for persistence (JSON-compatible)."""
+        """Serialize all peak data for persistence (JSON-compatible).
+
+        Complete: besides the peaks (incl. deconvolution fields) this carries
+        the colour bookkeeping, the palette and the set of files whose
+        instrument peaks were already imported, so a restored workspace never
+        re-imports them over the saved peaks.
+        """
         return {
             "grouping_window": self._grouping_window,
             "color_index": self._color_index,
             "file_color_index": self._file_color_index,
             "group_colors": self._group_colors,  # nested dict, JSON-safe
+            "imported_files": sorted(self._imported_files),
+            "palette": list(self._palette),
+            "palette_name": self._palette_name,
             "peaks": {
                 fid: [asdict(p) for p in pks]
                 for fid, pks in self._peaks.items()
             },
         }
+
+    _PEAK_TUPLE_FIELDS = ("q1", "q2")
+
+    @classmethod
+    def _peak_from_dict(cls, d: dict) -> "Peak":
+        values = {k: v for k, v in d.items() if k in Peak.__dataclass_fields__}
+        # JSON turns tuples into lists; the in-memory model uses tuples.
+        for key in cls._PEAK_TUPLE_FIELDS:
+            if isinstance(values.get(key), list):
+                values[key] = tuple(values[key])
+        if isinstance(values.get("p_line"), list):
+            values["p_line"] = [tuple(point) for point in values["p_line"]]
+        return Peak(**values)
 
     def deserialize(self, data: dict) -> None:
         """Restore peak data from a previously serialized dict."""
@@ -1300,6 +1322,30 @@ class PeakService:
             self._group_colors = {'': raw_gc}
         else:
             self._group_colors = raw_gc
+        # Absent in data written before these fields existed: keep defaults.
+        if "imported_files" in data:
+            self._imported_files = set(data["imported_files"])
+        if data.get("palette"):
+            self._palette = list(data["palette"])
+        if data.get("palette_name"):
+            self._palette_name = data["palette_name"]
+        self._undo_stack.clear()
+        self._redo_stack.clear()
         self._peaks.clear()
         for fid, peak_dicts in data.get("peaks", {}).items():
-            self._peaks[fid] = [Peak(**d) for d in peak_dicts]
+            self._peaks[fid] = [self._peak_from_dict(d) for d in peak_dicts]
+
+    def rekey_files(self, mapping: Dict[str, str]) -> None:
+        """Move peaks and per-file bookkeeping to new file ids ({old: new})."""
+        if not mapping:
+            return
+        def key(value):
+            return mapping.get(value, value)
+        self._peaks = {key(fid): peaks for fid, peaks in self._peaks.items()}
+        for fid, peaks in self._peaks.items():
+            for peak in peaks:
+                peak.file_id = fid
+        self._imported_files = {key(fid) for fid in self._imported_files}
+        self._file_color_index = {key(fid): index for fid, index in self._file_color_index.items()}
+        self._undo_stack.clear()
+        self._redo_stack.clear()
