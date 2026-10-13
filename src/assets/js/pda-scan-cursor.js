@@ -111,8 +111,13 @@
         send(true); dragging=false; document.body.style.cursor='';
         setTimeout(function () { suppressClick=false; }, 0);
     }
+    // Cheap on purpose: the MutationObserver below fires for every DOM change on the page. Without PDA state there is
+    // nothing to track; once the plot and the heatmap are bound their own plotly events (and resize/scroll) drive
+    // redraws, so a mutation reads no layout and schedules nothing.
     function install() {
+        if (!state) return;
         var gd=root();
+        var bound = gd && gd.__geckoPdaScrub;
         if (gd && !gd.__geckoPdaScrub) {
             gd.__geckoPdaScrub=true;
             gd.addEventListener('mousedown', down, true);
@@ -123,16 +128,24 @@
             if (gd.on) { gd.on('plotly_afterplot', schedule); gd.on('plotly_relayout', onMainRelayout); }
         }
         var h = heatmap();
+        var heatBound = !h || h.__geckoPdaFollow || !h.on;
         if (h && !h.__geckoPdaFollow && h.on) { h.__geckoPdaFollow = true; h.on('plotly_afterplot', schedule); }
+        if (bound && heatBound) return;     // nothing new to attach: no redraw needed
         schedule();
     }
-    window.GeckoPdaScanCursor={sourceId:function(){return state&&state.source_id;}, ownerId:function(){return state&&state.owner_id;}, preview:function(time){previewTime=time;place(time);}, plotRect:plotRect, timeToX:timeToX, xToTime:xToTime, sync:schedule, followMainZoom:followMainZoom,
+    var mutationFrame = 0;
+    // At most one install() per animation frame, however many mutations arrive.
+    function onMutation() {
+        if (mutationFrame) return;
+        mutationFrame = window.requestAnimationFrame(function () { mutationFrame = 0; install(); }) || 1;
+    }
+    window.GeckoPdaScanCursor={install:install, sourceId:function(){return state&&state.source_id;}, ownerId:function(){return state&&state.owner_id;}, preview:function(time){previewTime=time;place(time);}, plotRect:plotRect, timeToX:timeToX, xToTime:xToTime, sync:schedule, followMainZoom:followMainZoom,
         setState:function (value) {
             if (!value || !state || value.owner_id!==state.owner_id || value.source_id!==state.source_id) up();
             if (!state || !value || value.owner_id!==state.owner_id || value.source_id!==state.source_id) followPending = true;
-            state=value; previewTime=null; install();
+            state=value; previewTime=null; install(); schedule();
         }};
-    document.addEventListener('gecko:plot-ready', install);
+    document.addEventListener('gecko:plot-ready', function () { install(); schedule(); });
     document.addEventListener('gecko:plot-leave', function () { up(); var c=overlay(); if(c)c.style.display='none'; });
     document.addEventListener('mousemove', move, true);
     document.addEventListener('touchmove', move, {capture:true, passive:false});
@@ -143,5 +156,5 @@
     window.addEventListener('scroll', schedule, true);
     if(document.readyState==='loading') document.addEventListener('DOMContentLoaded',install);
     else setTimeout(install,250);
-    new MutationObserver(install).observe(document.body,{childList:true,subtree:true});
+    new MutationObserver(onMutation).observe(document.body,{childList:true,subtree:true});
 })();

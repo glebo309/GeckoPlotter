@@ -35,15 +35,39 @@ def register_research_export_callbacks(app, store):
 
 # Rendering and control hydration cannot edit scientific state. Unknown/new
 # callbacks remain captured so adding a feature cannot silently lose its history.
+# record_analysis_state() only looks at signals (names/metadata/roles/data), the plot settings it is handed, file_ui_state,
+# peaks, calibrations and integration settings; a callback may be listed here only when it touches none of those
+# (callbacks that output ``current-plot-settings``, edit peaks/calibration/integration/data stay recorded).
 _READ_ONLY_CALLBACKS = {
     'callbacks.viz_callbacks': {'master_render'},
     'callbacks.pda_callbacks': {'show_pda_tab', 'update_pda_views', 'sync_pda_main_view', 'preview_integration_controls'},
     'callbacks.workspace_callbacks': {'describe_figure', 'analysis_capabilities', 'show_export', 'report_file_action'},
     'callbacks.axis_inspector_callbacks': {'hydrate_axes'},
-    'callbacks.plot_settings_callbacks': {'resolve_plot_context', 'update_panel_visibility'},
-    'callbacks.file_tree_callbacks': {'toggle_bundle_expansion', 'toggle_group_expansion', 'toggle_file_expansion', 'sync_file_tree_selection', 'update_plot_channel_controls'},
+    'callbacks.plot_settings_callbacks': {
+        'resolve_plot_context',
+        'persist_plot_settings',     # writes the browser-side settings cache to disk only
+        'apply_theme_controls',      # fills colour controls; the change itself arrives via user_edit_settings (recorded)
+    },
+    'callbacks.file_tree_callbacks': {
+        'toggle_bundle_expansion', 'toggle_group_expansion', 'toggle_file_expansion', 'sync_file_tree_selection',
+        'update_plot_channel_controls',
+        'update_pda_channel_controls',    # channel checkboxes, display only
+        'toggle_group_sort', 'handle_drag_reorder',   # tree / overlay order (file-order store), not in provenance
+        'handle_visibility_toggles', 'sync_loaded_file_visibility', 'toggle_group_channel',   # visibility_state only
+    },
     'callbacks.integration_callbacks': {'detection_target', 'explain_sensitivity'},
-    'callbacks.lcms_callbacks': {'configure_scan_slider', 'update_mass_spectrum', 'scrub_mass_spectrum', 'update_eic_graph', 'update_eic_list', 'update_peak_mass_selector', 'show_peak_mass', 'peak_mass_polarity_visibility'},
+    'callbacks.lcms_callbacks': {
+        'configure_scan_slider', 'update_mass_spectrum', 'scrub_mass_spectrum', 'update_eic_graph', 'update_eic_list',
+        'update_peak_mass_selector', 'show_peak_mass', 'peak_mass_polarity_visibility',
+        'sync_polarity_toggle', 'sync_client_scan_event',   # toggle / slider mirrors, display only
+    },
+    'callbacks.session_callbacks': {
+        'save_project', 'autosave_project', 'check_last_session',   # write files / banners; the store is only read
+    },
+    'callbacks.tab_callbacks': {
+        'show_peak_table_empty_state', 'cross_calibration_disabled',   # style / disabled flags
+        'update_group_options_on_slider', 'sync_group_selector_to_plot_tab',   # selector options / value
+    },
 }
 
 

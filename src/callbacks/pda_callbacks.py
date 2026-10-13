@@ -1,6 +1,8 @@
 """PDA explorer links measured slices without changing the main plot's viewport."""
 from __future__ import annotations
 
+import math
+
 import dash
 from dash import Input, Output, State, callback_context
 import plotly.graph_objects as go
@@ -58,7 +60,7 @@ def register_pda_callbacks(app, data_manager):
         """Small JSON for the live preview while the heatmap cross is dragged (no Dash round trip)."""
         owner = request.args.get('owner')
         wavelength = request.args.get('wavelength', type=float)
-        if not owner or wavelength is None:
+        if not owner or wavelength is None or not math.isfinite(wavelength):   # also 'inf' / 'nan'
             return jsonify({'samples': []}), 400
         return jsonify({'samples': preview_chromatograms(data_manager, owner, wavelength)})
 

@@ -76,3 +76,15 @@ test('a redraw never changes the heatmap zoom; only a zoom of the main figure do
  window.GeckoPdaScanCursor.sync();
  assert.equal(heat.relayouts.length,1);
 });
+
+test('install() is a no-op once the plot and heatmap are bound, and without PDA state',()=>{
+ const heat={on(){},_fullLayout:{xaxis:{range:[0,10]}}},{window,gd}=setup(heat);
+ let frames=0,rects=0;const raf=window.requestAnimationFrame;
+ window.requestAnimationFrame=f=>{frames++;return raf(f);};
+ const rect=gd.getBoundingClientRect;gd.getBoundingClientRect=()=>{rects++;return rect();};
+ window.GeckoPdaScanCursor.install();window.GeckoPdaScanCursor.install();
+ assert.equal(frames,0);assert.equal(rects,0);
+ window.GeckoPdaScanCursor.setState(null);                 // no state: nothing to track
+ frames=0;rects=0;window.GeckoPdaScanCursor.install();
+ assert.equal(frames,0);assert.equal(rects,0);
+});

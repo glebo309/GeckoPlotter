@@ -76,8 +76,19 @@ class PeakService:
         self._group_colors: Dict[str, Dict[str, str]] = {}
         self._undo_stack: List[Dict[str, List[Peak]]] = []
         self._redo_stack: List[Dict[str, List[Peak]]] = []
-        self._palette: List[str] = list(OKABE_ITO_PALETTE)
+        # Palette and its name must agree from the start (the name is what the plot settings show).
         self._palette_name: str = 'muted'
+        self._palette: List[str] = self._named_palette(self._palette_name)
+
+    @staticmethod
+    def _named_palette(name: str) -> List[str]:
+        """Colours of the plot-settings palette *name* (imported lazily; Okabe-Ito if unknown)."""
+        try:
+            from .plot_settings_service import COLOR_PALETTES
+            colors = COLOR_PALETTES.get(name)
+        except ImportError:
+            colors = None
+        return list(colors or OKABE_ITO_PALETTE)
 
     def _resolve_file_id(self, file_id):
         """Use one peak owner for equivalent bundle/primary-component selections."""
@@ -1300,8 +1311,16 @@ class PeakService:
     _PEAK_TUPLE_FIELDS = ("q1", "q2")
 
     @classmethod
-    def _peak_from_dict(cls, d: dict) -> "Peak":
+    def _peak_from_dict(cls, d: dict, file_id: Optional[str] = None) -> "Peak":
+        if not isinstance(d, dict):
+            raise ValueError(f'a saved peak must be an object, not {type(d).__name__}')
         values = {k: v for k, v in d.items() if k in Peak.__dataclass_fields__}
+        # Tolerate older / hand-edited files: identity fields are filled in. The measured values
+        # (rt, rt_start, rt_end, area, height, width) are never invented: a peak without them is
+        # rejected (TypeError), which restore_session catches in its dry run before touching the workspace.
+        values.setdefault('peak_id', str(uuid.uuid4()))
+        values.setdefault('file_id', file_id or '')
+        values.setdefault('name', '')
         # JSON turns tuples into lists; the in-memory model uses tuples.
         for key in cls._PEAK_TUPLE_FIELDS:
             if isinstance(values.get(key), list):
@@ -1311,7 +1330,12 @@ class PeakService:
         return Peak(**values)
 
     def deserialize(self, data: dict) -> None:
-        """Restore peak data from a previously serialized dict."""
+        """Restore peak data from a previously serialized dict.
+
+        All peaks are parsed first, so malformed data raises before this service is modified.
+        """
+        peaks = {fid: [self._peak_from_dict(d, fid) for d in peak_dicts]
+                 for fid, peak_dicts in data.get("peaks", {}).items()}
         self._grouping_window = data.get("grouping_window")
         self._color_index = data.get("color_index", 0)
         self._file_color_index = data.get("file_color_index", {})
@@ -1329,11 +1353,12 @@ class PeakService:
             self._palette = list(data["palette"])
         if data.get("palette_name"):
             self._palette_name = data["palette_name"]
+            if not data.get("palette"):
+                self._palette = self._named_palette(self._palette_name)
         self._undo_stack.clear()
         self._redo_stack.clear()
         self._peaks.clear()
-        for fid, peak_dicts in data.get("peaks", {}).items():
-            self._peaks[fid] = [self._peak_from_dict(d) for d in peak_dicts]
+        self._peaks.update(peaks)
 
     def rekey_files(self, mapping: Dict[str, str]) -> None:
         """Move peaks and per-file bookkeeping to new file ids ({old: new})."""

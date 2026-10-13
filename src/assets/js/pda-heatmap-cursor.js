@@ -176,9 +176,15 @@
         if (!dragging) return;
         dragging = false; geom = null; send(true); selected = latest; latest = null;
     }
+    // Cheap on purpose: the MutationObserver below fires for every DOM change on the page (Plotly hover layers
+    // mutate constantly). Nothing to do without a heatmap; once a heatmap is bound its own plotly_afterplot /
+    // plotly_relayout events (and resize) drive redraws, so a mutation only matters when the plot or the overlay
+    // is new. No layout is read here.
     function install() {
         var gd = plot();
-        if (gd && !gd.__geckoPdaCross && gd.on) {
+        if (!gd) return;
+        if (gd.__geckoPdaCross && (!selected || (cross && cross.parentNode))) return;
+        if (!gd.__geckoPdaCross && gd.on) {
             gd.__geckoPdaCross = true;
             gd.on('plotly_afterplot', schedule); gd.on('plotly_relayout', schedule);
         }
@@ -189,12 +195,19 @@
         if (!value || dragging) return;
         selected = {time_min: Number(value.time_min), wavelength_nm: Number(value.wavelength_nm)};
         install();
+        schedule();     // the selection moved: place the cross even when the plot was already bound
+    }
+    // At most one install() per animation frame, however many mutations arrive.
+    var mutationFrame = 0;
+    function onMutation() {
+        if (mutationFrame) return;
+        mutationFrame = window.requestAnimationFrame(function () { mutationFrame = 0; install(); }) || 1;
     }
     document.addEventListener('mousedown', down, true);
     document.addEventListener('mousemove', move, true);
     document.addEventListener('mouseup', up, true);
     window.addEventListener('resize', schedule, true);
-    new MutationObserver(install).observe(document.body, {childList: true, subtree: true});
-    window.GeckoPdaHeatmapCursor = {setSelection: setSelection, dataPoint: dataPoint};
+    new MutationObserver(onMutation).observe(document.body, {childList: true, subtree: true});
+    window.GeckoPdaHeatmapCursor = {setSelection: setSelection, dataPoint: dataPoint, install: install};
     if (typeof module !== 'undefined') module.exports = {dataPoint: dataPoint};
 })();

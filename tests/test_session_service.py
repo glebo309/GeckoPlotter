@@ -342,7 +342,8 @@ def test_external_files_missing_then_found_by_relocate_or_search_dir(tmp_path):
     assert b.bundle_id not in partial.visibility_state
 
 
-def test_changed_external_file_is_used_with_a_warning(tmp_path):
+def test_changed_external_file_is_rejected_with_a_warning(tmp_path):
+    """Bytes found by stored path / search must match the manifest SHA-256 (docs/SESSION_FORMAT.md)."""
     store, a, b = synthetic_store(extra_state=False)
     folder = tmp_path / 'raw'
     folder.mkdir()
@@ -350,8 +351,22 @@ def test_changed_external_file_is_used_with_a_warning(tmp_path):
     (folder / B_NAME).write_bytes(chromatogram_csv([3.05, 6.1], amplitude=70.0))
     data = ss.build_session(store, embed_raw=False, source_paths={A_NAME: folder / A_NAME, B_NAME: folder / B_NAME})
     report = ss.restore_session(DataStore(), data)
+    assert report.restored['bundles'] == 1                      # B matches; the changed A is not used
+    assert any(A_NAME in w and 'not used' in w and 'checksum' in w for w in report.warnings)
+    assert [m['name'] for m in report.missing_files] == [A_NAME]
+    assert report.ok is False
+
+
+def test_changed_embedded_copy_is_still_used_with_a_warning():
+    store, *_ = synthetic_store(extra_state=False)
+    data = ss.build_session(store)
+    manifest = json.loads(zipfile.ZipFile(io.BytesIO(data)).read('manifest.json'))
+    path = next(f['path'] for f in manifest['files'] if f['name'] == A_NAME)
+    tampered = rewrite_zip(data, lambda name, content: (chromatogram_csv([3.0, 6.0]) + b'0,0\n'
+                                                       if name == path else content))
+    report = ss.restore_session(DataStore(), tampered)
     assert report.restored['bundles'] == 2
-    assert any(A_NAME in w and 'checksum' in w for w in report.warnings)
+    assert any(A_NAME in w and 'used anyway' in w for w in report.warnings)
 
 
 def test_raw_limit_switches_to_references_only():

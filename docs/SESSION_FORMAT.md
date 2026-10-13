@@ -18,7 +18,12 @@ same calibrations, same names, same figure settings. It is also the state an AI 
    state in the browser). Restore re-ingests, then re-keys the fresh objects to the *saved* ids, so nothing
    detaches (see "ID remapping").
 3. **Replace, never merge.** `restore_session` empties the workspace (in place: callbacks keep their service
-   objects) and rebuilds it from the file.
+   objects) and rebuilds it from the file. Before that, the saved peaks, calibrations, integration settings and
+   section types are dry-run on throwaway objects, so a damaged state is rejected (`SessionFormatError`) while the
+   live workspace is untouched. After the reset nothing raises: a failure is recorded in `report.errors`
+   (`ok=False`) and the previous workspace is rebuilt from an in-memory snapshot (`report.rolled_back`) when its
+   originals total at most `ROLLBACK_MAX_BYTES` (100 MB); above that the partial result stays and the report says
+   so. `report.workspace_replaced` tells the GUI the store changed, so it rebuilds every output from the store.
 4. **Never crash on partial data.** Missing originals, parser differences and hash mismatches are reported in the
    `SessionReport`; everything else is restored.
 
@@ -103,8 +108,22 @@ for GUI/agent use.
   its sub-folders; the session file's own folder (and its sub-folders); finally `relocate(file_entry) -> path|None`
   (`file_entry` = the manifest dict: name, size, sha256, original_path). Candidates with a matching SHA-256
   win. The tree is never walked recursively.
-* SHA-256 is **always verified** (embedded and external). A mismatch is a warning ("changed or damaged") and the
-  data is used anyway.
+* SHA-256 is **always verified**, and what a mismatch means depends on where the bytes come from:
+  * **Embedded in the archive** (or the FAIR package the project sits in): the session's own data. A mismatch is a
+    warning ("changed or damaged ... used anyway") and the bytes are used.
+  * **Outside the archive** (the raw cache, the stored `original_path`, `search_dirs`, `relocate()`): a mismatch is
+    a warning ("... was not used") and the file is **rejected**, so the sample is reported as missing. The session
+    file is untrusted input; a crafted `original_path` must never make the app ingest an arbitrary file. A stored
+    size that differs from the candidate's size is rejected without reading it. Relocating originals by stored
+    path is still supported: the file just has to be the one that was saved.
+  * Every `sha256` read from a manifest or `state.json` must be exactly 64 lowercase hex characters
+    (`^[0-9a-f]{64}$`); anything else (`../../x`, an absolute path, upper case) is ignored with a warning, because
+    the digest is joined onto the raw-cache folder.
+* **Size caps** (zip-bomb guard, checked against the ZIP directory before anything is inflated):
+  `state.json`, `manifest.json`, `client_state.json` at most 64 MB each; a raw member at most its manifest `size`
+  plus max(1 %, 1 MB) (without a declared size: the overall cap); 4 GB in total per session. A refused member is a
+  `SessionFormatError` (state/manifest) or an entry in `report.errors` (an original). The Open upload also sets
+  `max_size` to 2 GB.
 * Still missing: listed in `report.missing_files` (name, size, sha256, original_path, searched, bundles). The
   samples that depended on it are not restored, their ids are in `report.missing_ids`, and saved state that
   belongs only to them (peaks, visibility, file UI state) is dropped. Everything else is restored.

@@ -47,6 +47,10 @@ SCHEMA_VERSION = 1
 FORMAT_NAME = 'geckoplotter-session'
 EXTENSION = '.gecko'
 DEFAULT_RAW_LIMIT_BYTES = 400_000_000
+#: Decompression caps (zip-bomb guard), checked against ``ZipInfo.file_size`` before anything is inflated.
+MAX_JSON_BYTES = 64 * 1024 * 1024          # state.json, manifest.json, client_state.json (and tables)
+MAX_TOTAL_BYTES = 4 * 1024 ** 3            # everything read from one session
+RAW_SLACK_BYTES = 1_000_000                # a raw member may exceed its declared size by max(1 %, this)
 
 MANIFEST_NAME = 'manifest.json'
 STATE_NAME = 'state.json'
@@ -119,6 +123,8 @@ class SessionReport:
     info: SessionInfo = field(default_factory=SessionInfo)
     restored: Dict[str, int] = field(default_factory=dict)
     id_map: Dict[str, str] = field(default_factory=dict)  # only entries where saved id != final id
+    workspace_replaced: bool = False   # the store's workspace was reset (it no longer is what it was before)
+    rolled_back: bool = False          # opening failed midway and the previous workspace was put back
 
 
 # ----------------------------------------------------------------------------
@@ -131,6 +137,18 @@ def _now() -> str:
 
 def _sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
+
+
+_SHA256_RE = re.compile(r'[0-9a-f]{64}')
+
+
+def _valid_sha256(value) -> bool:
+    """True only for a lowercase 64-hex SHA-256 string.
+
+    Every digest read from a session file is untrusted: it is used as a dict key and joined onto the raw-cache
+    folder, so ``../../x`` or an absolute path must never pass.
+    """
+    return isinstance(value, str) and _SHA256_RE.fullmatch(value) is not None
 
 
 def _json_default(value):
@@ -346,6 +364,7 @@ class _Archive:
         self.size: Optional[int] = None
         self.package: Optional[zipfile.ZipFile] = None   # the outer zip when opened through a FAIR package
         self.package_names: set = set()
+        self._total_read = 0
         try:
             if isinstance(data_or_path, (bytes, bytearray, memoryview)):
                 data = bytes(data_or_path)
@@ -383,6 +402,10 @@ class _Archive:
                 'This ZIP has file names that point outside the package (absolute or ".." paths), so it was not '
                 f'opened: {unsafe[0]!r}.')
         try:
+            if outer.getinfo(PACKAGE_SESSION).file_size > MAX_TOTAL_BYTES:
+                raise SessionFormatError(
+                    f'The project file inside this FAIR package expands to more than '
+                    f'{MAX_TOTAL_BYTES // 1_000_000_000} GB; it was not opened.')
             inner = outer.read(PACKAGE_SESSION)
             self.zip = zipfile.ZipFile(io.BytesIO(inner))
         except (zipfile.BadZipFile, zlib.error, KeyError) as exc:
@@ -405,17 +428,64 @@ class _Archive:
     def has(self, name: str) -> bool:
         return name in self._names
 
-    def read(self, name: str) -> bytes:
+    def _size_of(self, archive: zipfile.ZipFile, name: str) -> int:
         try:
+            return archive.getinfo(name).file_size
+        except KeyError as exc:
+            raise SessionFormatError(f'The session file is incomplete (missing {name}).') from exc
+
+    def _check_total(self, size: int, name: str) -> None:
+        """Count decompressed bytes handed out; refuses a session that expands beyond MAX_TOTAL_BYTES."""
+        self._total_read += size
+        if self._total_read > MAX_TOTAL_BYTES:
+            raise SessionFormatError(
+                f'The session file expands to more than {MAX_TOTAL_BYTES // 1_000_000_000} GB ({name}); '
+                f'it was not opened.')
+
+    def read(self, name: str, *, max_size: Optional[int] = None) -> bytes:
+        """Read one member, refusing it (before decompressing) when it is larger than ``max_size``.
+
+        Default cap: ``MAX_JSON_BYTES`` (state, manifest, client state and tables are JSON/CSV).
+        """
+        limit = MAX_JSON_BYTES if max_size is None else max_size
+        try:
+            size = self._size_of(self.zip, name)
+            if size > limit:
+                raise SessionFormatError(
+                    f'The session file is not safe to open: {name} expands to {size} bytes '
+                    f'(limit {limit}).')
+            self._check_total(size, name)
             return self.zip.read(name)
         except KeyError as exc:
             raise SessionFormatError(f'The session file is incomplete (missing {name}).') from exc
         except (zipfile.BadZipFile, zlib.error) as exc:
             raise SessionFormatError(f'The session file is damaged ({name}).') from exc
 
+    @staticmethod
+    def _raw_limit(declared) -> int:
+        """Raw originals: the manifest's declared size plus 1 % or 1 MB (whichever is larger), else the total cap."""
+        if isinstance(declared, int) and not isinstance(declared, bool) and declared >= 0:
+            return declared + max(declared // 100, RAW_SLACK_BYTES)
+        return MAX_TOTAL_BYTES
+
+    def read_raw(self, name: str, declared_size=None) -> bytes:
+        return self.read(name, max_size=self._raw_limit(declared_size))
+
+    def read_package_member(self, name: str, declared_size=None) -> bytes:
+        """One original stored next to the project inside a FAIR package (same size policy as ``read_raw``)."""
+        size = self._size_of(self.package, name)
+        limit = self._raw_limit(declared_size)
+        if size > limit:
+            raise SessionFormatError(
+                f'The package is not safe to open: {name} expands to {size} bytes (limit {limit}).')
+        self._check_total(size, name)
+        return self.package.read(name)
+
     def read_json(self, name: str):
         try:
             return json.loads(self.read(name).decode('utf-8'))
+        except SessionFormatError:
+            raise
         except (ValueError, UnicodeDecodeError) as exc:
             raise SessionFormatError(f'The session file is damaged ({name} is not valid).') from exc
 
@@ -924,7 +994,14 @@ class _RawResolver:
 
     def __init__(self, archive: _Archive, manifest: dict, search_dirs: Iterable, relocate, report: SessionReport):
         self.archive, self.relocate, self.report = archive, relocate, report
-        self.entries = {(f['sha256'], f['name']): f for f in manifest.get('files') or []}
+        self.entries = {}
+        for f in manifest.get('files') or []:
+            if not isinstance(f, dict) or not _valid_sha256(f.get('sha256')) or not isinstance(f.get('name'), str):
+                report.warnings.append(
+                    f"Ignored a file entry in the session manifest with an invalid checksum "
+                    f"({str(f.get('sha256') if isinstance(f, dict) else f)[:80]!r}).")
+                continue
+            self.entries[(f['sha256'], f['name'])] = f
         self.dirs = [Path(d).expanduser() for d in search_dirs or ()]
         self.cache_dirs: List[Path] = []
         if manifest.get('raw_cache'):
@@ -935,15 +1012,30 @@ class _RawResolver:
         self.users: Dict[Tuple[str, str], List[str]] = {}
 
     def get(self, sha: str, name: str, bundle_name: str) -> Optional[bytes]:
+        if not isinstance(sha, str):
+            sha = str(sha)
         key = (sha, name)
         self.users.setdefault(key, [])
         if bundle_name not in self.users[key]:
             self.users[key].append(bundle_name)
         if key in self.cache:
             return self.cache[key]
+        if not _valid_sha256(sha):
+            self.report.warnings.append(
+                f"{name}: the session refers to this file with an invalid checksum ({str(sha)[:80]!r}); "
+                f"it was not read.")
+            self.report.missing_files.append({
+                'name': name, 'size': None, 'sha256': sha,
+                'original_path': None, 'searched': [], 'bundles': self.users.get(key, [])})
+            self.cache[key] = None
+            return None
         entry = self.entries.get(key) or {'name': name, 'sha256': sha, 'size': None, 'embedded': False,
                                           'path': None, 'original_path': None}
-        data = self._find(entry)
+        try:
+            data = self._find(entry)
+        except SessionFormatError as exc:     # oversize or damaged member: not fatal for the other files
+            self.report.errors.append(f'{name}: {exc}')
+            data = None
         self.cache[key] = data
         return data
 
@@ -956,25 +1048,34 @@ class _RawResolver:
                 f"from when the session was saved.")
         return ok
 
+    def _reject(self, entry: dict, origin) -> None:
+        self.report.warnings.append(
+            f"{entry['name']}: {origin} does not match the checksum stored in the session (it changed, is "
+            f"damaged, or is a different file), so it was not used.")
+
     def _find(self, entry: dict) -> Optional[bytes]:
+        # Bytes that travel inside the archive itself are the session's own data: a checksum mismatch is
+        # reported but they are used. Bytes found outside (cache, stored path, search folders, relocate())
+        # must match the stored SHA-256, otherwise they are rejected (docs/SESSION_FORMAT.md).
+        if not _valid_sha256(entry.get('sha256')):
+            return None
         if entry.get('embedded') and entry.get('path') and self.archive.has(entry['path']):
-            data = self.archive.read(entry['path'])
+            data = self.archive.read_raw(entry['path'], entry.get('size'))
             self._verify(data, entry, 'embedded copy')
             return data
         searched: List[str] = []
-        mismatched: Optional[Tuple[Path, bytes]] = None
         member = entry.get('original_path')
         if self.archive.package is not None and member in self.archive.package_names:
             # FAIR package: the original sits next to the project inside the same ZIP.
             try:
-                data = self.archive.package.read(member)
+                data = self.archive.read_package_member(member, entry.get('size'))
             except (KeyError, zipfile.BadZipFile, zlib.error):
                 data = None
             if data is not None:
                 self._verify(data, entry, f'package file {member}')
                 return data
         for folder in self.cache_dirs:
-            cached = folder / entry['sha256']
+            cached = folder / entry['sha256']      # sha256 was validated as 64 hex characters above
             searched.append(str(cached))
             try:
                 data = cached.read_bytes()
@@ -982,20 +1083,19 @@ class _RawResolver:
                 continue
             if _sha256(data) == entry['sha256']:
                 return data
-            if mismatched is None:
-                mismatched = (cached, data)
+            self._reject(entry, f'the cached copy {cached}')
+        declared = entry.get('size')
         for candidate in self._candidates(entry, searched):
             try:
+                if isinstance(declared, int) and candidate.stat().st_size != declared:
+                    self._reject(entry, f'the file {candidate} (size differs from the stored size)')
+                    continue
                 data = candidate.read_bytes()
             except OSError:
                 continue
             if _sha256(data) == entry['sha256']:
                 return data
-            if mismatched is None:
-                mismatched = (candidate, data)
-        if mismatched is not None:
-            self._verify(mismatched[1], entry, str(mismatched[0]))
-            return mismatched[1]
+            self._reject(entry, f'the file {candidate}')
         self.report.missing_files.append({
             'name': entry['name'], 'size': entry.get('size'), 'sha256': entry['sha256'],
             'original_path': entry.get('original_path'), 'searched': searched,
@@ -1110,7 +1210,7 @@ def _apply_saved_component(component, saved: dict, archive: _Archive, report: Se
     frame = component.dataframe
     if saved.get('edited') and saved.get('table'):
         try:
-            data = archive.read(saved['table'])
+            data = archive.read(saved['table'], max_size=MAX_TOTAL_BYTES)
             frame = _read_table(data, saved.get('dtypes') or {})
             if csv_bytes(frame) != data:
                 report.warnings.append(f'{label}: the edited table could not be reproduced bit-for-bit.')
@@ -1208,7 +1308,7 @@ def _install_frame_bundle(store, saved: dict, archive: _Archive, resolver: _RawR
     for saved_component in saved['components']:
         frame = None
         if saved_component.get('table'):
-            frame = _read_table(archive.read(saved_component['table']), saved_component.get('dtypes') or {})
+            frame = _read_table(archive.read(saved_component['table'], max_size=MAX_TOTAL_BYTES), saved_component.get('dtypes') or {})
         roles = _roles_from_saved(saved_component.get('column_roles'),
                                   frame.columns if frame is not None else []) or {}
         category = types.SourceCategory(saved_component.get('source_category') or 'generic')
@@ -1360,16 +1460,94 @@ def _install_ingested_bundle(store, saved: dict, archive: _Archive, resolver: _R
     return bundle
 
 
+#: Above this many bytes of originals the previous workspace is not snapshotted before an Open (a rollback
+#: would need to rebuild it); a failed Open then keeps whatever restored cleanly and reports the error.
+ROLLBACK_MAX_BYTES = 100_000_000
+
+_DICT_SECTIONS = ('visibility_state', 'collapse_state', 'file_ui_state', 'shared_plot_settings', 'group_overrides',
+                  'hidden_sample_channels', 'channel_combine_modes', 'analysis_plot_settings',
+                  'analysis_previous', 'peaks', 'calibrations', 'integration_settings', 'lcms_eic_overlays')
+
+
+def _validate_state(state: dict) -> None:
+    """Dry run of everything ``_apply_state`` will do, on throwaway objects.
+
+    Raises ``SessionFormatError`` for a state that cannot be applied, so ``restore_session`` rejects it while the
+    user's workspace is still untouched.
+    """
+    from .calibration_service import CalibrationService
+    from .integration_service import IntegrationService
+    from .peak_service import PeakService
+
+    def bad(what, exc=None):
+        detail = f' ({type(exc).__name__}: {exc})' if exc is not None else ''
+        return SessionFormatError(f'The session file is damaged: its saved {what} cannot be read{detail}. '
+                                  f'Your current workspace was not changed.')
+
+    for key in _DICT_SECTIONS:
+        value = state.get(key)
+        if value is not None and not isinstance(value, dict):
+            raise bad(key.replace('_', ' '))
+    history = state.get('analysis_history')
+    if history is not None and not isinstance(history, list):
+        raise bad('analysis history')
+    bundles = state.get('bundles')
+    if bundles is not None and not isinstance(bundles, list):
+        raise bad('sample list')
+    for saved in bundles or []:
+        if (not isinstance(saved, dict) or not isinstance(saved.get('bundle_id'), str)
+                or not isinstance(saved.get('components'), list)
+                or not all(isinstance(c, dict) and isinstance(c.get('component_id'), str)
+                           for c in saved['components'])):
+            raise bad('sample list')
+    for key, service, label in (('peaks', PeakService, 'peaks'), ('calibrations', CalibrationService, 'calibrations'),
+                                ('integration_settings', IntegrationService, 'integration settings')):
+        try:
+            service().deserialize(state.get(key) or {})
+        except Exception as exc:
+            raise bad(label, exc) from exc
+    for file_id, overlays in (state.get('lcms_eic_overlays') or {}).items():
+        if not isinstance(overlays, list) or not all(isinstance(o, dict) for o in overlays):
+            raise bad('LC-MS overlays')
+    try:
+        for value in (state.get('group_overrides') or {}).values():
+            tuple(value) if isinstance(value, list) else value
+    except Exception as exc:
+        raise bad('group overrides', exc) from exc
+
+
+def _snapshot_workspace(store) -> Optional[bytes]:
+    """The current workspace as ``.gecko`` bytes (in memory) for rollback, or None when empty or too large."""
+    try:
+        bundles = list(store.iter_bundles())
+        if not bundles:
+            return None
+        raw_bytes = sum(len(c.raw_bytes or b'') for b in bundles for c in b.component_list)
+        if raw_bytes > ROLLBACK_MAX_BYTES:
+            return None
+        return build_session(store, None, embed_raw=True, raw_limit_bytes=ROLLBACK_MAX_BYTES)
+    except Exception:
+        log.exception('Could not snapshot the workspace before opening a session')
+        return None
+
+
 def restore_session(store, data_or_path, *, search_dirs: Iterable = (),
                     relocate: Optional[Callable[[dict], Any]] = None) -> SessionReport:
     """Replace the workspace of *store* with the saved session.
 
     The file is read and validated before anything is touched, so a bad or
     too-new file raises (``SessionFormatError`` / ``SessionVersionError``,
-    messages are user-readable) and leaves the current workspace intact.
+    messages are user-readable) and leaves the current workspace intact. That
+    includes a dry run of the saved peaks, calibrations and settings.
     Afterwards ``store.reset_workspace()`` empties the workspace in place (the
     service objects callbacks hold stay the same) and every original is
     re-ingested, re-keyed to its saved id, and the saved decisions are applied.
+
+    Nothing after the reset raises: an unexpected failure is recorded in
+    ``report.errors`` (``ok=False``) and the previous workspace is put back from
+    an in-memory snapshot (``report.rolled_back``) when it was small enough to
+    take one; otherwise whatever restored cleanly stays.
+    ``report.workspace_replaced`` tells callers that the store changed.
 
     Missing external originals are looked up at the stored path, in
     ``search_dirs`` (plus the session file's own folder), then via
@@ -1378,75 +1556,123 @@ def restore_session(store, data_or_path, *, search_dirs: Iterable = (),
     are *not* re-imported: the saved peaks are authoritative. The GUI-layer
     ``client_state`` comes back in ``report.client_state``.
     """
+    return _restore_session(store, data_or_path, search_dirs=search_dirs, relocate=relocate, allow_rollback=True)
+
+
+def _restore_session(store, data_or_path, *, search_dirs, relocate, allow_rollback: bool) -> SessionReport:
     with _Archive(data_or_path) as archive:
         session = _load_session(archive)
         manifest, state = session['manifest'], session['state']
+        _validate_state(state)
         report = SessionReport(info=_info_from_manifest(manifest, archive))
         dirs = list(search_dirs or ())
         if archive.path is not None:
             dirs.append(archive.path.parent)
         resolver = _RawResolver(archive, manifest, dirs, relocate, report)
 
-        # Phase 1 happens inside the installers, but everything that can reject
-        # the file outright (format, version, JSON) has already run above.
+        # Everything that can reject the file outright (format, version, JSON, state shape) has run above.
+        snapshot = _snapshot_workspace(store) if allow_rollback else None
+        previous_meta = dict(getattr(store, 'session_meta', None) or {})
         store.reset_workspace()
-        idmap: Dict[str, str] = {}
-        remap = lambda obj: remap_ids(obj, idmap) if any(k != v for k, v in idmap.items()) else obj  # noqa: E731
-        missing_ids: set = set()
-        restored_bundles = restored_components = edited = 0
-
-        for saved in state.get('bundles') or []:
-            try:
-                bundle = (_install_frame_bundle(store, saved, archive, resolver, report)
-                          if saved.get('recipe') == 'frame'
-                          else _install_ingested_bundle(store, saved, archive, resolver, report, idmap, remap))
-            except Exception as exc:
-                log.exception('Could not restore %s', saved.get('name'))
-                report.errors.append(f"{saved.get('name')}: could not be restored ({exc}).")
-                bundle = None
-            saved_ids = [saved['bundle_id']] + [c['component_id'] for c in saved['components']]
-            if bundle is None:
-                missing_ids.update(saved_ids)
-                continue
-            idmap.setdefault(saved['bundle_id'], bundle.bundle_id)
-            present = {c.component_id for c in bundle.component_list}
-            for component_id in (c['component_id'] for c in saved['components']):
-                if idmap.get(component_id, component_id) not in present:
-                    missing_ids.add(component_id)
-            restored_bundles += 1
-            restored_components += len(bundle.component_list)
-            edited += sum(1 for c in saved['components'] if c.get('edited'))
-        for entry in report.missing_files:
-            entry['bundles'] = resolver.users.get((entry['sha256'], entry['name']), entry.get('bundles', []))
-            report.warnings.append(
-                f"Original file not found: {entry['name']} (used by {', '.join(entry['bundles']) or '?'}). "
-                f"Locate it and restore again.")
-        missing_ids.update(report.missing_ids)
-        report.missing_ids = sorted(missing_ids)
-        report.id_map = {k: v for k, v in idmap.items() if k != v}
-
-        # Saved user state, with ids remapped if any id could not be kept.
-        state = remap(state)
-        _prune_state(state, missing_ids)
-        _apply_state(store, state, report)
-
-        client_state = remap(session.get('client_state') or {})
-        report.client_state = client_state
-        meta = {'project_name': manifest.get('project_name') or '', 'created_at': manifest.get('created_at'),
-                'saved_at': manifest.get('saved_at')}
-        if archive.path is not None and archive.package is None:   # a package is a deposit, not "the project file"
-            meta['path'] = str(archive.path)
-        store.session_meta = meta
-        for cache in getattr(store, '_render_caches', []):
-            cache.prune([])
-        report.restored = {
-            'bundles': restored_bundles, 'components': restored_components,
-            'peaks': sum(len(p) for p in store.peak_service._peaks.values()),
-            'calibrations': len(store.calibration_service.get_all_models()),
-            'edited_tables': edited,
-        }
-        report.ok = not report.errors and not report.missing_files
+        report.workspace_replaced = True
+        try:
+            _install_session(store, archive, session, report, resolver)
+        except Exception as exc:
+            log.exception('Restoring the session failed after the workspace was reset')
+            report.ok = False
+            report.client_state = {}
+            report.errors.append(f'The session could not be fully restored ({type(exc).__name__}: {exc}).')
+            if snapshot is not None:
+                try:
+                    _restore_session(store, snapshot, search_dirs=(), relocate=None, allow_rollback=False)
+                    store.session_meta = previous_meta
+                    report.rolled_back = True
+                    report.errors.append('Your previous workspace was put back unchanged.')
+                    report.restored = {}
+                except Exception:
+                    log.exception('Rollback of the previous workspace failed')
+                    report.errors.append('Putting the previous workspace back also failed; '
+                                         'what could be restored from the session is shown.')
+            else:
+                report.errors.append('What could be restored from the session is shown; the previous '
+                                     'workspace could not be put back (too large to keep a copy).')
+            if not report.rolled_back:
+                report.restored = _restored_counts(store, report.restored)
         return report
+
+
+def _restored_counts(store, previous: Optional[dict] = None) -> Dict[str, int]:
+    counts = dict(previous or {})
+    try:
+        bundles = list(store.iter_bundles())
+        counts['bundles'] = len(bundles)
+        counts['components'] = sum(len(b.component_list) for b in bundles)
+        counts['peaks'] = sum(len(p) for p in store.peak_service._peaks.values())
+        counts['calibrations'] = len(store.calibration_service.get_all_models())
+    except Exception:
+        pass
+    return counts
+
+
+def _install_session(store, archive: _Archive, session: dict, report: SessionReport,
+                     resolver: _RawResolver) -> None:
+    manifest, state = session['manifest'], session['state']
+    idmap: Dict[str, str] = {}
+    remap = lambda obj: remap_ids(obj, idmap) if any(k != v for k, v in idmap.items()) else obj  # noqa: E731
+    missing_ids: set = set()
+    restored_bundles = restored_components = edited = 0
+
+    for saved in state.get('bundles') or []:
+        try:
+            bundle = (_install_frame_bundle(store, saved, archive, resolver, report)
+                      if saved.get('recipe') == 'frame'
+                      else _install_ingested_bundle(store, saved, archive, resolver, report, idmap, remap))
+        except Exception as exc:
+            log.exception('Could not restore %s', saved.get('name'))
+            report.errors.append(f"{saved.get('name')}: could not be restored ({exc}).")
+            bundle = None
+        saved_ids = [saved['bundle_id']] + [c['component_id'] for c in saved['components']]
+        if bundle is None:
+            missing_ids.update(saved_ids)
+            continue
+        idmap.setdefault(saved['bundle_id'], bundle.bundle_id)
+        present = {c.component_id for c in bundle.component_list}
+        for component_id in (c['component_id'] for c in saved['components']):
+            if idmap.get(component_id, component_id) not in present:
+                missing_ids.add(component_id)
+        restored_bundles += 1
+        restored_components += len(bundle.component_list)
+        edited += sum(1 for c in saved['components'] if c.get('edited'))
+    for entry in report.missing_files:
+        entry['bundles'] = resolver.users.get((entry['sha256'], entry['name']), entry.get('bundles', []))
+        report.warnings.append(
+            f"Original file not found: {entry['name']} (used by {', '.join(entry['bundles']) or '?'}). "
+            f"Locate it and restore again.")
+    missing_ids.update(report.missing_ids)
+    report.missing_ids = sorted(missing_ids)
+    report.id_map = {k: v for k, v in idmap.items() if k != v}
+
+    # Saved user state, with ids remapped if any id could not be kept.
+    state = remap(state)
+    _prune_state(state, missing_ids)
+    _apply_state(store, state, report)
+
+    client_state = remap(session.get('client_state') or {})
+    report.client_state = client_state
+    meta = {'project_name': manifest.get('project_name') or '', 'created_at': manifest.get('created_at'),
+            'saved_at': manifest.get('saved_at')}
+    if archive.path is not None and archive.package is None:   # a package is a deposit, not "the project file"
+        meta['path'] = str(archive.path)
+    store.session_meta = meta
+    for cache in getattr(store, '_render_caches', []):
+        cache.prune([])
+    report.restored = {
+        'bundles': restored_bundles, 'components': restored_components,
+        'peaks': sum(len(p) for p in store.peak_service._peaks.values()),
+        'calibrations': len(store.calibration_service.get_all_models()),
+        'edited_tables': edited,
+    }
+    report.ok = not report.errors and not report.missing_files
 
 
 def _apply_state(store, state: dict, report: SessionReport) -> None:

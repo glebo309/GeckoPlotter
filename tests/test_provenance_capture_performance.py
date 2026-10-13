@@ -60,3 +60,45 @@ def test_pattern_outputs_do_not_skip_provenance_capture(monkeypatch):
             'changedPropIds': ['edit-peak.data']}):
         capture(response)
     assert record.call_count == 1
+
+
+import ast
+from pathlib import Path
+import pytest
+
+SKIPPED = [('toggle_group_sort', 'callbacks.file_tree_callbacks'), ('handle_drag_reorder', 'callbacks.file_tree_callbacks'),
+           ('handle_visibility_toggles', 'callbacks.file_tree_callbacks'),
+           ('check_last_session', 'callbacks.session_callbacks'), ('autosave_project', 'callbacks.session_callbacks'),
+           ('show_peak_table_empty_state', 'callbacks.tab_callbacks'),
+           ('persist_plot_settings', 'callbacks.plot_settings_callbacks'),
+           ('sync_polarity_toggle', 'callbacks.lcms_callbacks')]
+
+
+@pytest.mark.parametrize('name,module', SKIPPED)
+def test_display_only_callbacks_do_not_rescan_scientific_state(monkeypatch, name, module):
+    server, record, capture = capture_app(monkeypatch, name, module)
+    with server.test_request_context('/_dash-update-component', method='POST', json={
+            'output': 'target', 'outputs': {'id': 'x', 'property': 'y'}, 'changedPropIds': ['x.y']}):
+        capture(Response('{}', mimetype='application/json'))
+    record.assert_not_called()
+
+
+@pytest.mark.parametrize('name,module', [('delete_peak_table_rows', 'callbacks.tab_callbacks'),
+                                         ('update_peak_analysis_tab', 'callbacks.tab_callbacks'),
+                                         ('hydrate_plot_settings', 'callbacks.plot_settings_callbacks'),
+                                         ('open_project', 'callbacks.session_callbacks'),
+                                         ('rename_dataset', 'callbacks.file_tree_callbacks')])
+def test_state_changing_callbacks_are_still_recorded(monkeypatch, name, module):
+    server, record, capture = capture_app(monkeypatch, name, module)
+    with server.test_request_context('/_dash-update-component', method='POST', json={
+            'output': 'target', 'outputs': {'id': 'x', 'property': 'y'}, 'changedPropIds': ['x.y']}):
+        capture(Response('{}', mimetype='application/json'))
+    assert record.call_count == 1
+
+
+def test_every_allowlisted_name_exists_in_its_module():
+    root = Path(callbacks.__file__).parent
+    for module, names in callbacks._READ_ONLY_CALLBACKS.items():
+        tree = ast.parse((root / (module.split('.')[-1] + '.py')).read_text())
+        defined = {n.name for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)}
+        assert names <= defined, (module, names - defined)

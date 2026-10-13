@@ -251,6 +251,8 @@ def register_session_callbacks(app, data_manager) -> None:
             return _failure_outputs('Could not open this file', f'Unexpected error: {exc}', 'Could not open the file')
         if new_source.get('upload'):
             data_manager.session_meta.pop('path', None)        # a temp copy is not "the project file"
+        # Whenever the store changed (even if the report is not ok) every output is rebuilt from it, so the
+        # browser never shows a tree that disagrees with the server.
         return _restore_outputs(report, new_source, render_counter)
 
     def _restore_outputs(report, source, render_counter):
@@ -260,7 +262,8 @@ def register_session_callbacks(app, data_manager) -> None:
         from services.data_store import BundleType
 
         restored = report.restored.get('bundles', 0) > 0
-        cs = dict(report.client_state or {}) if restored else {}
+        rolled_back = bool(getattr(report, 'rolled_back', False))
+        cs = dict(report.client_state or {}) if restored and not rolled_back else {}
         files = data_manager.get_loaded_files_list()
         name = (report.info.project_name or '').strip()
         name = '' if name == 'Autosave' else name
@@ -299,29 +302,35 @@ def register_session_callbacks(app, data_manager) -> None:
         }
         for key, cid, prop, default in _RESTORE_OUTPUTS:
             value = cs.get(key, default)
-            values[f'{cid}.{prop}'] = no_update if value is _KEEP else value
+            # A rolled-back Open put the previous workspace back: the browser's own state still matches it.
+            values[f'{cid}.{prop}'] = no_update if value is _KEEP or rolled_back else value
 
         warnings = list(report.errors) + [w for w in report.warnings if not w.startswith('Original file not found')]
         late = ({'active_plot_tab': cs.get('active-plot-tab'), 'plot_settings_cache': cs.get('plot-settings-cache') or None,
                  'ts': int(time.time() * 1000)} if restored else None)
-        if not restored:
+        if rolled_back:
+            title, body = 'Could not open this project', _notes(warnings)
+        elif not restored:
             title, body = 'Nothing could be restored', _notes(warnings or ['The project contains no samples.'])
         elif warnings:
             title, body = f"Opened with {sf.plural(len(warnings), 'note')}", _notes(warnings)
         else:
             title, body = '', ''
-        needs_files = bool(report.missing_files)
+        needs_files = bool(report.missing_files) and not rolled_back
         if not needs_files:
             sf.forget_stash(source)
         values.update({
             'session-name.data': name, 'session-dirty.data': False, 'session-stamp.data': _stamp('opened'),
             'session-source.data': source if needs_files else None,
             'session-restore-late.data': late, 'session-banner.hidden': True,
-            'session-message.hidden': not (warnings or not restored),
+            'session-message.hidden': not (warnings or not restored or rolled_back),
             'session-message-title.children': title, 'session-message-body.children': body,
             'session-missing-modal.opened': needs_files,
             'session-missing-list.children': missing_items(report.missing_files) if needs_files else [],
         })
+        if rolled_back:   # the project that is open is still the previous one, unchanged
+            values.update({'session-name.data': no_update, 'session-dirty.data': no_update,
+                           'session-stamp.data': _stamp('failed', message='Could not open the file')})
         return _ordered_open_outputs(values)
 
     # -------------------------------------------------------------- Autosave

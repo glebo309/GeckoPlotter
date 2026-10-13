@@ -50,7 +50,16 @@ def extract_pda_views(pda, wavelength_nm=None, time_min=None):
 
     Wavelengths are reported as integers; time is the exact measured value."""
     time, wavelength, intensity = _arrays(pda)
-    requested_wavelength = float(round(float(wavelength_nm))) if wavelength_nm is not None else 254.
+    if wavelength_nm is None:
+        requested_wavelength = 254.
+    else:
+        try:
+            requested = float(wavelength_nm)
+            if not np.isfinite(requested):
+                raise ValueError('The wavelength must be a finite number.')
+            requested_wavelength = float(round(requested))
+        except OverflowError as exc:      # round(inf) and friends
+            raise ValueError('The wavelength must be a finite number.') from exc
     wi = int(np.argmin(abs(wavelength - requested_wavelength)))
     if time_min is None:
         column = intensity[:, wi]

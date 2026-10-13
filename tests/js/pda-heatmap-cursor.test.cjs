@@ -146,3 +146,46 @@ test('a wavelength requested while a fetch is in flight is fetched next, even af
   assert.equal(t.fetched.length, 2);
   assert.notEqual(t.fetched[0], t.fetched[1]);
 });
+
+// ---- the page-wide MutationObserver must stay cheap ---------------------------------------------------------------
+test('install() is a no-op once the heatmap is bound and its overlay exists; mutations are coalesced per frame', () => {
+  let rects = 0, frames = 0, bindings = 0, observed = null;
+  const frameQueue = [];
+  const axis = (len, off, d2p, p2d) => ({_length: len, _offset: off, d2p, p2d});
+  const gd = {
+    _fullLayout: {xaxis: axis(200, 40, t => t * 50, v => v / 50), yaxis: axis(100, 10, w => w, v => v)},
+    getBoundingClientRect: () => { rects++; return {left: 100, top: 50}; },
+    closest: () => view, on() { bindings++; }};
+  const view = {getBoundingClientRect: () => { rects++; return {left: 90, top: 40}; }, appendChild() {}};
+  const host = {contains: () => true, querySelector: () => gd};
+  const document = {addEventListener() {}, getElementById: () => host,
+    createElement: () => ({style: {}, set innerHTML(v) { this.firstChild = {style: {}}; this.lastChild = {style: {}}; }, parentNode: view})};
+  const window = {addEventListener() {}, requestAnimationFrame: f => { frames++; frameQueue.push(f); return frames; },
+    dash_clientside: {set_props() {}}};
+  vm.runInNewContext(fs.readFileSync('src/assets/js/pda-heatmap-cursor.js', 'utf8'),
+    {document, window, MutationObserver: class { constructor(cb) { observed = cb; } observe() {} }, Date});
+  const flush = () => { while (frameQueue.length) frameQueue.shift()(); };
+  const api = window.GeckoPdaHeatmapCursor;
+  api.setSelection({time_min: 1, wavelength_nm: 250});     // binds the plot, creates the overlay, places the cross
+  flush();
+  assert.equal(bindings, 2);                               // plotly_afterplot + plotly_relayout, once
+  const framesBefore = frames, rectsBefore = rects;
+  api.install(); api.install();                            // bound + overlay present: nothing to do
+  assert.equal(frames, framesBefore);
+  assert.equal(rects, rectsBefore);
+  assert.equal(bindings, 2);
+  for (let i = 0; i < 50; i++) observed();                 // 50 DOM mutations in one frame ...
+  assert.equal(frameQueue.length, 1);                      // ... queue a single install()
+  flush();
+  assert.equal(frames, framesBefore + 1);                  // and that install() scheduled no redraw
+  assert.equal(rects, rectsBefore);
+});
+
+test('install() without a heatmap in the DOM does nothing', () => {
+  let frames = 0;
+  const window = {addEventListener() {}, requestAnimationFrame: () => { frames++; return 1; }, dash_clientside: {set_props() {}}};
+  vm.runInNewContext(fs.readFileSync('src/assets/js/pda-heatmap-cursor.js', 'utf8'),
+    {document: {addEventListener() {}, getElementById: () => null}, window, MutationObserver: class { observe() {} }, Date});
+  window.GeckoPdaHeatmapCursor.install();
+  assert.equal(frames, 0);
+});

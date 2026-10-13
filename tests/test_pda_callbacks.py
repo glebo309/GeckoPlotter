@@ -222,3 +222,23 @@ def test_dragging_the_cross_updates_the_spectrum_without_redrawing_the_heatmap(m
     ctx = {'source_id': 'source', 'wavelength_nm': 220., 'time_min': .5, 'heatmap_ready': True, 'colormap': 'Viridis'}
     out = invoke(fns['update_pda_views'], context=ctx, heat_event={'time_min': .6, 'wavelength_nm': 275.})
     assert out[0] is dash.no_update and out[1].data
+
+
+@pytest.mark.parametrize('value', ['inf', '-inf', 'nan', '1e999'])
+def test_preview_endpoint_rejects_non_finite_wavelengths_with_400(value):
+    from flask import Flask
+    server = Flask(__name__)
+    app = App()
+    app.server = server
+    pda_callbacks.register_pda_callbacks(app, setup())
+    client = server.test_client()
+    assert client.get(f'/_pda/chromatograms?owner=bundle&wavelength={value}').status_code == 400
+    assert client.get('/_pda/chromatograms?owner=bundle&wavelength=220').status_code == 200
+
+
+@pytest.mark.parametrize('value', [float('inf'), float('-inf'), float('nan')])
+def test_extract_pda_views_raises_value_error_for_non_finite_wavelength(value):
+    from services.pda_service import extract_pda_views, resolve_pda_source
+    _, pda = resolve_pda_source(setup(), 'source')
+    with pytest.raises(ValueError):
+        extract_pda_views(pda, value)

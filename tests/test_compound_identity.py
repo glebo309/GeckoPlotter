@@ -7,7 +7,7 @@ import numpy as np
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..'))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', 'src'))
 
-from services.peak_service import PeakService, OKABE_ITO_PALETTE
+from services.peak_service import PeakService
 
 
 @pytest.fixture
@@ -105,11 +105,11 @@ class TestCompoundGrouping:
         assert p2.color == color_before
 
     def test_first_grouping_preserves_imported_peak_colors(self, ps):
-        p1 = _add_imported_peak(ps, 'file_a', 5.0, OKABE_ITO_PALETTE[0])
-        p2 = _add_imported_peak(ps, 'file_a', 7.0, OKABE_ITO_PALETTE[1])
+        p1 = _add_imported_peak(ps, 'file_a', 5.0, ps._palette[0])
+        p2 = _add_imported_peak(ps, 'file_a', 7.0, ps._palette[1])
         imported_colors = {p1.peak_id: p1.color, p2.peak_id: p2.color}
 
-        _add_imported_peak(ps, 'file_a', 3.0, OKABE_ITO_PALETTE[2])
+        _add_imported_peak(ps, 'file_a', 3.0, ps._palette[2])
         ps.group_peaks_across_samples()
 
         assert p1.color == imported_colors[p1.peak_id]
@@ -135,7 +135,7 @@ class TestCompoundGrouping:
         groups = ps.group_peaks_across_samples()
         assert len(groups) == 1
         assert p.group_id is not None
-        assert p.color in OKABE_ITO_PALETTE
+        assert p.color in ps._palette
 
     def test_window_parameter_respected(self, ps):
         p1 = _add_peak(ps, 'file_a', 5.0)
@@ -168,9 +168,9 @@ def test_new_peak_matches_nearest_existing_compound_without_recoloring(ps):
 
 
 def test_new_compounds_do_not_restart_palette_for_each_file(ps):
-    a = _add_imported_peak(ps, 'a', 7.3, OKABE_ITO_PALETTE[0])
+    a = _add_imported_peak(ps, 'a', 7.3, ps._palette[0])
     ps.group_peaks_across_samples()
-    b = _add_imported_peak(ps, 'b', 2.0, OKABE_ITO_PALETTE[0])
+    b = _add_imported_peak(ps, 'b', 2.0, ps._palette[0])
     ps.group_peaks_across_samples()
     assert a.color != b.color
     original = a.color

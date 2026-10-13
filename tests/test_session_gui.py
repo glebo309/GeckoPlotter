@@ -207,6 +207,46 @@ def test_open_rejects_a_bad_file_and_leaves_the_workspace_alone(monkeypatch):
     assert len(list(busy.iter_bundles())) == 2
 
 
+def test_open_failing_after_the_reset_rolls_back_and_rebuilds_every_output_from_the_store(monkeypatch):
+    _, a, b, data = saved_project()
+    busy = DataStore()
+    (other,) = load_files(busy, [('other.csv', chromatogram_csv([2.0]))])
+    fns = callbacks(busy)
+    real, calls = ss._apply_state, []
+
+    def flaky(*args, **kwargs):
+        calls.append(1)
+        if len(calls) == 1:
+            raise RuntimeError('boom')
+        return real(*args, **kwargs)
+    monkeypatch.setattr(ss, '_apply_state', flaky)
+    trigger(monkeypatch, 'session-open-upload.contents')
+    out = fns['open_project'](upload_of(data), None, None, None, None, 'p.gecko', None, None, None, 0)
+    assert [x.bundle_id for x in busy.iter_bundles()] == [other.bundle_id]          # previous workspace is back
+    assert result_for(out, 'loaded-files.data') == busy.get_loaded_files_list()      # outputs rebuilt from the store
+    assert result_for(out, 'file-tree.children') is not dash.no_update
+    assert result_for(out, 'session-message.hidden') is False
+    assert 'boom' in str(result_for(out, 'session-message-body.children'))
+    assert result_for(out, 'session-stamp.data')['kind'] == 'failed'
+    assert result_for(out, 'session-name.data') is dash.no_update
+
+
+def test_open_failing_after_the_reset_without_a_snapshot_still_rebuilds_from_the_store(monkeypatch):
+    _, a, b, data = saved_project()
+    busy = DataStore()
+    load_files(busy, [('other.csv', chromatogram_csv([2.0]))])
+    fns = callbacks(busy)
+    monkeypatch.setattr(ss, 'ROLLBACK_MAX_BYTES', 0)
+    monkeypatch.setattr(ss, '_apply_state', lambda *a, **k: (_ for _ in ()).throw(RuntimeError('boom')))
+    trigger(monkeypatch, 'session-open-upload.contents')
+    out = fns['open_project'](upload_of(data), None, None, None, None, 'p.gecko', None, None, None, 0)
+    assert {x.bundle_id for x in busy.iter_bundles()} == {a.bundle_id, b.bundle_id}
+    assert result_for(out, 'loaded-files.data') == busy.get_loaded_files_list()
+    assert len(result_for(out, 'loaded-files.data')) == 2
+    assert result_for(out, 'file-tree.children') is not dash.no_update
+    assert result_for(out, 'session-message.hidden') is False
+
+
 def test_missing_originals_open_the_locate_dialog_and_retry_finds_them(monkeypatch, tmp_path):
     store, a, b = stored_workspace()
     data = ss.build_session(store, {'active-plot-tab': 'tab-chromatogram_time'}, project_name='Big', embed_raw=False)

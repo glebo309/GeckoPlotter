@@ -9,6 +9,7 @@ import dash_mantine_components as dmc
 from components.popup_menu import popup_menu, menu_item, menu_divider
 
 DEFAULT_NAME = 'Untitled project'
+MAX_OPEN_BYTES = 2 * 1024 ** 3   # dcc.Upload max_size for a project file
 
 
 def create_session_header_controls():
@@ -23,6 +24,7 @@ def create_session_header_controls():
             html.Div(className='session-open-group', children=[
                 dcc.Upload(
                     id='session-open-upload', accept='.gecko,.zip', multiple=False, className='session-open-upload',
+                    max_size=MAX_OPEN_BYTES,   # refuse absurd uploads in the browser (2 GB)
                     children=html.Button('Open', id='session-open-btn', type='button', className='session-btn',
                                          title='Open a project (.gecko file, or a FAIR package .zip made by GeckoPlotter) - Cmd/Ctrl+O')),
                 html.Button('▾', id='session-open-menu-btn', type='button', className='session-btn session-menu-btn',
