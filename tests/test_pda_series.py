@@ -179,3 +179,13 @@ def test_owner_given_as_sample_id_still_previews_every_sample():
     fig = plotted(store, 's0-uv')
     _apply_pda_main_preview(fig, store, {'owner_id': 's0', 'source_id': 's0-uv', 'wavelength_nm': 220.})
     assert {t.meta['pda_source_id'] for t in preview_traces(fig)} == {'s0-uv', 's1-uv', 's2-uv'}
+
+
+def test_a_wavelength_the_instrument_already_exports_reuses_that_channel_instead_of_adding_a_duplicate():
+    store = series_store()
+    channel = store.get_bundle('a').component_list[0]
+    channel.metadata.update(detector_channel='Ch2', wavelength_nm=219.6)
+    before = len(store.get_bundle('a').component_list)
+    assert pda.add_pda_chromatogram(store, 'a-extra', 220.) == channel.component_id
+    assert len(store.get_bundle('a').component_list) == before
+    assert pda.add_pda_chromatogram(store, 'a-extra', 200.) != channel.component_id      # a new wavelength still adds one

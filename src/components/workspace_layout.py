@@ -122,11 +122,20 @@ def arrange_workspace(root):
                     **{'aria-label':{'smooth-value':'Smoothing window','spacing-value':'Subplot spacing percent','opacity-value':'Opacity percent'}[number_id]},
                     className='slider-exact-value')]
                 break
-    # Keep deconvolution with the other peak creation/editing tools. Matching
-    # and display preferences come after the analysis actions.
+    # Keep deconvolution with the other peak creation/editing tools, then the recipe; matching and display
+    # preferences come after the analysis actions. Sections are found by class, never by position.
     integration = nodes['integration-container']
     parts = list(integration.children)
-    integration.children = [*parts[:4], parts[5], parts[4]]
+
+    def has_class(part, name):
+        return name in str(getattr(part, 'className', '') or '').split()
+
+    ordered = [p for p in parts if not any(has_class(p, c) for c in ('integration-deconv', 'integration-recipe',
+                                                                      'integration-display'))]
+    for name in ('integration-deconv', 'integration-recipe', 'integration-display'):
+        ordered += [p for p in parts if has_class(p, name)]
+    assert len(ordered) == len(parts), 'a section of the Integration inspector was lost while arranging it'
+    integration.children = ordered
     # Hide diagnostic reset from the everyday workspace.
     nodes['clear-cache-btn'].style={'display':'none'}
     status_bar = next(n for n in walk(root) if getattr(n, 'className', '') == 'status-bar')

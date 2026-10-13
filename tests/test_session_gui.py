@@ -487,3 +487,28 @@ def test_every_component_the_project_callbacks_use_exists_and_no_slow_mantine_ty
     assert layout_facts['count'] >= 12
     assert not {'Menu', 'MenuDropdown', 'MenuItem', 'MenuTarget', 'MenuDivider', 'Tooltip'} & set(layout_facts['types'])
     assert 'Modal' in layout_facts['types']
+
+
+def test_integration_inspector_keeps_every_section_in_order():
+    script = r'''
+import json, sys
+sys.path.insert(0, 'src'); sys.path.insert(0, '.')
+import app
+nodes = {}
+def walk(n):
+    yield n
+    for c in (getattr(n, 'children', None) if isinstance(getattr(n, 'children', None), (list, tuple)) else [getattr(n, 'children', None)]):
+        if hasattr(c, 'to_plotly_json'):
+            yield from walk(c)
+ids = {n.id for n in walk(app._layout_body) if isinstance(getattr(n, 'id', None), str)}
+box = next(n for n in walk(app._layout_body) if getattr(n, 'id', None) == 'integration-container')
+print(json.dumps({'classes': [str(getattr(c, 'className', '')) for c in box.children],
+                  'ids': [i for i in ('deconv-btn', 'deconv-results-container', 'deconv-accept-btn', 'deconv-cancel-btn',
+                                      'recipe-save-btn', 'recipe-apply-upload', 'int-display-opts') if i in ids]}))
+'''
+    out = subprocess.run([sys.executable, '-B', '-c', script], capture_output=True, text=True, check=True,
+                         cwd=str(Path(__file__).resolve().parents[1])).stdout
+    facts = json.loads(out.strip().splitlines()[-1])
+    classes = [c.split()[-1] if c else '' for c in facts['classes']]
+    assert classes.index('integration-deconv') < classes.index('integration-recipe') < classes.index('integration-display')
+    assert len(facts['ids']) == 7                       # nothing the callbacks write to is missing

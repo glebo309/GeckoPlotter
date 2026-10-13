@@ -146,6 +146,14 @@ def add_pda_chromatogram(store, file_id, wavelength_nm):
         if meta.get('pda_source_id') == source_id and meta.get('pda_extracted') and meta.get('wavelength_nm') == actual:
             store.visibility_state[component.component_id] = True
             return component.component_id
+    # The instrument already exported this wavelength as a channel (Ch2 263 nm): use that signal instead of adding
+    # a second, nearly identical trace of the same sample.
+    for component in bundle.component_list:
+        meta = component.metadata or {}
+        if (meta.get('detector_channel') and not meta.get('pda_extracted') and meta.get('wavelength_nm') is not None
+                and round(float(meta['wavelength_nm'])) == round(actual)):
+            store.visibility_state[component.component_id] = True
+            return component.component_id
     source = store.get_data_by_id(source_id)
     component_id = str(uuid4())
     metadata = {'sample_name': source['metadata'].get('sample_name', bundle.name),

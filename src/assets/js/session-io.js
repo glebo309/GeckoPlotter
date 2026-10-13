@@ -276,6 +276,7 @@
         if (e.stopImmediatePropagation) e.stopImmediatePropagation();
     }
     function onDrop(e) {
+        if (e.defaultPrevented) return;   // global-drop-zone.js took it: it reaches the upload input and onFileInput below
         var file = sessionFileIn(e.dataTransfer && e.dataTransfer.files);
         if (!file) return;
         if (guardOpen(function () { openFile(file); })) { swallow(e); return; }   // the dropzone never sees it
