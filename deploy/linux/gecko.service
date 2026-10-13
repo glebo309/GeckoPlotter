@@ -1,0 +1,17 @@
+[Unit]
+Description=GeckoPlotter
+After=network.target
+
+[Service]
+User=gecko
+WorkingDirectory=/opt/gecko
+Environment=GECKO_AUTOSAVE_DIR=/var/lib/gecko/autosave
+Environment=PYTHONUNBUFFERED=1
+# One worker on purpose: every browser's workspace lives in this process's memory.
+# Threads let several people work at once; the long timeout covers big .lcd uploads.
+ExecStart=/opt/gecko/.venv/bin/gunicorn "app:app.server" --workers 1 --threads 8 --timeout 300 --bind 0.0.0.0:8052
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=multi-user.target

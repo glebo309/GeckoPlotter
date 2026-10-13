@@ -2175,8 +2175,8 @@ clientside_callback(
 if __name__ == '__main__':
     log.info("Starting GeckoPlotter V2...")
     log.info("Upload TXT chromatograms or CSV UV-Vis files to get started!")
-    # Fast and safe by default. GECKO_HOST=0.0.0.0 serves the local network (the app keeps one workspace per
-    # process, so everyone who opens it shares it). GECKO_DEBUG=1 is for development only: it makes the browser run
+    # Fast and safe by default. GECKO_HOST=0.0.0.0 serves the local network (each browser gets its own workspace,
+    # kept in this process's memory, so run a single copy). GECKO_DEBUG=1 is for development only: it makes the browser run
     # Dash's slow development build, polls the server for file changes and exposes the Werkzeug debugger.
     app.run(host=os.environ.get('GECKO_HOST', '127.0.0.1'), port=int(os.environ.get('GECKO_PORT', '8052')),
             debug=os.environ.get('GECKO_DEBUG', '0') == '1')
