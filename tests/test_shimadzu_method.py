@@ -206,3 +206,15 @@ def test_gradient_at_the_column_inlet_is_shifted_by_dwell_volume_over_flow():
     sm.add_gradient_overlay(figure, store, entries, dwell_volume_ul=715)
     assert [round(x, 2) for x in figure.data[0].x] == [1.04, 2.04]            # 0.715 mL / 0.9 mL/min = 0.79 min
     assert figure.data[0].name == 'LC gradient at the column inlet (% B)'
+
+
+def test_runs_with_the_same_gradient_draw_one_line():
+    import plotly.graph_objects as go
+    store = _Store()
+    first = {**LCM_METHOD, 'file_name': 'a.lcd', 'run_identity': {'generated_utc': '2026-10-12T10:00:00+00:00', 'modified_utc': '2026-10-12T10:05:00+00:00'}}
+    second = {**first, 'file_name': 'b.lcd', 'run_identity': {'generated_utc': '2026-10-12T11:00:00+00:00', 'modified_utc': '2026-10-12T11:05:00+00:00'}}
+    sm.register_method(store, first)
+    sm.register_method(store, second)
+    entries = [('a', {'metadata': {'method_key': sm.method_key(first)}}), ('b', {'metadata': {'method_key': sm.method_key(second)}})]
+    figure = go.Figure()
+    assert sm.add_gradient_overlay(figure, store, entries) == 1 and len(figure.data) == 1

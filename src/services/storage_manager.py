@@ -27,7 +27,7 @@ from src.ingestion import ingest_file
 log = logging.getLogger(__name__)
 
 TEXT_EXTENSIONS = {"txt", "csv", "tsv", "log", "json", "xml", "cdf", "cdfx"}
-BINARY_EXTENSIONS = {"cdf", "cdfx", "cdf.vwd", "raw", "dat", "bin"}
+BINARY_EXTENSIONS = {"cdf", "cdfx", "cdf.vwd", "raw", "dat", "bin", "lcd"}
 IMAGE_EXTENSIONS = {"png", "jpg", "jpeg", "svg"}
 
 def _decode_content(contents: str) -> bytes:

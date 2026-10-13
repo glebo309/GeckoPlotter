@@ -1,49 +1,42 @@
-# Shimadzu LabSolutions .lcd: raw PDA data (work in progress)
+# Shimadzu LabSolutions .lcd (raw data file)
 
-Status 2026-10-13: the container and most of the PDA frame codec are understood; the raw matrix is **not** yet
-readable end to end, so nothing in the app reads signal from an `.lcd`. Only the method is read (see
-`src/services/shimadzu_method.py`). Needed to finish: one `.lcd` and the text export of the **same injection**
-(the export holds the full 3D matrix as ground truth).
+Status 2026-10-13: **read in full** by `src/services/lcd_reader.py` and ingested by `src/ingestion/presets/shimadzu_lcd.py`.
+Verified against the ASCII exports of the same injections: for all 7 alanine calibration runs every one of the 8401 spectra
+(412 points each) is identical to the export's `[PDA 3D]` matrix, the exported channels reproduce to the last digit, and the
+sample record matches. All 39 `.lcd` files on the group share (3, 7 and 10 min runs) open.
 
-Reference file used: `BZ-AMINE-STANDR2.lcd` (no export available).
+Not read yet: LabSolutions' own peak tables (`LSS Data Processing/PT-PDA.1.1.PDA.1.<n>`), the MS data of LC-MS runs.
 
-## Container
-
-OLE2 compound file (`olefile`). Streams that matter:
+An `.lcd` is an OLE2 compound file (`olefile`). What is where:
 
 | Stream | Content |
 |---|---|
-| `PDA 3D Raw Data/3D Raw Data` | the matrix, 7201 frames (spectra), see below |
-| `PDA 3D Raw Data/3D Data Item` | XML: `CN` spectra count (7201), `ECN` 412 wavelengths, `ELE/DT` the 412 wavelengths as little-endian float64 in 0.01 nm (188.88, 190.18 ... 700.91; the spacing is not uniform), `WVB`/`WVE` 190/700 nm, units: raw = **uAU** (`VF` 1), mAU = 1000 uAU, AU = 1e6 |
-| `PDA 3D Raw Data/Status` | int32: 1, 7201, 19000, 70000, 0, 180000 (ms), 25 (ms interval) |
-| `LSS Raw Data/StatusLog Ch*`, `Max Plot` | same `RC` frame family (status traces, max-absorbance plot), compressed |
-| `GUMM_Information/.../*.METHOD` | the method as run (already read) |
+| `PDA 3D Raw Data/3D Raw Data` | the matrix, one frame per spectrum |
+| `PDA 3D Raw Data/3D Data Item` | XML: `CN` spectra, `ELE/DT` the wavelengths (float64, hundredths of nm, not uniformly spaced), `WVB`/`WVE` scan range; the raw unit is micro-AU (mAU = raw / 1000) |
+| `PDA 3D Raw Data/Status` | int32: 1, spectra, 19000, 70000, 0, run length in ms, interval in ms |
+| `LSS Data Processing/SD-PDA.1.1.PDA.1.<n>` | existence = channel n is exported; `Multi Chromato Table` int32 record n (8 ints from index 4): wavelength in hundredths of nm, `flags & 0xFF` = bandwidth |
+| `LSS Raw Data/StatusLog Ch<n>` and `2D Data Item` | pump pressure, temperatures: frames like the PDA ones, factor `CF`, unit factor `VF` (bar = kgf/cm2 / VF), names by `DSID` |
+| `File Property` | XML: `SampleInfo` (hex-coded text: name, type, vial, level, operator; amounts; acquired), `SampleInfoFile` (data, method and batch paths), created and saved times |
+| `GUMM_Information/*` | the instrument method as run (`shimadzu_method.py`), `<IN>` instrument name |
 
-## Frame layout (`3D Raw Data`)
+## Frame codec
 
-The stream is a plain concatenation of frames, each starting `52 43 00 00` ("RC"):
+A stream is a plain concatenation of frames:
 
 ```
-int32 magic 0x4352 | int32 1 | int32 412 | int32 frame_length | 8 zero bytes | payload | 1 trailer byte (0 or 1)
+int32 0x4352 'RC' | int32 1 | int32 n_values | int32 frame_length | 8 zero bytes
+group A: uint16 L | L bytes of tokens | uint16 L          (the first 256 values)
+group B: uint16 L | L bytes of tokens | uint16 L          (the remaining n_values - 256)
 ```
 
-Frames 0 and 1 are all zero (412 zero bytes). The frame lengths add up exactly to the stream size.
+Every group is a running sum of signed deltas that starts at zero. A token is a prefix code on the top three bits of its
+first byte: `000` 1 byte (5 signed bits), `001` 2 bytes (13 bits), `010` 3 bytes (21 bits), `011` 4 bytes (29 bits).
+Status traces use the same groups (one group while there are at most 256 readings, two above), with a 24-byte header.
 
-Payload (understood):
-- `uint16 LE` reference value, then **256 delta tokens**, giving 257 values along the wavelength axis.
-- Token = prefix code by the top 3 bits of the first byte: `0x00-0x1f` 1 byte, 5-bit signed; `0x20-0x3f` 2 bytes, 13-bit signed;
-  `0x40-0x5f` 3 bytes, 21-bit signed; `0x60-0x7f` 4 bytes, 29-bit signed.
-- Then the same `uint16` reference value again, then 158 or 159 more tokens; the **last token repeats the first one of this second
-  group** in every frame checked (frames 888, 2000, 5070).
+Channel chromatograms are not stored: they are the mean of the spectrum columns within wavelength +/- bandwidth, rounded
+half up. The text export repeats the first status reading of a short trace; the reader does the same so both agree.
 
-What supports the decoding: the value at wavelength index 25 across all frames gives a real chromatogram (a strong peak at
-0.37 min, a second at 2.1 min, a rising gradient baseline), values in uAU.
+## How it was found
 
-## Open questions
-
-1. How the second group maps to wavelengths 257..411 (155 values) and what the extra 3-4 tokens and the repeated first token are
-   (a step, a correction, or a check value). With 412 expected values, 257 + 155 = 412 only if the extras are not data.
-2. The meaning of the reference value (equal in both groups).
-3. Whether the first value after the reference is the 188.88 nm point (it behaves like a very large first delta).
-
-All three are settled by comparing the decoded frames with the `[PDA 3D]` section of the text export of the same run.
+Frame lengths add up exactly to the stream size; the first and second frame are all zero; the delta prefix code was the
+only reading under which every frame ends exactly where it declares; then the decoded matrix was compared with the export.

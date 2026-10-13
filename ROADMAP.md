@@ -24,7 +24,7 @@ The May/June notes below are historical. The current UI and source are ahead of 
 
 ### Still open or deferred
 
-- [ ] Read the raw signal inside an .lcd so it can be opened without the text export. Container and most of the frame codec decoded (docs/LCD_FORMAT_NOTES.md); finishing needs one .lcd plus the text export of the same injection as ground truth.
+- [x] .lcd files open directly in GeckoPlotter (PDA 3D matrix, channels, sample record, pump/temperature traces, method), identical to the ASCII export; docs/LCD_FORMAT_NOTES.md. Still to read: LabSolutions' own peak tables, LC-MS data.
 - [ ] Show more of the method: autosampler program, PDA lamp/slit/response, the integration parameters LabSolutions applied, the method audit trail.
 - [ ] Compare GeckoPlotter integration with LabSolutions' own peak tables (already in the export).
 - [x] Recipes: save integration settings, named compound windows and calibrations, apply them to a new batch (docs/RECIPES.md). Not yet: shoulder splits, figure settings, recipes inside a project file.

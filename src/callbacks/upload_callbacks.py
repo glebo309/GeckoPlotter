@@ -217,6 +217,11 @@ def register_upload_callbacks(app: dash.Dash, data_manager) -> None:
                 return (dash.no_update,) * 9
 
             new_bundles = assign_bundles(parsed_files)
+            # An .lcd carries the method it was run with: register it so the gradient overlay and the FAIR methods
+            # text work for it, exactly as for a dropped .lcm.
+            for lcd_name, lcd_bytes, _result in parsed_files:
+                if lcd_name.lower().endswith('.lcd'):
+                    _register_method_bytes(data_manager, lcd_bytes, lcd_name)
 
             last_bundle_id = None
             auto_layout_mode = dash.no_update
@@ -308,24 +313,36 @@ def register_upload_callbacks(app: dash.Dash, data_manager) -> None:
                                   active_file)
 
 
-def _register_methods(data_manager, uploads) -> int:
-    """Read each uploaded .lcm/.lcd and attach its method to the matching samples. Returns how many were read."""
-    import base64
+def _register_method_bytes(data_manager, raw: bytes, name: str) -> int:
+    """Read the method in one .lcm/.lcd and attach it to the samples that used it. Returns the samples matched."""
     from services.shimadzu_method import MethodFormatError, read_method, register_method
+    try:
+        matched = register_method(data_manager, read_method(raw, name), raw)
+    except (MethodFormatError, ValueError) as exc:
+        log.warning("Could not read the method in %s: %s", name, exc)
+        return 0
+    except Exception:
+        log.exception("Could not read the method in %s", name)
+        return 0
+    if matched:
+        log.info("Method in %s attached to %d sample(s)", name, matched)
+    else:
+        log.warning("%s was read but no loaded sample uses it", name)
+    return matched
+
+
+def _register_methods(data_manager, uploads) -> int:
+    """Read each uploaded .lcm and attach its method to the matching samples. Returns how many files were read."""
+    import base64
     read = 0
     for contents, name in uploads:
         try:
             raw = base64.b64decode(contents.split(',', 1)[1])
-            matched = register_method(data_manager, read_method(raw, name), raw)
-            if matched:
-                log.info("Method in %s attached to %d sample(s)", name, matched)
-            else:
-                log.warning("%s was read but no loaded sample uses it", name)
-            read += 1
-        except (MethodFormatError, ValueError, IndexError) as exc:
-            log.warning("Could not read the method in %s: %s", name, exc)
-        except Exception:
-            log.exception("Could not read the method in %s", name)
+        except (ValueError, IndexError):
+            log.warning("Could not read %s", name)
+            continue
+        _register_method_bytes(data_manager, raw, name)
+        read += 1
     return read
 
 

@@ -259,7 +259,7 @@ def describe_method(method: Dict[str, Any], acquired: Any = None) -> List[Dict[s
     return rows
 
 
-METHOD_EXTENSIONS = ('.lcm', '.lcd')
+METHOD_EXTENSIONS = ('.lcm',)           # an .lcd is a data file: it is read as data and brings its own method
 MAX_UTC_OFFSET_HOURS = 3        # local time (CET/CEST and neighbours) minus the stored UTC
 
 
@@ -371,10 +371,14 @@ def add_gradient_overlay(figure, store, entries, dwell_volume_ul: Optional[float
     """
     import plotly.graph_objects as go
     users: Dict[str, List[str]] = {}
+    signatures: Dict[tuple, str] = {}     # runs of the same gradient (each .lcd brings its own copy) draw one line
     for name, data in entries:
         key = (data.get('metadata') or {}).get('method_key')
         if key in store.instrument_methods and len(gradient_points(store.instrument_methods[key])) > 1:
-            users.setdefault(key, []).append(name)
+            method = store.instrument_methods[key]
+            signature = (tuple(gradient_points(method)),
+                         tuple(sorted({s['flow_ml_min'] for s in method.get('pump_program', []) if 'flow_ml_min' in s})))
+            users.setdefault(signatures.setdefault(signature, key), []).append(name)
     if not users:
         return 0
     run_end = max((float((d.get('metadata') or {}).get('time_end_min') or 0) for _, d in entries), default=0.0)
