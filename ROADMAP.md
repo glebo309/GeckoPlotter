@@ -27,7 +27,7 @@ The May/June notes below are historical. The current UI and source are ahead of 
 - [ ] Read the raw signal inside an .lcd so it can be opened without the text export. Container and most of the frame codec decoded (docs/LCD_FORMAT_NOTES.md); finishing needs one .lcd plus the text export of the same injection as ground truth.
 - [ ] Show more of the method: autosampler program, PDA lamp/slit/response, the integration parameters LabSolutions applied, the method audit trail.
 - [ ] Compare GeckoPlotter integration with LabSolutions' own peak tables (already in the export).
-- [ ] Recipes: save the analysis steps (integration, grouping, calibration) and apply them to a new set of files.
+- [x] Recipes: save integration settings, named compound windows and calibrations, apply them to a new batch (docs/RECIPES.md). Not yet: shoulder splits, figure settings, recipes inside a project file.
 
 - [x] Session save/restore **engine** (`.gecko` project files: originals + parameters, ids preserved, schema versions + migrations, large-file relocation, autosave helpers). See docs/SESSION_FORMAT.md, `src/services/session_service.py`.
 - [x] Session **GUI**: Save / Open icon buttons (top left), autosave with a restore banner, unsaved-changes guard, FAIR packages reopen as projects (2026-10-13).

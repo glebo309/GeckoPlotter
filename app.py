@@ -37,6 +37,7 @@ from components.data_table_editor import create_data_table_editor
 from components.table_styles import TABLE_STYLE_CELL, TABLE_STYLE_HEADER, TABLE_STYLE_DATA
 from callbacks.publication_callbacks import register_publication_callbacks
 from callbacks.integration_callbacks import register_integration_callbacks
+from callbacks.recipe_callbacks import register_recipe_callbacks
 from callbacks.baseline_callbacks import register_baseline_callbacks
 from callbacks.context_menu_callbacks import register_context_menu_callbacks
 from callbacks.ms_context_menu_callbacks import register_ms_context_menu_callbacks
@@ -751,6 +752,20 @@ _layout_body = html.Div(
                                                                                 **{'aria-label': 'Match retention time (± min)'}),
                                                             ]),
                                                         ]),
+                                                    ]),
+                                                    html.Section(className='integration-section integration-recipe', children=[
+                                                        html.Div('Recipe', className='toolbox-section-title'),
+                                                        html.Div(className='integration-help',
+                                                                 children='Save these peaks, settings and calibrations, then apply them to the next batch.'),
+                                                        html.Div(className='integration-actions', children=[
+                                                            html.Button('Save recipe', id='recipe-save-btn', n_clicks=0, className='btn btn-secondary',
+                                                                        title='Download the integration settings, named peak windows and calibrations of this workspace'),
+                                                            dcc.Upload(id='recipe-apply-upload', multiple=False, accept='.geckorecipe,.json',
+                                                                       className='recipe-apply-upload',
+                                                                       children=html.Button('Apply recipe…', id='recipe-apply-btn', n_clicks=0, className='btn btn-secondary',
+                                                                                            title='Integrate the loaded samples with a saved recipe and name their compounds')),
+                                                        ]),
+                                                        dcc.Download(id='recipe-download'),
                                                     ]),
                                                     html.Section(className='integration-section integration-deconv', children=[
                                                         html.Div('Peak deconvolution', className='toolbox-section-title'),
@@ -1852,6 +1867,7 @@ register_table_editor_callbacks(app, data_manager)
 register_context_callbacks(app, data_manager)
 register_publication_callbacks(app, data_manager)
 register_integration_callbacks(app, data_manager)
+register_recipe_callbacks(app, data_manager)
 register_baseline_callbacks(app, data_manager)
 register_context_menu_callbacks(app, data_manager)
 register_plot_context_menu_callbacks(app, data_manager)

@@ -40,6 +40,7 @@ def register_research_export_callbacks(app, store):
 # (callbacks that output ``current-plot-settings``, edit peaks/calibration/integration/data stay recorded).
 _READ_ONLY_CALLBACKS = {
     'callbacks.viz_callbacks': {'master_render'},
+    'callbacks.recipe_callbacks': {'save_recipe'},   # downloads a file; touches no workspace state
     'callbacks.pda_callbacks': {'show_pda_tab', 'update_pda_views', 'sync_pda_main_view', 'preview_integration_controls'},
     'callbacks.workspace_callbacks': {'describe_figure', 'analysis_capabilities', 'show_export', 'report_file_action'},
     'callbacks.axis_inspector_callbacks': {'hydrate_axes'},
