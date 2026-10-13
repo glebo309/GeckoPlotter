@@ -105,8 +105,10 @@ def decode_matrix(raw: bytes, n_wavelengths: int, n_frames: Optional[int] = None
     if n_frames is not None and len(frames) != n_frames:
         raise LcdFormatError(f'The PDA data has {len(frames)} frames, the file declares {n_frames}.')
     matrix = np.zeros((len(frames), n_wavelengths), dtype=np.int32)
-    values = np.zeros(n_wavelengths, dtype=np.int64)
-    limit = np.iinfo(np.int32).max
+    first_starts = np.empty(len(frames), dtype=np.int64)
+    first_stops = np.empty(len(frames), dtype=np.int64)
+    second_starts = np.empty(len(frames), dtype=np.int64)
+    second_stops = np.empty(len(frames), dtype=np.int64)
     for row, (start, length) in enumerate(frames):
         la = struct.unpack_from('<H', raw, start + 24)[0]
         first_start = start + 26
@@ -118,12 +120,46 @@ def decode_matrix(raw: bytes, n_wavelengths: int, n_frames: Optional[int] = None
         end = second_start + lb
         if end + 2 != start + length or struct.unpack_from('<H', raw, end)[0] != lb:
             raise LcdFormatError('A PDA frame has an inconsistent group length.')
-        _decode_group(raw, first_start, mid, FIRST_GROUP, values, 0)
-        _decode_group(raw, second_start, end, second, values, FIRST_GROUP)
-        if np.abs(values).max() > limit:
-            raise LcdFormatError('A PDA value is outside the expected range.')
-        matrix[row] = values
+        first_starts[row], first_stops[row], second_starts[row], second_stops[row] = first_start, mid, second_start, end
+    buf = np.frombuffer(raw, dtype=np.uint8)
+    _decode_groups(buf, first_starts, first_stops, FIRST_GROUP, matrix, 0)
+    _decode_groups(buf, second_starts, second_stops, second, matrix, FIRST_GROUP)
     return matrix
+
+
+def _decode_groups(buf: np.ndarray, starts: np.ndarray, stops: np.ndarray, count: int, matrix: np.ndarray,
+                   offset: int) -> None:
+    """The same group of ``count`` tokens in every frame at once: token ``k`` of all frames is decoded together.
+
+    A token's position depends on the ones before it, so one frame cannot be decoded in parallel, but the frames are
+    independent: stepping through the token index and decoding that token of every frame with array operations does
+    ~100x fewer Python steps than ``_decode_group`` frame by frame (a 10 min run: 12 million -> 600).
+    """
+    limit = np.iinfo(np.int32).max
+    last = len(buf) - 1
+    position = starts.astype(np.int64)
+    total = np.zeros(len(starts), dtype=np.int64)
+    columns = np.empty((count, len(starts)), dtype=np.int32)
+    for k in range(count):
+        first = buf[np.minimum(position, last)].astype(np.int64)
+        size = first >> 5                                   # token class: 0..3 -> 1..4 bytes
+        if (size > 3).any():
+            raise LcdFormatError('Unknown value code in a PDA frame.')
+        value = first & 0x1F
+        for j in (1, 2, 3):
+            longer = size >= j
+            if not longer.any():
+                break
+            value = np.where(longer, (value << 8) | buf[np.minimum(position + j, last)], value)
+        half = np.left_shift(1, 4 + 8 * size)               # sign bit of a 5, 13, 21 or 29 bit field
+        total += np.where(value >= half, value - 2 * half, value)
+        if (np.abs(total) > limit).any():
+            raise LcdFormatError('A PDA value is outside the expected range.')
+        columns[k] = total
+        position += size + 1
+    if not np.array_equal(position, stops):
+        raise LcdFormatError('A PDA frame group does not end where it declares.')
+    matrix[:, offset:offset + count] = columns.T
 
 
 def decode_status_log(raw: bytes) -> np.ndarray:

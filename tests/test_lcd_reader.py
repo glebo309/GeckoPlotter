@@ -56,6 +56,29 @@ def test_decoder_round_trips_every_token_size():
     assert np.array_equal(matrix, np.array(rows))
 
 
+def test_all_frames_at_once_decode_exactly_like_one_frame_at_a_time():
+    rng = np.random.default_rng(3)
+    width = 400
+
+    def row():
+        steps = rng.integers(-1, 2, width) * rng.choice([9, 2500, 700_000, 3_000_000], width)
+        return np.concatenate([np.cumsum(steps[:256]), np.cumsum(steps[256:])])
+
+    rows = [row() for _ in range(40)]
+    raw = b''.join(_frame(r, width) for r in rows)
+    expected = np.zeros((len(rows), width), dtype=np.int64)
+    pos = 0
+    for index in range(len(rows)):
+        length = struct.unpack_from('<i', raw, pos + 12)[0]
+        la = struct.unpack_from('<H', raw, pos + 24)[0]
+        mid = pos + 26 + la
+        lb = struct.unpack_from('<H', raw, mid + 2)[0]
+        lr._decode_group(raw, pos + 26, mid, 256, expected[index], 0)
+        lr._decode_group(raw, mid + 4, mid + 4 + lb, width - 256, expected[index], 256)
+        pos += length
+    assert np.array_equal(lr.decode_matrix(raw, width, len(rows)), expected)
+
+
 def test_decoder_rejects_damaged_data_instead_of_returning_garbage():
     width = 300
     raw = _frame(np.arange(width), width)
