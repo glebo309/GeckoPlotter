@@ -61,13 +61,20 @@ app = dash.Dash(__name__, suppress_callback_exceptions=True, assets_folder='src/
                  compress=True)
 from services.output_dedupe import install as _install_output_dedupe
 _install_output_dedupe(app)
+from services.upload_stage import install as _install_upload_stage
+_install_upload_stage(app.server)
 from services.request_timing import install as _install_request_timing
 _install_request_timing(app.server, float(os.environ.get('GECKO_SLOW_MS', '500')))
 app.config.suppress_callback_exceptions = True
 app.title = 'GeckoPlotter'
 
 # Global data store (Bundle-first architecture)
-data_manager = DataStore()
+from services import workspaces as _workspaces, session_service as _session_service
+# One workspace per browser (a cookie id), not one global workspace shared by everyone who opens the app.
+_workspace_registry = _workspaces.WorkspaceRegistry(DataStore)
+data_manager = _workspace_registry.proxy
+_workspaces.install(app.server)
+_session_service.autosave_scope = _workspaces.current_session_key
 
 
 @app.server.before_request

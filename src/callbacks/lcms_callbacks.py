@@ -19,7 +19,8 @@ log = logging.getLogger(__name__)
 def register_lcms_callbacks(app, data_manager):
     """Register LC-MS viewer callbacks against *app*."""
 
-    lcms_svc = data_manager.lcms_service
+    from services.workspaces import service_of
+    lcms_svc = service_of(data_manager, 'lcms_service')     # the current browser's workspace, looked up at every use
 
     from services.data_store import BundleType, ComponentRole
 

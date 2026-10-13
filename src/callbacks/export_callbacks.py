@@ -37,7 +37,8 @@ PRESETS = {
 def register_export_callbacks(app: dash.Dash, data_manager) -> None:
     """Register all Export toolbox callbacks."""
 
-    export_svc = data_manager.export_service
+    from services.workspaces import service_of
+    export_svc = service_of(data_manager, 'export_service')
 
     # ── Preset selector ──────────────────────────────────────────────
 

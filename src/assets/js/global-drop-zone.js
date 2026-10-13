@@ -89,8 +89,11 @@
     }
 
     function hand(files) {
+        if (!files.length) return;
+        var fast = window.GeckoFastUpload;
+        if (fast && !files.some(fast.isProject)) { fast.upload(files.slice(0, MAX_FILES), 'upload-button'); return; }
         var input = document.querySelector('#upload-button input[type="file"]');
-        if (!input || !files.length) return;
+        if (!input) return;
         var transfer = new DataTransfer();
         files.slice(0, MAX_FILES).forEach(function (file) { transfer.items.add(file); });
         input.files = transfer.files;

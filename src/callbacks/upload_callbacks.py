@@ -187,8 +187,8 @@ def register_upload_callbacks(app: dash.Dash, data_manager) -> None:
 
             for contents, fname in zip(contents_list, filenames):
                 try:
-                    _, encoded = contents.split(",", 1)
-                    raw_bytes = base64.b64decode(encoded)
+                    from services.upload_stage import read_contents
+                    raw_bytes = read_contents(contents)
 
                     tmp = tempfile.NamedTemporaryFile(delete=False, suffix=f"_{fname}")
                     try:
@@ -212,6 +212,10 @@ def register_upload_callbacks(app: dash.Dash, data_manager) -> None:
                 except Exception as e:
                     log.error(f"Error parsing {fname}: {e}")
                     failed_names.add(fname)
+
+            from services.upload_stage import release
+            for staged in contents_list:
+                release(staged)                 # the bytes now live in the workspace; do not hold them twice
 
             if not parsed_files:
                 return (dash.no_update,) * 9
@@ -337,11 +341,14 @@ def _register_methods(data_manager, uploads) -> int:
     read = 0
     for contents, name in uploads:
         try:
-            raw = base64.b64decode(contents.split(',', 1)[1])
-        except (ValueError, IndexError):
+            from services.upload_stage import UploadError, read_contents
+            raw = read_contents(contents)
+        except (ValueError, IndexError, UploadError):
             log.warning("Could not read %s", name)
             continue
         _register_method_bytes(data_manager, raw, name)
+        from services.upload_stage import release
+        release(contents)
         read += 1
     return read
 

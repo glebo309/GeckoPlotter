@@ -14,4 +14,4 @@ if it ever stops. Log: `logs\gecko.log` in the GeckoPlotter folder.
    - Settings: *If the task fails, restart every 1 minute*, up to 999 times; untick *Stop the task if it runs longer than*.
 4. To update the app, push to GitHub and restart the task (End, then Run): it pulls on every start.
 
-The app keeps one workspace per running copy: everyone who opens it shares it, and loading the page empties it.
+Every browser has a workspace of its own, but all calculations run on this PC: a busy or slow computer makes everybody slow.

@@ -928,10 +928,18 @@ def save_session(store, path, client_state: Optional[dict] = None, *, project_na
 # Autosave helpers
 # ----------------------------------------------------------------------------
 
+#: Set by the web app to a function returning the current browser's short id (or None): every browser then gets an
+#: autosave folder of its own, so the "restore last session" offer never shows someone else's work.
+autosave_scope = None
+
+
 def autosave_dir(create: bool = True) -> Path:
-    """Folder for autosaves: ``$GECKO_AUTOSAVE_DIR`` or ``~/Documents/GeckoPlotter/Autosave``."""
+    """Folder for autosaves: ``$GECKO_AUTOSAVE_DIR`` or ``~/Documents/GeckoPlotter/Autosave`` (+ a folder per browser)."""
     override = os.environ.get('GECKO_AUTOSAVE_DIR')
     folder = Path(override).expanduser() if override else Path.home() / 'Documents' / 'GeckoPlotter' / 'Autosave'
+    scope = autosave_scope() if callable(autosave_scope) else None
+    if scope and re.fullmatch(r'[0-9a-f]{8,32}', scope):
+        folder = folder / scope
     if create:
         folder.mkdir(parents=True, exist_ok=True)
     return folder

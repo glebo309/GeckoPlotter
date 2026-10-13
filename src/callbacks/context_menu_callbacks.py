@@ -38,7 +38,8 @@ _ANCHOR_BASE = {
 def register_context_menu_callbacks(app: dash.Dash, data_manager) -> None:
     """Register peak context-menu callbacks."""
 
-    ps = data_manager.peak_service
+    from services.workspaces import service_of
+    ps = service_of(data_manager, 'peak_service')
 
     def _find_peak(peak_id):
         """Return (file_id, Peak) for a peak_id, or (None, None)."""

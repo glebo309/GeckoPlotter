@@ -244,6 +244,13 @@ class DataStore:
         from .file_removal_service import FileRemovalService
         self.file_removal_service = FileRemovalService(self)
 
+    def scoped(self, key: str, factory):
+        """A helper object that belongs to this workspace (made on first use, dropped with a reset)."""
+        registry = self.__dict__.setdefault('_scoped_state', {})
+        if key not in registry:
+            registry[key] = factory()
+        return registry[key]
+
     def reset_workspace(self) -> None:
         """Discard this local workspace, including undo and temporary uploads.
 

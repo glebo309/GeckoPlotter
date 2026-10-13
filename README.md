@@ -17,11 +17,15 @@ Open http://127.0.0.1:8052 and drag files onto the drop zone.
 
 ### Install for the group
 
-Each person runs their own copy (the app keeps one workspace per running process, so a shared server would mix everyone's
-data):
+Everyone who opens a running copy gets a workspace of their own (a cookie in their browser): their files, peaks and
+autosaves are separate, and refreshing one page never touches another person's work. Idle workspaces are dropped from
+memory after 8 hours (the autosave stays on disk), and at most 12 are kept at once.
+
+All calculations (reading `.lcd` files, integration, plots) run on the computer that hosts the app, the browser only
+draws. A shared copy is therefore as fast as the host: for heavy Shimadzu data it is quicker to run your own copy.
 
 ```bash
-git clone -b ui-professional-workspace https://github.com/glebo309/GeckoPlotter.git
+git clone https://github.com/glebo309/GeckoPlotter.git
 cd GeckoPlotter
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
@@ -29,8 +33,9 @@ python app.py
 ```
 
 The repository is private: collaborators need to be added on GitHub first. Settings: `GECKO_PORT` (default 8052),
-`GECKO_HOST` (`0.0.0.0` makes it reachable from the local network, one shared workspace for everyone who opens it),
-`GECKO_DEBUG=1` (development only: slower in the browser, exposes the debugger; leave it unset on a network).
+`GECKO_HOST` (`0.0.0.0` makes it reachable from the local network), `GECKO_SLOW_MS` (log callbacks slower than this,
+default 500), `GECKO_DEBUG=1` (development only: slower in the browser, exposes the debugger).
+On Windows, `deploy/windows/run-gecko.bat` keeps it running and updated.
 
 ## Supported Formats
 

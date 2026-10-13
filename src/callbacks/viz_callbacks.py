@@ -594,10 +594,16 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
 
     plot_manager = PlotManager()
     from services.render_cache import RenderCache
-    render_cache = RenderCache()
-    if not hasattr(data_manager, '_render_caches'):
-        data_manager._render_caches = []
-    data_manager._render_caches.append(render_cache)
+    from services.workspaces import scoped
+
+    def _new_render_cache():
+        cache = RenderCache()
+        if not hasattr(data_manager, '_render_caches'):
+            data_manager._render_caches = []
+        data_manager._render_caches.append(cache)
+        return cache
+
+    render_cache = scoped(data_manager, 'render_cache:viz', _new_render_cache)      # one per workspace
 
     # ------------------------------------------------------------------
     # Plot tab management

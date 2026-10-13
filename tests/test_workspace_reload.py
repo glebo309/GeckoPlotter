@@ -12,7 +12,10 @@ from services.data_store import Bundle, BundleType, Component, ComponentRole
 from components.workspace_layout import walk
 
 client = module.app.server.test_client()
-dm = module.data_manager
+# Each browser has its own workspace: this client is one browser, and dm is that browser's workspace.
+sid = 'a' * 32
+client.set_cookie('gecko_sid', sid)
+dm = module._workspace_registry.for_session(sid)
 client.get('/_dash-layout')
 original_peak_service = dm.peak_service
 original_cal_service = dm.calibration_service
@@ -57,7 +60,10 @@ assert find(layout, 'custom-plot-figures')['data'] == {}
 callback = next(v for v in module.app.callback_map.values()
     if v.get('callback') and v['callback'].__name__ == 'handle_file_upload')
 contents = 'data:text/csv;base64,' + base64.b64encode(b'Time,Signal\n0,1\n1,2\n2,1\n').decode()
-result = callback['callback'].__wrapped__([contents], ['new.csv'], [0], [], 0)
+from flask import g
+with module.app.server.test_request_context('/'):
+    g.gecko_sid = sid                              # the callback runs as this browser, like a real request
+    result = callback['callback'].__wrapped__([contents], ['new.csv'], [0], [], 0)
 assert len(dm.get_loaded_files_list()) == 1
 assert dm.get_loaded_files_list()[0]['name'] != 'Remaining'
 # A callback or dependencies request must not reset the active workspace.
@@ -88,3 +94,25 @@ def test_stores_do_not_share_plot_settings():
     first, second = DataStore(), DataStore()
     first._shared_plot_settings['old'] = {'title': 'Old'}
     assert second._shared_plot_settings == {}
+
+
+def test_one_browsers_reload_never_clears_another_browsers_workspace():
+    script = r'''
+import app as module
+from services.data_store import Bundle, BundleType, Component, ComponentRole
+
+registry = module._workspace_registry
+ann, ben = registry.for_session('a' * 32), registry.for_session('b' * 32)
+for store, name in ((ann, 'ann'), (ben, 'ben')):
+    store.add_bundle(Bundle(name, name, BundleType.GENERIC,
+                            component_list=[Component(name + '-signal', ComponentRole.PRIMARY, name + '.csv')]))
+client = module.app.server.test_client()
+client.set_cookie('gecko_sid', 'a' * 32)
+client.get('/_dash-layout')                      # Ann reloads her page
+assert ann.get_loaded_files_list() == []
+assert [f['name'] for f in ben.get_loaded_files_list()] == ['ben']
+print('ok')
+'''
+    out = subprocess.run([sys.executable, '-B', '-c', script], capture_output=True, text=True,
+                         cwd=str(__import__('pathlib').Path(__file__).resolve().parents[1]))
+    assert out.returncode == 0 and out.stdout.strip().endswith('ok'), out.stderr[-1500:]

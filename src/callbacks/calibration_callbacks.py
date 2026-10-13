@@ -107,8 +107,9 @@ def _empty_figure(title):
 
 def register_calibration_callbacks(app: dash.Dash, data_manager) -> None:
     from services.calibration_workflow import peak_candidates, apply_calibrations
-    service = data_manager.calibration_service
-    drafts = {}
+    from services.workspaces import scoped, service_of
+    service = service_of(data_manager, 'calibration_service')
+    drafts = scoped(data_manager, 'calibration_drafts', dict)       # unsaved calibration edits, per workspace
     field_ids = [('cal-analyte-name','value'), ('cal-units','value'), ('cal-fit-type','value'),
                  ('cal-force-zero','checked'), ('cal-response-type','value'),
                  ('cal-match-position','value'), ('cal-match-tolerance','value'), ('cal-auto-apply','checked')]
