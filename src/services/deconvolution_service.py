@@ -246,6 +246,7 @@ class DeconvolutionService:
 
     # Shoulder detection / model-selection tuning (see ``auto_detect_centers``).
     _MAX_SHOULDERS = 3
+    _SCALE_DIVISORS = (2.5, 1.0)     # Savitzky-Golay window = FWHM / divisor, finest first
     _MIN_POINTS_ACROSS_PEAK = 8      # FWHM in samples needed to look for shoulders
     _APEX_NOISE_SIGMAS = 8.0         # apex prominence floor in noise sigmas
     _D2_NOISE_SIGMAS = 6.0           # d2 prominence must exceed this many noise sigmas
@@ -260,6 +261,9 @@ class DeconvolutionService:
     _SHOULDER_TAU_FWHM_INV = 0.5     # shoulder gamma >= this / FWHM (tail tau <= 2 FWHM)
     _TAIL_SIDE_BIC_MARGIN = 10.0     # downstream (tail-side) candidates need strong evidence ...
     _TAIL_SIDE_MAX_WIDTH_RATIO = 2.0 # ... and must not be much broader than the main peak
+    _TAIL_SIDE_STRONG_REDUCTION = 0.9   # unless the extra component removes this much of the residual there:
+    _TAIL_SIDE_STRONG_BIC_MARGIN = 5.0  # then a clear plateau on the tail is accepted with a lower BIC bar
+    _TAIL_SIDE_STRONG_WIDTH_RATIO = 2.5 # ... and a somewhat broader shape
     _EVIDENCE_WINDOW = (0.75, 0.35)  # window around candidate (x - a*FWHM, x + b*FWHM)
     _INDEPENDENT_PER_SIGMA = 5.0     # independent samples per Gaussian sigma (smooth data)
     _SHOULDER_PROMINENCE_SCALE = 0.25  # shoulder height >= this * prominence * signal range
@@ -319,36 +323,40 @@ class DeconvolutionService:
         if fwhm_pts < self._MIN_POINTS_ACROSS_PEAK or n < 3 * self._MIN_POINTS_ACROSS_PEAK:
             return [], fwhm_pts * dx, 0.0, height
 
-        # Window from the number of points across the peak (~FWHM / 2.5).
-        w = int(round(fwhm_pts / 2.5)) | 1
-        w = max(w, 7)
-        if w > n:
-            w = n if n % 2 == 1 else n - 1
-        polyorder = 3 if w > 5 else 2
-        d2 = savgol_filter(y, w, polyorder, deriv=2, delta=dx)
-
         noise_y = self._robust_noise(y)
-        coeffs = savgol_coeffs(w, polyorder, deriv=2, delta=dx)
-        noise_d2 = noise_y * float(np.linalg.norm(coeffs))
-        strongest = float(np.max(-d2))
-        if strongest <= 0:
-            return [], fwhm_pts * dx, noise_y, height
-        thr = max(self._D2_NOISE_SIGMAS * noise_d2, self._D2_MIN_REL_PROMINENCE * strongest)
-        idx, props = find_peaks(-d2, prominence=thr)
-
         # Savitzky-Golay edges are unreliable and a bump cut by the region edge
         # cannot be told from baseline drift: keep shoulders off the borders.
-        margin = int(max(w, round(self._EDGE_MARGIN_FWHM * fwhm_pts)))
         exclusion = 0.4 * fwhm_pts * dx
         cands = []
-        for i, prom in zip(idx, props["prominences"]):
-            ok = margin <= i <= n - 1 - margin
-            if ok and len(apex_idx):
-                ok = bool(np.all(np.abs(x[apex_idx] - x[i]) >= exclusion))
-            if trace is not None:
-                trace.append(dict(x=float(x[i]), prom=float(prom), rel=float(prom / strongest), ok=ok))
-            if ok:
-                cands.append((float(prom), float(x[i])))
+        # A narrow window finds sharp shoulders; a broad, low plateau on a tail only shows in the curvature at a
+        # coarser scale, so each scale is searched against its own strongest curvature.
+        for divisor in self._SCALE_DIVISORS:
+            w = int(round(fwhm_pts / divisor)) | 1
+            w = max(w, 7)
+            if w > n:
+                w = n if n % 2 == 1 else n - 1
+            polyorder = 3 if w > 5 else 2
+            d2 = savgol_filter(y, w, polyorder, deriv=2, delta=dx)
+            coeffs = savgol_coeffs(w, polyorder, deriv=2, delta=dx)
+            noise_d2 = noise_y * float(np.linalg.norm(coeffs))
+            strongest = float(np.max(-d2))
+            if strongest <= 0:
+                continue
+            thr = max(self._D2_NOISE_SIGMAS * noise_d2, self._D2_MIN_REL_PROMINENCE * strongest)
+            idx, props = find_peaks(-d2, prominence=thr)
+            margin = int(max(w, round(self._EDGE_MARGIN_FWHM * fwhm_pts)))
+            for i, prom in zip(idx, props["prominences"]):
+                ok = margin <= i <= n - 1 - margin
+                if ok and len(apex_idx):
+                    ok = bool(np.all(np.abs(x[apex_idx] - x[i]) >= exclusion))
+                if ok and any(abs(x[i] - c[1]) < 0.3 * fwhm_pts * dx for c in cands):
+                    ok = False                      # the same bump already found at another scale
+                if trace is not None:
+                    trace.append(dict(x=float(x[i]), prom=float(prom), rel=float(prom / strongest), ok=ok,
+                                      scale=divisor))
+                if ok:
+                    # scales are not comparable in absolute curvature: rank within the scale, finest scale first
+                    cands.append((float(prom / strongest) - 1e-3 * self._SCALE_DIVISORS.index(divisor), float(x[i])))
         cands.sort(reverse=True)
         return [c[1] for c in cands[: self._MAX_SHOULDERS + 1]], fwhm_pts * dx, noise_y, height
 
@@ -482,6 +490,10 @@ class DeconvolutionService:
             dbic = (self._bic(rss_new, n_eff_w, len(trial), floor_w)
                     - self._bic(rss_old, n_eff_w, len(current), floor_w))
             reduction = 1.0 - rss_new / rss_old if rss_old > 0 else 0.0
+            if tail_side and reduction >= self._TAIL_SIDE_STRONG_REDUCTION:
+                margin = self._TAIL_SIDE_STRONG_BIC_MARGIN
+                ratio_ok = all(self._MIN_WIDTH_RATIO <= new_fwhm / max(fw, 1e-12) <= self._TAIL_SIDE_STRONG_WIDTH_RATIO
+                               for _, fw in others)
             ok = (dbic < -margin and reduction >= self._MIN_RSS_REDUCTION
                   and areas[j] >= self._MIN_AREA_FRACTION and sep_ok and ratio_ok
                   and not truncated and new_fwhm >= 3 * dx * step

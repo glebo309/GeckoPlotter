@@ -190,3 +190,26 @@ class TestRealHplcExcerpts:
         assert time.perf_counter() - t0 < 1.0
         assert len(result.components) == 2
         assert result.r_squared > 0.99
+
+
+class TestBroadShoulderOnATail:
+    """A low, broad plateau on the tail only shows in the curvature at a coarser scale than the main peak's."""
+
+    def _data(self, noise):
+        rng = np.random.default_rng(5)
+        x = np.linspace(1.5, 2.6, 2300)
+        main = _emg_peak(x, 1.78, 0.025, 25.0, height=990.0)
+        return x, main, rng.normal(0, noise, x.size)
+
+    @pytest.mark.parametrize("noise", [0.0, 0.2])
+    def test_plateau_on_the_tail_is_a_second_component(self, svc, noise):
+        x, main, jitter = self._data(noise)
+        y = main + _gauss(x, 80.0, 2.0, 0.06) + jitter
+        xs = _xs(svc.auto_detect_centers(x, y))
+        assert len(xs) == 2
+        assert xs[0] == pytest.approx(x[np.argmax(main)], abs=0.02) and xs[1] == pytest.approx(2.0, abs=0.06)
+
+    @pytest.mark.parametrize("noise", [0.0, 0.2])
+    def test_the_same_tailing_peak_without_the_plateau_stays_one_component(self, svc, noise):
+        x, main, jitter = self._data(noise)
+        assert len(svc.auto_detect_centers(x, main + jitter)) == 1
