@@ -130,12 +130,13 @@ def register_upload_callbacks(app: dash.Dash, data_manager) -> None:
         [State('upload-button', 'filename'),
          State('upload-button', 'last_modified'),
          State('loaded-files', 'data'),
-         State('render-trigger', 'data')],
+         State('render-trigger', 'data'),
+         State('active-file', 'data')],
         prevent_initial_call=True
     )
     def handle_file_upload(contents_list: List[str], filenames: List[str],
                           last_modified_list: List[int], existing_files: List[Dict[str, Any]],
-                          render_counter) -> tuple:
+                          render_counter, active_file=None) -> tuple:
         """Handle file upload via Bundle-first pipeline.
 
         1. Decode + parse each file via ingestion pipeline
@@ -155,6 +156,23 @@ def register_upload_callbacks(app: dash.Dash, data_manager) -> None:
                 return (dash.no_update,) * 8 + (stash_session_upload(*project),)
             except Exception:
                 log.exception("Could not read the project file %s", project[1])
+                return (dash.no_update,) * 9
+
+        # LabSolutions method/data files (.lcm, .lcd) are not plotted: their instrument method is read and shown
+        # in the Metadata of the samples that used it.
+        from services.shimadzu_method import is_method_upload
+        method_uploads = [(c, f) for c, f in zip(contents_list, filenames) if is_method_upload(f)]
+        if method_uploads:
+            contents_list = [c for c, f in zip(contents_list, filenames) if not is_method_upload(f)]
+            filenames = [f for f in filenames if not is_method_upload(f)]
+            _register_methods(data_manager, method_uploads)
+            if not contents_list:
+                if active_file:
+                    try:
+                        return (dash.no_update,) * 3 + (build_active_file_views(data_manager, active_file)[0],) \
+                            + (dash.no_update,) * 5
+                    except Exception:
+                        log.exception("Could not refresh the metadata after reading a method file")
                 return (dash.no_update,) * 9
 
         try:
@@ -214,6 +232,8 @@ def register_upload_callbacks(app: dash.Dash, data_manager) -> None:
                 if bundle.bundle_type == BundleType.LCMS and len(bundle.component_list) > 1:
                     auto_layout_mode = 'stacked'
 
+            from services.shimadzu_method import apply_methods
+            apply_methods(data_manager)
             from services.channel_visibility import initialize_imported_channels, visible_component_id
             initialize_imported_channels(data_manager, new_bundles)
             loaded_files = data_manager.get_loaded_files_list()
@@ -252,13 +272,15 @@ def register_upload_callbacks(app: dash.Dash, data_manager) -> None:
         [State('drop-zone', 'filename'),
          State('drop-zone', 'last_modified'),
          State('loaded-files', 'data'),
-         State('render-trigger', 'data')],
+         State('render-trigger', 'data'),
+         State('active-file', 'data')],
         prevent_initial_call=True
     )
-    def handle_drop_upload(contents_list, filenames, last_modified_list, existing_files, render_counter):
+    def handle_drop_upload(contents_list, filenames, last_modified_list, existing_files, render_counter, active_file=None):
         if not contents_list or not filenames:
             return (dash.no_update,) * 9
-        return handle_file_upload(contents_list, filenames, last_modified_list, existing_files, render_counter)
+        return handle_file_upload(contents_list, filenames, last_modified_list, existing_files, render_counter,
+                                  active_file)
 
     @app.callback(
         [Output('loaded-files', 'data', allow_duplicate=True),
@@ -274,13 +296,37 @@ def register_upload_callbacks(app: dash.Dash, data_manager) -> None:
         [State('global-drop-zone', 'filename'),
          State('global-drop-zone', 'last_modified'),
          State('loaded-files', 'data'),
-         State('render-trigger', 'data')],
+         State('render-trigger', 'data'),
+         State('active-file', 'data')],
         prevent_initial_call=True
     )
-    def handle_global_drop_upload(contents_list, filenames, last_modified_list, existing_files, render_counter):
+    def handle_global_drop_upload(contents_list, filenames, last_modified_list, existing_files, render_counter,
+                                  active_file=None):
         if not contents_list or not filenames:
             return (dash.no_update,) * 9
-        return handle_file_upload(contents_list, filenames, last_modified_list, existing_files, render_counter)
+        return handle_file_upload(contents_list, filenames, last_modified_list, existing_files, render_counter,
+                                  active_file)
+
+
+def _register_methods(data_manager, uploads) -> int:
+    """Read each uploaded .lcm/.lcd and attach its method to the matching samples. Returns how many were read."""
+    import base64
+    from services.shimadzu_method import MethodFormatError, read_method, register_method
+    read = 0
+    for contents, name in uploads:
+        try:
+            raw = base64.b64decode(contents.split(',', 1)[1])
+            matched = register_method(data_manager, read_method(raw, name), raw)
+            if matched:
+                log.info("Method in %s attached to %d sample(s)", name, matched)
+            else:
+                log.warning("%s was read but no loaded sample uses it", name)
+            read += 1
+        except (MethodFormatError, ValueError, IndexError) as exc:
+            log.warning("Could not read the method in %s: %s", name, exc)
+        except Exception:
+            log.exception("Could not read the method in %s", name)
+    return read
 
 
 def _auto_import_peaks(data_manager, bundle):

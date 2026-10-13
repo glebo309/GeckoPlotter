@@ -209,3 +209,29 @@ def test_ordinary_zip_is_not_a_project():
     assert sf.is_project_upload('data:,', 'x.gecko') and not sf.is_project_upload(url(payload), 'x.csv')
     with pytest.raises(ss.SessionFormatError):
         ss.restore_session(DataStore(), plain_zip.getvalue())
+
+
+def test_instrument_method_and_its_original_file_are_in_the_package_and_survive_reopening():
+    from services import session_service, shimadzu_method
+    store, c = workspace()
+    c.metadata['method_file'] = 'run.lcm'
+    method = {'file_name': 'run.lcm', 'sha256': hashlib.sha256(b'LCM-BYTES').hexdigest(),
+              'pump_program': [{'time_min': 1.0, 'b_percent': 5.0, 'flow_ml_min': 0.9}]}
+    assert shimadzu_method.register_method(store, method, b'LCM-BYTES') == 1
+
+    z = zipfile.ZipFile(io.BytesIO(build_research_package(store, {'title': 'Dataset for study'}, None, [])))
+    methods = json.loads(z.read('analysis/instrument_methods.json'))
+    assert methods[0]['pump_program'] == method['pump_program']
+    assert methods[0]['attached_to_samples'] == ['Sample (signal)'] or methods[0]['attached_to_samples']
+    assert z.read(methods[0]['original_file']) == b'LCM-BYTES'
+    assert 'General procedure for HPLC' in z.read('README.md').decode()
+    assert 'was applied at a flow rate' not in z.read('README.md').decode()   # one-point program: no gradient sentence
+    assert json.loads(z.read('metadata/dataset.json'))['methods_text'][0]['text']
+    manifest = pd.read_csv(io.BytesIO(z.read('dataset_manifest.csv')))
+    assert methods[0]['original_file'] in set(manifest.path)
+    assert 'method_details' not in json.dumps(json.loads(z.read('metadata/dataset.json'))['signals'])
+
+    # The project saved on its own brings the original method file back too.
+    restored = DataStore()
+    session_service.restore_session(restored, session_service.build_session(store))
+    assert list(restored.instrument_method_files.values()) == [b'LCM-BYTES']

@@ -1,0 +1,5 @@
+{
+  "column": "Shimadzu Shim-pack Scepter C18-120 (1.9 µm, 2.1 × 100 mm)",
+  "dwell_volume_ul": 715,
+  "source": "SOP_UHPLC_Nexera_XS_User_Guide.docx (group UHPLC): routine column and measured pre-column dwell volume. The guide says to verify the physically installed column, so the export keeps the column editable."
+}

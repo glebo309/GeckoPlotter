@@ -15,6 +15,7 @@ def editable_publication_figure(source, settings, source_settings=None, *, clean
     original = publication_plot_settings(source, source_settings)
     from services.figure_sanitization import clean_figure_for_output
     fig = go.Figure(clean_figure_for_output(source) if clean_output else source)
+    PlotSettingsService.unshare_stacked_y_label(fig)
     from services.peak_display import refresh_peak_display
     refresh_peak_display(fig)
     if 'plot_type' in original and s['plot_type'] != original['plot_type']:

@@ -4,7 +4,7 @@ import logging
 from dash import Input, Output, State, ClientsideFunction, no_update
 from services.research_package import build_research_package, record_analysis_state, safe_name
 
-FIELDS = ['title','description','creators','orcid','affiliation','record-url','article-doi','license','funding','keywords','methods']
+FIELDS = ['title','description','creators','orcid','affiliation','record-url','article-doi','license','funding','keywords','column','methods']
 
 
 def register_research_export_callbacks(app, store):

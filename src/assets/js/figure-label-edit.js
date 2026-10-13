@@ -38,7 +38,7 @@
         if (classes.indexOf('annotation-text') !== -1 && element.closest) {
             var group = element.closest('.annotation'), index = group && Number(group.getAttribute('data-index'));
             var annotation = gd.layout && gd.layout.annotations && gd.layout.annotations[index];
-            if (annotation && annotation.name === 'gecko-shared-y') {
+            if (annotation && (annotation.name === 'gecko-shared-y' || annotation.name === 'gecko-live-shared-y')) {
                 var remembered=(gd.layout.meta || {}).gecko_axis_identities || {};
                 var units=(gd.layout.meta || {}).gecko_axis_units || {};
                 var axis = Object.keys(gd.layout).find(function(key){

@@ -100,3 +100,7 @@
 /* ---- Status bar --------------------------------------------------------- */
 .status-bar { height:auto; min-height:22px; padding:0 10px; gap:8px; font-size:12px; }
 .status-bar #undo-file-removal-btn { height:20px; font-size:12px; padding:0 7px; }
+
+/* Metadata tab: choose what to overlay on the plot */
+.metadata-overlay-bar { display: flex; align-items: center; gap: 8px; padding: 8px 15px 0; }
+.metadata-overlay-bar .form-label { margin: 0; white-space: nowrap; }

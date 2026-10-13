@@ -1,6 +1,7 @@
 """Research package controls, alongside the existing figure export workflow."""
 from dash import html, dcc
 import dash_mantine_components as dmc
+from services.lab_defaults import default_column
 
 
 def create_research_export():
@@ -19,6 +20,9 @@ def create_research_export():
                     data=['CC-BY-4.0','CC0-1.0','CC-BY-SA-4.0']),
                 dmc.TextInput(id='pkg-funding', label='Funding / grant numbers', size='xs', mb=8),
                 dmc.TextInput(id='pkg-keywords', label='Keywords', placeholder='Comma separated', size='xs', mb=8),
+                dmc.TextInput(id='pkg-column', label='HPLC column', value=default_column(), size='xs', mb=8,
+                              description='Group routine column from the UHPLC SOP; the instrument files do not record it. Change it if another column was installed.',
+                              placeholder='Manufacturer, phase (particle size, dimensions)'),
                 dmc.Textarea(id='pkg-methods', label='Methods and sample information', autosize=True, minRows=3, size='xs', mb=8),
                 dmc.Checkbox(id='pkg-include-code', label='Include analysis code', checked=False, size='xs', mt=8),
             ])])]),

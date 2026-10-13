@@ -11,7 +11,7 @@ import re
 from datetime import datetime
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-GROUP_ORDER = ('Sample', 'Acquisition', 'Instrument', 'Method', 'Detector', 'Channels', 'Instrument data', 'Other')
+GROUP_ORDER = ('Sample', 'Acquisition', 'Instrument', 'Method', 'Gradient', 'Detector', 'Channels', 'Instrument data', 'Other')
 
 # Raw dumps, provenance helpers and ids that only other code needs.
 HIDDEN_KEYS = frozenset({
@@ -185,7 +185,7 @@ _SPEC.append(('Channels', 'Signal min / max', ('signal_min', 'signal_max'),
               lambda m: f"{m['signal_min']} / {m['signal_max']}"
               if _present(m.get('signal_min')) and _present(m.get('signal_max')) else None))
 
-_KNOWN_KEYS = frozenset(k for _, _, keys, _ in _SPEC for k in keys) | {'channels'}
+_KNOWN_KEYS = frozenset(k for _, _, keys, _ in _SPEC for k in keys) | {'channels', 'method_details'}
 
 
 def _label_for(key: str) -> str:
@@ -234,6 +234,12 @@ def group_metadata(metadata: Optional[Dict[str, Any]]) -> List[Tuple[str, Rows]]
     if listed:
         rows = [(str(c.get('channel') or f'Channel {i}'), _channel_text(c)) for i, c in enumerate(listed, 1)]
         groups['Channels'] = [(label, text) for label, text in rows if text] + groups['Channels']
+
+    details = meta.get('method_details')
+    if isinstance(details, (list, tuple)):
+        for row in details:
+            if isinstance(row, dict) and row.get('group') in groups:
+                add(row['group'], str(row.get('name', '')), str(row.get('value', '')))
 
     for key, value in meta.items():
         if key in HIDDEN_KEYS or key in _KNOWN_KEYS or key.startswith('_'):

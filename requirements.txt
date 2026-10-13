@@ -16,3 +16,4 @@ Pillow>=10.0.0  # TIFF export
 
 # Development tools
 python-dotenv==1.0.1  # Environment variables
+olefile>=0.47

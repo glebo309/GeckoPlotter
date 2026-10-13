@@ -213,6 +213,8 @@ class DataStore:
         self.file_ui_state: Dict[str, Dict[str, Any]] = {}
         self.visibility_state: Dict[str, bool] = {}
         self.collapse_state: Dict[str, str] = {}
+        self.instrument_methods: Dict[str, dict] = {}    # parsed LabSolutions methods by key (see shimadzu_method)
+        self.instrument_method_files: Dict[str, bytes] = {}   # the original .lcm/.lcd bytes, for the FAIR package
         self.lcms_eic_overlays: Dict[str, List[Dict[str, Any]]] = {}
 
         # Provenance of the loaded workspace when it came from / went to a

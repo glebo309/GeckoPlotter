@@ -638,3 +638,19 @@ def test_autosave_can_still_embed_and_explicit_save_always_does(tmp_path, monkey
     explicit = ss.save_session(store, tmp_path / 'p.gecko')
     assert [n for n in _names(explicit) if n.startswith('raw/')]
     assert not ss.inspect_session(explicit).raw_cache
+
+
+def test_instrument_method_is_saved_and_reattached_after_restore():
+    from services import shimadzu_method as sm
+    store, a, _b = synthetic_store(extra_state=False)
+    component = a.component_list[0]
+    component.metadata.update(file_generated='2026-10-12T15:43:39', file_modified='2026-10-12T15:47:25')
+    method = {'file_name': 'run.lcd', 'pump_program': [{'time_min': 1.0, 'b_percent': 5.0, 'flow_ml_min': 0.9}],
+              'run_identity': {'generated_utc': '2026-10-12T13:43:39+00:00',
+                               'modified_utc': '2026-10-12T13:47:25+00:00'}}
+    assert sm.register_method(store, method) == 1
+    assert any(r['name'] == '1 min' for r in component.metadata['method_details'])
+
+    restored = DataStore()
+    ss.restore_session(restored, ss.build_session(store))
+    assert list(restored.instrument_methods.values()) == [method]

@@ -204,3 +204,14 @@ test('docking and analysis selection reveal only the active tab inside its horiz
  selectedBounds={left:150,right:220,width:70};
  dock(s,'ms-peak-mass','right');s.paint();assert.equal(scroller.scrollLeft,120,'visible tab needs no scrolling');
 });
+
+test('the Below/Right switch works before any data is loaded',()=>{
+ const s=setup();wide(s);
+ s.window.dash_clientside.callback_context={triggered:[{prop_id:'analysis-dock.value'}]};
+ const result=s.window.dash_clientside.resize.syncAnalysisDock('data-overview','right',null,[],null);
+ assert.equal(s.elements['right-column'].dataset.analysisDock,'right');
+ assert.equal(result[0],'right');
+ s.window.dash_clientside.callback_context={triggered:[{prop_id:'analysis-dock.value'}]};
+ assert.equal(s.window.dash_clientside.resize.syncAnalysisDock('data-overview','below',null,[],null)[0],'below');
+ assert.equal(s.elements['right-column'].dataset.analysisDock,'below');
+});

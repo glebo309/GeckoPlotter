@@ -534,7 +534,20 @@
 
         window.__geckoSyncAnalysisDock = function (panel, requested, activeTab, plotTabs, owner) {
             var kind = tabKind(activeTab, plotTabs);
-            if (!activeTab || !kind) return [window.dash_clientside.no_update, window.dash_clientside.no_update];
+            if (!activeTab || !kind) {
+                // No figure yet (nothing loaded): the dock control and the analysis tabs still have to work.
+                var emptyCtx = window.dash_clientside.callback_context;
+                var emptyTrigger = emptyCtx && emptyCtx.triggered && emptyCtx.triggered.length
+                    ? emptyCtx.triggered[0].prop_id.split('.')[0] : '';
+                if (emptyTrigger === 'analysis-dock' && (requested === 'below' || requested === 'right')) {
+                    analysisDockOverride = requested;
+                } else if (emptyTrigger !== 'analysis-tabs') {
+                    return [window.dash_clientside.no_update, window.dash_clientside.no_update];
+                }
+                if (panel && emptyTrigger === 'analysis-tabs') analysisPanel = panel;
+                updateAnalysisDock();
+                return [analysisDock, window.dash_clientside.no_update];
+            }
             if (activePlotTab !== activeTab || activePlotKind !== kind) window.__geckoSyncPlotTabLayout(activeTab, plotTabs);
             if (kind === 'publication') return ['below', activeTab];
             var ctx = window.dash_clientside.callback_context;

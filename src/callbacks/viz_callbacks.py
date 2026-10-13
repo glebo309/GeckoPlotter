@@ -261,7 +261,8 @@ def _find_file_id(dm, fdata):
     return rec.get('id')
 
 
-def _collect_visible_files(dm, active_file_id=None, loaded_files=None, target_group_override=None, file_order=None):
+def _collect_visible_files(dm, active_file_id=None, loaded_files=None, target_group_override=None, file_order=None,
+                           include_hidden=False):
     """Return dict of {group_key: [(name, file_data), ...]} for visible files.
 
     Only returns files matching the target group so different data types
@@ -271,8 +272,13 @@ def _collect_visible_files(dm, active_file_id=None, loaded_files=None, target_gr
 
     *target_group_override* can be a group tuple to use directly instead
     of deriving from the active file.
+
+    *include_hidden* also returns files hidden with the eye icon; it is only used to give every trace a colour
+    slot that does not change when other traces are hidden.
     """
     vis_state = getattr(dm, 'visibility_state', {})
+    if include_hidden:
+        vis_state = {}
 
     if target_group_override:
         target_group = target_group_override
@@ -367,6 +373,38 @@ def _collect_visible_files(dm, active_file_id=None, loaded_files=None, target_gr
         for gkey, file_list in result.items():
             file_list.sort(key=lambda x: x[0].lower())
     return result
+
+
+def _trace_color_slots(dm, group_key, loaded_files, file_order):
+    """Map 'file_id|y_column' to a fixed palette slot for every trace of this plot, hidden ones included."""
+    try:
+        everything = _collect_visible_files(dm, None, loaded_files, target_group_override=group_key,
+                                            file_order=file_order, include_hidden=True)
+    except Exception:
+        log.exception('colour slot calculation failed')
+        return {}
+    slots = {}
+    for files in everything.values():
+        for _name, fdata in files:
+            sr = fdata.get('standardized')
+            fid = _find_file_id(dm, fdata)
+            if sr is None or not fid:
+                continue
+            columns = [c for c in sr.y_columns if c in fdata['data'].columns]
+            for column in columns:
+                slots[f'{fid}|{column}'] = len(slots)
+    return slots
+
+
+def _assign_color_slots(figure, slots):
+    """Tag data traces with their fixed slot so styling uses it instead of the visible position."""
+    if not slots:
+        return
+    for trace in figure.data:
+        meta = trace.meta if isinstance(trace.meta, dict) else {}
+        slot = slots.get(f"{meta.get('file_id')}|{meta.get('y_column')}")
+        if slot is not None:
+            trace.meta = {**meta, 'color_slot': slot}
 
 
 _GROUP_LABELS = {
@@ -516,7 +554,9 @@ def _apply_pda_main_preview(figure, data_manager, preview):
         trace.y = view['chromatogram'].tolist()
         sample = f'{bundle.name} · ' if len(sources) > 1 else ''
         trace.name = f"{sample}PDA {view['wavelength_nm']:.0f} nm · preview"
-        trace.meta = {'pda_preview': True, 'pda_source_id': source_id, 'pda_owner_id': fid}
+        previous = trace.meta if isinstance(trace.meta, dict) else {}
+        trace.meta = {'pda_preview': True, 'pda_source_id': source_id, 'pda_owner_id': fid,
+                      **({'color_slot': previous['color_slot']} if 'color_slot' in previous else {})}
         trace.customdata = None
         trace.hovertemplate = '%{x:.4g} min<br>%{y:.5g} mAU<extra>%{fullData.name}</extra>'
         replaced.append(fid)
@@ -664,7 +704,7 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
             label_el = _html.Span(
                 tab['label'],
                 id={'type': 'plot-tab-label', 'index': tab['id']},
-                contentEditable='true' if is_custom else 'false',
+                contentEditable='false',
                 style={'outline': 'none'},
             )
             tab_children = [label_el]
@@ -856,7 +896,7 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
             new_active = new_tabs[-1]['id'] if new_tabs else None
         return new_tabs, new_active, new_figures
 
-    # -- Rename custom plot tab --
+    # -- Rename a plot tab (kept in plot-tabs, so it is saved with the project) --
     @app.callback(
         Output('plot-tabs', 'data', allow_duplicate=True),
         Input('tab-rename-event', 'data'),
@@ -873,7 +913,7 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
         updated = []
         changed = False
         for t in tabs:
-            if t['id'] == tab_id and t.get('type') == 'custom' and t['label'] != new_label:
+            if t['id'] == tab_id and t['label'] != new_label:
                 updated.append({**t, 'label': new_label})
                 changed = True
             else:
@@ -1356,6 +1396,8 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
             'baseline': baseline_mode, 'markers': deconv_markers,
             'deconvolution': deconv_result, 'display': display_opts,
             'visibility': data_manager.visibility_state,
+            **({'methods': sorted(data_manager.instrument_methods)}
+               if getattr(data_manager, 'instrument_methods', None) else {}),
             'files': [record.get('id') for record in (loaded_files or [])],
             # Adding a wavelength does not change its parent bundle's ID.
             'signals': sorted(data_manager.loaded_data),
@@ -1387,6 +1429,8 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
 
         subplot_spacing = s.get('subplot_spacing', 0.08)
         figure = plot_manager.create_multi_file_plot(visible_files, layout_mode, subplot_spacing=subplot_spacing)
+        if hasattr(figure, 'data'):
+            _assign_color_slots(figure, _trace_color_slots(data_manager, group_key, loaded_files, file_order))
 
         smooth_window = s.get('smooth_window', 0)
         if smooth_window >= 3:
@@ -1476,6 +1520,7 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
             PlotSettingsService.apply_to_figure(fig_obj, ps)
             from services.axis_linking import apply_axis_linking
             apply_axis_linking(fig_obj, bool(link_x), y_scope == 'global')
+            PlotSettingsService.share_stacked_y_label(fig_obj, ps)
             from services.signal_axis_range import apply_signal_x_bounds
             apply_signal_x_bounds(fig_obj)
             fig_obj.update_layout(uirevision=active_tab_id,
@@ -1498,6 +1543,16 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
             log.exception("Failed to apply plot settings to raw figure")
 
         _apply_pda_main_cursor(figure, pda_cursor)
+        overlay = next((o[len('overlay:'):] for o in (display_opts or []) if str(o).startswith('overlay:')), None)
+        if overlay and layout_mode != 'stacked':
+            from services.shimadzu_method import add_gradient_overlay, add_status_overlay
+            overlay_entries = [e for files in visible_files.values() for e in files]
+            if overlay in ('gradient', 'gradient_column'):
+                from services.lab_defaults import dwell_volume_ul
+                add_gradient_overlay(figure, data_manager, overlay_entries,
+                                     dwell_volume_ul() if overlay == 'gradient_column' else None)
+            elif overlay.startswith('status:'):
+                add_status_overlay(figure, overlay_entries, overlay[len('status:'):])
         figure.update_layout(meta={**(figure.layout.meta or {}), 'gecko_render_revision': render_revision})
         render_cache.put(active_tab_id, render_inputs, figure)
         return figure, set_zoom

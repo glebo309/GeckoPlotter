@@ -12,20 +12,25 @@ DEFAULT_NAME = 'Untitled project'
 MAX_OPEN_BYTES = 2 * 1024 ** 3   # dcc.Upload max_size for a project file
 
 
+def create_session_status():
+    """Autosave/open status text, placed in the status bar at the bottom of the window."""
+    return html.Span('', id='session-status', className='session-status', role='status', **{'aria-live': 'polite'})
+
+
 def create_session_header_controls():
-    """Right end of the dark top bar: project name, status text, Open (with recent menu) and Save."""
+    """Left end of the dark top bar, next to the logo: Open (with recent menu), Save and the project name.
+
+    The save/autosave status text (``session-status``) lives in the status bar at the bottom: see
+    ``create_session_status``."""
     return html.Div(
         id='session-bar', className='session-bar',
         children=[
-            html.Button(DEFAULT_NAME, id='session-name-btn', type='button', className='session-name',
-                        title='Project name - click to rename'),
-            html.Span('', id='session-status', className='session-status', role='status',
-                      **{'aria-live': 'polite'}),
             html.Div(className='session-open-group', children=[
                 dcc.Upload(
                     id='session-open-upload', accept='.gecko,.zip', multiple=False, className='session-open-upload',
                     max_size=MAX_OPEN_BYTES,   # refuse absurd uploads in the browser (2 GB)
-                    children=html.Button('Open', id='session-open-btn', type='button', className='session-btn',
+                    children=html.Button('', id='session-open-btn', type='button', className='session-btn session-icon-open',
+                                         **{'aria-label': 'Open project'},
                                          title='Open a project (.gecko file, or a FAIR package .zip made by GeckoPlotter) - Cmd/Ctrl+O')),
                 html.Button('▾', id='session-open-menu-btn', type='button', className='session-btn session-menu-btn',
                             title='Recent autosaves', **{'aria-haspopup': 'menu', 'aria-label': 'Recent autosaves'}),
@@ -37,8 +42,10 @@ def create_session_header_controls():
                              children=html.Div('None yet', className='session-menu-empty')),
                 ]),
             ]),
-            html.Button('Save', id='session-save-btn', type='button', className='session-btn session-btn-save',
-                        n_clicks=0, title='Save the project as a .gecko file - Cmd/Ctrl+S'),
+            html.Button('', id='session-save-btn', type='button', className='session-btn session-btn-save session-icon-save',
+                        n_clicks=0, **{'aria-label': 'Save project'}, title='Save the project as a .gecko file - Cmd/Ctrl+S'),
+            html.Button(DEFAULT_NAME, id='session-name-btn', type='button', className='session-name',
+                        title='Project name - click to rename'),
         ],
     )
 

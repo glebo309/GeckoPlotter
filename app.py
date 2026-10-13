@@ -53,7 +53,7 @@ from services.plot_settings_service import DEFAULT_PALETTE, palette_options
 from callbacks.research_export_callbacks import register_research_export_callbacks, register_provenance_capture
 from components.paper_mock import create_paper_mock
 from callbacks.publication_preview_callbacks import register_publication_preview_callbacks
-from components.session_controls import create_session_header_controls, create_session_banner, create_session_support
+from components.session_controls import create_session_header_controls, create_session_banner, create_session_status, create_session_support
 
 # App setup
 app = dash.Dash(__name__, suppress_callback_exceptions=True, assets_folder='src/assets', update_title=None)
@@ -249,6 +249,7 @@ _layout_body = html.Div(
                                 html.Span('GeckoPlotter'),
                             ],
                         ),
+                        create_session_header_controls(),    # Open / Save / project name, top left next to the logo
                         html.Div(style={'flex': 1}),
                         html.Div(
                             id='plot-tab-bar',
@@ -259,7 +260,6 @@ _layout_body = html.Div(
                         html.Button('Analysis Plot', id='analysis-mode-btn', style={'display': 'none'}, n_clicks=0),
                         # Hidden Dev View button (kept for callback compatibility)
                         html.Button('Dev View', id='toggle-dev-panel', style={'display': 'none'}),
-                        create_session_header_controls(),
                     ],
                 ),
 
@@ -1125,6 +1125,24 @@ _layout_body = html.Div(
                                                         'height': '100%',
                                                         'overflowY': 'auto'
                                                     }, children=[
+                                                        html.Div(className='metadata-overlay-bar', children=[
+                                                            html.Label('Overlay on plot', htmlFor='overlay-select', className='form-label'),
+                                                            dmc.Select(
+                                                                id='overlay-select', value='none', size='xs', w=300,
+                                                                allowDeselect=False, comboboxProps={'withinPortal': True},
+                                                                data=[{'value': 'none', 'label': 'Nothing'},
+                                                                      {'value': 'gradient', 'label': 'LC gradient (% B), as programmed'},
+                                                                      {'value': 'gradient_column', 'label': 'LC gradient (% B) at the column inlet (dwell-volume shift)'},
+                                                                      *[{'value': 'status:' + name, 'label': label} for name, label in (
+                                                                          ('Pump A Pressure', 'Pump A pressure'),
+                                                                          ('Pump A Degasser Pressure', 'Pump A degasser pressure'),
+                                                                          ('Oven Temp.', 'Column oven temperature'),
+                                                                          ('Sample Cooler Temp.', 'Autosampler cooler temperature'),
+                                                                          ('PDA Cell Temp.', 'PDA cell temperature'),
+                                                                          ('PDA Polychromator Temp.', 'PDA polychromator temperature'),
+                                                                          ('PDA Lamp Housing Temp.', 'PDA lamp housing temperature'),
+                                                                          ('Room Temp.', 'Room temperature'))]]),
+                                                        ]),
                                                         html.Div(
                                                             id='metadata-container',
                                                             style={'padding': '15px', 'width': '100%', 'boxSizing': 'border-box'},
@@ -1338,6 +1356,7 @@ _layout_body = html.Div(
                     children=[
                         html.Span(id='status-text', children='Ready'),
                         html.Div(style={'flex': 1}),
+                        create_session_status(),
                         html.Span(id='file-info', children='No files loaded'),
                         html.Button(
                             'Clear Cache',
@@ -1901,6 +1920,32 @@ clientside_callback(
     [Input('plot-tool-overlay', 'n_clicks'), Input('plot-tool-separate', 'n_clicks'),
      Input('plot-tool-integrate', 'n_clicks'), Input('current-plot-settings', 'data'),
      Input('baseline-mode', 'data')],
+)
+
+# The overlay choice (Metadata tab) lives in the display options list as one 'overlay:<name>' entry, so the
+# render, session save and restore handle it with the other display options.
+clientside_callback(
+    """function(choice, options) {
+        var current = (options || []).filter(function(o) { return String(o).indexOf('overlay:') === 0; });
+        var wanted = (!choice || choice === 'none') ? [] : ['overlay:' + choice];
+        if (current.join() === wanted.join()) return window.dash_clientside.no_update;
+        return (options || []).filter(function(o) { return String(o).indexOf('overlay:') !== 0; }).concat(wanted);
+    }""",
+    Output('int-display-opts', 'value', allow_duplicate=True),
+    Input('overlay-select', 'value'),
+    State('int-display-opts', 'value'),
+    prevent_initial_call=True,
+)
+
+clientside_callback(
+    """function(options, choice) {
+        var found = (options || []).filter(function(o) { return String(o).indexOf('overlay:') === 0; })[0];
+        var value = found ? found.slice('overlay:'.length) : 'none';
+        return value === choice ? window.dash_clientside.no_update : value;
+    }""",
+    Output('overlay-select', 'value'),
+    Input('int-display-opts', 'value'),
+    State('overlay-select', 'value'),
 )
 
 clientside_callback(

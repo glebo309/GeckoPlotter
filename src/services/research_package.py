@@ -41,7 +41,8 @@ def csv_bytes(frame):
 
 
 def _history_metadata(metadata):
-    result = {k:v for k,v in metadata.items() if k != 'mass_spectral_data'}
+    # method_details is a display copy; the full method is in analysis/instrument_methods.json.
+    result = {k:v for k,v in metadata.items() if k not in ('mass_spectral_data', 'method_details')}
     pda = result.get('pda')
     if pda:
         keys = ('time_min', 'wavelength_nm', 'absorbance_mau')
@@ -139,6 +140,29 @@ def _package_session(store, metadata, original_paths_by_sha):
     return data, ''
 
 
+def _instrument_methods(store, add):
+    """Methods read from dropped .lcm/.lcd files, with the samples they were attached to and the original files."""
+    methods = getattr(store, 'instrument_methods', None) or {}
+    if not methods:
+        return []
+    users = {}
+    for bundle in store.iter_bundles():
+        for component in bundle.component_list:
+            key = component.metadata.get('method_key')
+            if key in methods:
+                users.setdefault(key, []).append(f'{bundle.name} ({bundle.component_display_name(component)})')
+    result = []
+    for key, method in methods.items():
+        entry = {'key': key, 'attached_to_samples': users.get(key, []), **method, 'original_file': None}
+        raw = (getattr(store, 'instrument_method_files', None) or {}).get(key)
+        if raw:
+            path = f"raw_data/methods/{(method.get('sha256') or hashlib.sha256(raw).hexdigest())[:12]}_{safe_name(method.get('file_name', 'method'))}"
+            add(path, raw, 'original LabSolutions method/data file the method was read from', key)
+            entry['original_file'] = path
+        result.append(entry)
+    return result
+
+
 def build_research_package(store, metadata, figure_request=None, formats=None, include_code=False):
     if not store.all_bundles():
         raise ValueError('Load data before exporting a FAIR-data package.')
@@ -177,7 +201,7 @@ def build_research_package(store, metadata, figure_request=None, formats=None, i
                 else:
                     add(processed_path, current_csv, 'current data before display smoothing', raw_path)
             sr = c.standardized
-            signal_meta = {**(sr.metadata if sr else {}), **c.metadata}
+            signal_meta = {k: v for k, v in {**(sr.metadata if sr else {}), **c.metadata}.items() if k != 'method_details'}
             signal_meta.setdefault('source_category', str(getattr(c.source_category, 'value', c.source_category)))
             if sr:
                 signal_meta.setdefault('detected_format', sr.identity.detected_format)
@@ -239,6 +263,12 @@ def build_research_package(store, metadata, figure_request=None, formats=None, i
     add('analysis/integration_settings.json', dumps(store.integration_service.serialize()), 'detection and integration settings')
     add('analysis/calibrations.json', dumps(store.calibration_service.serialize()), 'calibration models and points')
     add('analysis/history.json', dumps(store.analysis_history), 'timestamped before/after analysis history')
+    from services.shimadzu_method import methods_text
+    from services.lab_defaults import dwell_volume_ul
+    method_paragraphs = methods_text(store, metadata.get('column', ''), dwell_volume_ul())
+    instrument_methods = _instrument_methods(store, add)
+    if instrument_methods:
+        add('analysis/instrument_methods.json', dumps(instrument_methods), 'LC/PDA instrument methods read from LabSolutions files (gradient, flow, oven, detector)')
     add('analysis/plot_settings.json', dumps({'current': settings, 'files': store.file_ui_state}), 'visualization settings')
     software = {'GeckoPlotter': '2', 'Python': platform.python_version()}
     for library in ('numpy','pandas','scipy','plotly','kaleido','Pillow'):
@@ -283,11 +313,14 @@ def build_research_package(store, metadata, figure_request=None, formats=None, i
         if not metadata.get(key): issues.append(label+' is missing.')
     if not metadata.get('orcid'): issues.append('Add an NCCR-affiliated author ORCID for NCCR community submission.')
     if session_note: issues.append(session_note)
+    if any('[column:' in p['text'] for p in method_paragraphs):
+        issues.append('The methods paragraph has a [column: ...] placeholder: the LabSolutions files do not record the column. Add it before submission.')
     issues.append('Confirm applicable funding, sample/molecule identities and structure files before repository submission.')
     if any(not s['original_file'] for s in signals): issues.append('Some original upload bytes were unavailable; parsed CSV is included where available.')
     document = {'schema_version':'1.1', 'project_file': SESSION_PATH if session_bytes is not None else None,
         'project_file_note': session_note or None,
         'includes_analysis_code':include_code, 'exported_at':exported, 'dataset':metadata, 'software':software,
+        'methods_text': method_paragraphs or None,
         'signals':signals, 'figure_sources':figure_sources, 'figure_files':figure_files,
         'processing':{'smoothing':smoothing_fair_export_record(settings.get('smooth_window',0)),
             'uv_ms_timing_correction':{'applied':False,'status':'Not implemented'},
@@ -328,6 +361,9 @@ for path in metadata['figure_files']:
     if metadata.get('article_doi'): zenodo['related_identifiers']=[{'identifier':metadata['article_doi'],'relation':'isSupplementTo','scheme':'doi'}]
     add('metadata/zenodo.json',dumps(zenodo),'repository metadata draft')
     title=metadata.get('title') or 'Research dataset'
+    user_methods = metadata.get('methods') or ('' if method_paragraphs else
+        'No additional methods supplied. See signal metadata in metadata/dataset.json and analysis history.')
+    generated_methods=''.join(f"**{p['heading']}**\n\n{p['text']}\n\n" for p in method_paragraphs)
     if session_bytes is not None:
         project_line = ('- session/project.gecko: the whole workspace (peaks, calibrations, names, figure settings) as a GeckoPlotter project. '
             'Open this ZIP in GeckoPlotter (Open, or drop it in) to keep editing; the instrument files are read from raw_data/originals/ '
@@ -352,7 +388,7 @@ Funding: {metadata.get('funding','Not supplied')}
 - raw_data/: untouched parsed CSV at import plus original uploaded files where available. This is the imported instrument export, not a claim that upstream processing never occurred.
 - processed_data/: edited tables only, before display smoothing. Unchanged tables link to their raw CSV without a second copy.
 - figures/: publication files, editable figure JSON, and exact displayed x/y source data. Axis labels and units are in figure.json; signal column names and instrument metadata are linked in metadata/dataset.json.
-- analysis/: complete peak results, baselines, deconvolution parameters, calibration data, plot settings, timestamped before/after history. Analysis code and the figure recreation script are included only when selected.
+- analysis/: complete peak results, baselines, deconvolution parameters, calibration data, plot settings, timestamped before/after history. When LabSolutions method files were added, analysis/instrument_methods.json holds the LC gradient, flow, column oven and detector settings read from them (original files in raw_data/methods/). Analysis code and the figure recreation script are included only when selected.
 {project_line}
 - experiment_metadata.csv: links samples, signals, original filenames, raw and processed CSV, and imported metadata.
 - dataset_manifest.csv: file descriptions, source links and SHA-256 checksums. The manifest excludes itself.
@@ -363,7 +399,7 @@ Figure smoothing is Savitzky-Golay and does not overwrite raw points. Peak detec
 
 ## Methods and sample information
 
-{metadata.get('methods','No additional methods supplied. See signal metadata in metadata/dataset.json and analysis history.')}
+{generated_methods}{user_methods}
 
 ## Repository preparation
 
@@ -417,7 +453,7 @@ NCCR guidance: {POLICY}
     report+='<h2>Processing and output</h2><table>'+''.join('<tr><th>'+html.escape(k)+'</th><td>'+html.escape(v)+'</td></tr>' for k,v in summary)+'</table>'
     report+='<p>Figure smoothing preserves imported values. Detection parameters, baseline geometry, fitted components and calibrations are retained in the analysis files.</p>'
     report+='<h2>Samples</h2>'+pd.DataFrame([{'Sample':s['sample'],'Signal':s['signal'],'Source file':s['original_filename'],'Imported (UTC)':(s['imported_at'] or '').replace('T',' ')[:19]} for s in signals]).to_html(index=False,escape=True,border=0)
-    report+='<h2>Peak results</h2>'+table+'<h2>Analysis history (UTC)</h2><table><tr><th>Time</th><th>Change</th></tr>'+event_rows+'</table><h2>Methods</h2><p>'+html.escape(metadata.get('methods','Not supplied'))+'</p><h2>Files and metadata</h2><p><a href="README.md">README</a> · <a href="metadata/dataset.json">Dataset metadata</a> · <a href="analysis/history.json">Full edit history</a> · <a href="experiment_metadata.csv">Sample mapping</a></p>'
+    report+='<h2>Peak results</h2>'+table+'<h2>Analysis history (UTC)</h2><table><tr><th>Time</th><th>Change</th></tr>'+event_rows+'</table><h2>Methods</h2>'+''.join('<h3>'+html.escape(p['heading'])+'</h3><p>'+html.escape(p['text'])+'</p>' for p in method_paragraphs)+'<p>'+html.escape(metadata.get('methods','Not supplied'))+'</p><h2>Files and metadata</h2><p><a href="README.md">README</a> · <a href="metadata/dataset.json">Dataset metadata</a> · <a href="analysis/history.json">Full edit history</a> · <a href="experiment_metadata.csv">Sample mapping</a></p>'
     report+=('<p>Reopenable project: <code>'+SESSION_PATH+'</code> (open this ZIP in GeckoPlotter to keep editing the figure and analysis).</p>' if session_bytes is not None
              else '<p>Reopenable project: not included. '+html.escape(session_note)+'</p>')
     add('report.html',report,'readable analysis report')

@@ -119,6 +119,7 @@ def _sample_type(value):
 def _curated_metadata(source, version):
     """Small, consistently named and typed summary of the raw sections (no empty values)."""
     header, sample = source.get('Header', {}), source.get('Sample Information', {})
+    file_info = source.get('File Information', {})
     files, config = source.get('Original Files', {}), source.get('Configuration', {})
     detector = config.get('Detector Name') or config.get('Detector ID')
     curated = {
@@ -134,6 +135,9 @@ def _curated_metadata(source, version):
         'dilution_factor': _optional_number(sample.get('Dilution Factor')),
         'operator': sample.get('Operator Name') or None,
         'acquired': _iso_datetime(sample.get('Acquired')),
+        # The data file's own created/last-saved stamps; they identify the run inside the .lcd it came from.
+        'file_generated': _iso_datetime(file_info.get('Generated')),
+        'file_modified': _iso_datetime(file_info.get('Modified')),
         'exported': _iso_datetime(header.get('Output Date'), header.get('Output Time')),
         'instrument': config.get('Instrument Name') or None,
         'detector': detector or None,

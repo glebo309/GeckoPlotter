@@ -456,6 +456,8 @@ print(json.dumps({
     'upload_accept': next(n.accept for n in nodes if getattr(n, 'id', None) == 'session-open-upload'),
     'header': [getattr(n, 'id', None) for n in walk(next(n for n in nodes if getattr(n, 'className', '') == 'app-header'))
                if isinstance(getattr(n, 'id', None), str)],
+    'status_bar': [getattr(n, 'id', None) for n in walk(next(n for n in nodes if getattr(n, 'className', '') == 'status-bar'))
+                   if isinstance(getattr(n, 'id', None), str)],
     'legacy': [i for i in ids if i.startswith('exp-session')],
 }))
 '''
@@ -465,7 +467,8 @@ print(json.dumps({
 
 def test_layout_has_the_project_controls_in_the_header(layout_facts):
     header = layout_facts['header']
-    for needed in ('session-bar', 'session-name-btn', 'session-status', 'session-open-upload', 'session-open-btn',
+    assert 'session-status' in layout_facts['status_bar'] and 'session-status' not in header   # bottom status bar
+    for needed in ('session-bar', 'session-name-btn', 'session-open-upload', 'session-open-btn',
                    'session-open-menu', 'session-recent-list', 'session-save-btn'):
         assert needed in header, needed
     assert layout_facts['upload_accept'] == '.gecko,.zip'   # .zip: a FAIR package that holds a project

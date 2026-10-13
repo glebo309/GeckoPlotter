@@ -762,6 +762,11 @@ def _build_parts(store, client_state, project_name, embed_raw, raw_limit_bytes,
                                'embedded': embedded, 'path': path if embedded else None,
                                'original_path': entry['original_path']})
 
+    for key, raw_method in (getattr(store, 'instrument_method_files', None) or {}).items():
+        method = store.instrument_methods.get(key) or {}
+        if method.get('sha256') and len(raw_method) <= MAX_METHOD_FILE_BYTES:
+            tables[_method_path(method)] = raw_method
+
     peaks_state = store.peak_service.serialize()
     peak_count = sum(len(p) for p in peaks_state.get('peaks', {}).values())
     overlays = {}
@@ -788,6 +793,7 @@ def _build_parts(store, client_state, project_name, embed_raw, raw_limit_bytes,
         'peaks': peaks_state,
         'calibrations': store.calibration_service.serialize(),
         'integration_settings': store.integration_service.serialize(),
+        'instrument_methods': dict(store.instrument_methods),
     }
     client_state = dict(client_state or {})
     name = (project_name if project_name is not None else previous.get('project_name')) or ''
@@ -816,6 +822,31 @@ def _build_parts(store, client_state, project_name, embed_raw, raw_limit_bytes,
         'notes': notes,
     }
     return _Parts(manifest, state, client_state, tables, raw)
+
+
+MAX_METHOD_FILE_BYTES = 16_000_000
+
+
+def _method_path(method: dict) -> str:
+    return f"methods/{method['sha256']}/{_safe_zip_name(method.get('file_name') or 'method')}"
+
+
+def _restore_method_files(store, archive) -> None:
+    """Bring back the original .lcm/.lcd bytes saved with the project (for the FAIR package), verified by SHA-256."""
+    store.instrument_method_files.clear()
+    for key, method in store.instrument_methods.items():
+        sha = method.get('sha256')
+        if not (isinstance(sha, str) and re.fullmatch(r'[0-9a-f]{64}', sha)):
+            continue
+        path = _method_path(method)
+        if not archive.has(path):
+            continue
+        try:
+            data = archive.read(path, max_size=MAX_METHOD_FILE_BYTES)
+        except SessionFormatError:
+            continue
+        if hashlib.sha256(data).hexdigest() == sha:
+            store.instrument_method_files[key] = data
 
 
 def _write_archive(fileobj, parts: _Parts) -> None:
@@ -1466,7 +1497,8 @@ ROLLBACK_MAX_BYTES = 100_000_000
 
 _DICT_SECTIONS = ('visibility_state', 'collapse_state', 'file_ui_state', 'shared_plot_settings', 'group_overrides',
                   'hidden_sample_channels', 'channel_combine_modes', 'analysis_plot_settings',
-                  'analysis_previous', 'peaks', 'calibrations', 'integration_settings', 'lcms_eic_overlays')
+                  'analysis_previous', 'peaks', 'calibrations', 'integration_settings', 'lcms_eic_overlays',
+                  'instrument_methods')
 
 
 def _validate_state(state: dict) -> None:
@@ -1656,6 +1688,7 @@ def _install_session(store, archive: _Archive, session: dict, report: SessionRep
     state = remap(state)
     _prune_state(state, missing_ids)
     _apply_state(store, state, report)
+    _restore_method_files(store, archive)
 
     client_state = remap(session.get('client_state') or {})
     report.client_state = client_state
@@ -1697,6 +1730,10 @@ def _apply_state(store, state: dict, report: SessionReport) -> None:
     store.peak_service.deserialize(state.get('peaks') or {})
     store.calibration_service.deserialize(state.get('calibrations') or {})
     store.integration_service.deserialize(state.get('integration_settings') or {})
+    store.instrument_methods.clear()
+    store.instrument_methods.update(state.get('instrument_methods') or {})
+    from services.shimadzu_method import apply_methods
+    apply_methods(store)
 
     for file_id, overlays in (state.get('lcms_eic_overlays') or {}).items():
         entry = store.get_data_by_id(file_id)

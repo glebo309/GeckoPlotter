@@ -5,6 +5,8 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field, fields
 from typing import Dict, List, Optional
 
+import re
+
 import plotly.graph_objects as go
 
 from services.crameri_colors import CATEGORICAL, CATEGORICAL_LABELS
@@ -214,6 +216,9 @@ class PlotSettings:
 # PlotSettingsService
 # ---------------------------------------------------------------------------
 
+LIVE_SHARED_Y = 'gecko-live-shared-y'   # the on-screen shared Y label; publication views rebuild their own
+
+
 class PlotSettingsService:
     """Create, serialize, and apply :class:`PlotSettings` to Plotly figures."""
 
@@ -250,6 +255,45 @@ class PlotSettingsService:
         return list(COLOR_PALETTES.get(name, COLOR_PALETTES[DEFAULT_PALETTE]))
 
     # -- Legend coordinates --------------------------------------------------
+
+    @staticmethod
+    def share_stacked_y_label(fig, settings: 'PlotSettings') -> None:
+        """Stacked panes that measure the same thing share one centred Y label instead of repeating it per pane
+        (repeated titles overlap each other when the panes are short). Leaves publication figures alone: they
+        manage their own shared labels."""
+        panes = [k for k in fig.layout.to_plotly_json()
+                 if re.fullmatch(r'yaxis\d*', k) and not fig.layout[k].overlaying]
+        titles = {(fig.layout[k].title.text or '') for k in panes}
+        domains = {tuple(fig.layout[k].domain or ()) for k in panes}
+        if (len(panes) < 2 or len(domains) != len(panes) or len(titles) != 1 or not next(iter(titles))
+                or settings.axis_label_modes.get('y') == 'custom'
+                or any(getattr(a, 'name', None) in ('gecko-shared-y', LIVE_SHARED_Y) for a in fig.layout.annotations)):
+            return
+        label = next(iter(titles))
+        foreground = fig.layout.font.color or '#444'
+        shift = int(settings.tick_font_size * 3.4) + 8
+        for k in panes:
+            fig.layout[k].title.text = ''
+        fig.add_annotation(
+            name=LIVE_SHARED_Y, text=label, xref='paper', yref='paper', x=0, y=0.5, xanchor='right',
+            xshift=-shift, showarrow=False, textangle=-90, font=dict(size=settings.tick_font_size, color=foreground))
+        fig.update_layout(margin=dict(l=shift + settings.tick_font_size * 2 + 12))
+
+    @staticmethod
+    def unshare_stacked_y_label(fig) -> None:
+        """Undo share_stacked_y_label: put the label back on each pane so another view can lay it out itself."""
+        kept, label = [], None
+        for annotation in fig.layout.annotations:
+            if getattr(annotation, 'name', None) == LIVE_SHARED_Y:
+                label = annotation.text
+            else:
+                kept.append(annotation)
+        if label is None:
+            return
+        fig.layout.annotations = tuple(kept)
+        for key in fig.layout.to_plotly_json():
+            if re.fullmatch(r'yaxis\d*', key) and not fig.layout[key].overlaying and not fig.layout[key].title.text:
+                fig.layout[key].title.text = label
 
     @staticmethod
     def get_legend_coords(position: str) -> dict:
@@ -498,11 +542,14 @@ class PlotSettingsService:
                 or trace_name.startswith('peak:')
                 or trace_name == '__deselect__'
                 or 'baseline' in trace_name.lower()
+                or (isinstance(trace.meta, dict) and trace.meta.get('gecko_gradient'))
             )
             if is_peak_trace:
                 continue
 
-            color = palette[data_trace_idx % len(palette)]
+            trace_meta = trace.meta if isinstance(trace.meta, dict) else {}
+            slot = trace_meta.get('color_slot')
+            color = palette[(slot if isinstance(slot, int) else data_trace_idx) % len(palette)]
 
             trace.update(opacity=settings.trace_opacity)
 
