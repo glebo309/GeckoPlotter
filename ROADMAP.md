@@ -24,7 +24,7 @@ The May/June notes below are historical. The current UI and source are ahead of 
 
 ### Still open or deferred
 
-- [ ] Read the raw signal inside an .lcd (PDA 3D data and status logs are binary/compressed) so an .lcd can be opened without the text export. Needs a real .lcd and its export from the same injection.
+- [ ] Read the raw signal inside an .lcd so it can be opened without the text export. Container and most of the frame codec decoded (docs/LCD_FORMAT_NOTES.md); finishing needs one .lcd plus the text export of the same injection as ground truth.
 - [ ] Show more of the method: autosampler program, PDA lamp/slit/response, the integration parameters LabSolutions applied, the method audit trail.
 - [ ] Compare GeckoPlotter integration with LabSolutions' own peak tables (already in the export).
 - [ ] Recipes: save the analysis steps (integration, grouping, calibration) and apply them to a new set of files.
