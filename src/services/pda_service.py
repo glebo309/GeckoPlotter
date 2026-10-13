@@ -35,7 +35,9 @@ def _arrays(pda):
     try:
         time = np.asarray(pda['time_min'], dtype=float)
         wavelength = np.asarray(pda['wavelength_nm'], dtype=float)
-        intensity = np.asarray(pda['absorbance_mau'], dtype=float)
+        intensity = np.asarray(pda['absorbance_mau'])      # float32 stays float32: converting would copy the whole matrix
+        if not np.issubdtype(intensity.dtype, np.floating):
+            intensity = intensity.astype(float)
     except (KeyError, TypeError, ValueError) as exc:
         raise ValueError('The PDA matrix or its axes are missing.') from exc
     if (time.ndim != 1 or wavelength.ndim != 1 or not time.size or not wavelength.size
@@ -71,7 +73,7 @@ def extract_pda_views(pda, wavelength_nm=None, time_min=None):
             # Whole nanometres are the working unit; the column used is the nearest measured one.
             'wavelength_nm': float(round(wavelength[wi])), 'measured_wavelength_nm': float(wavelength[wi]),
             'time_index': ti, 'wavelength_index': wi,
-            'chromatogram': intensity[:, wi], 'spectrum': intensity[ti, :]}
+            'chromatogram': intensity[:, wi].astype(float), 'spectrum': intensity[ti, :].astype(float)}
 
 
 def _reduce_axis(values, limit, axis):

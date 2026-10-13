@@ -50,7 +50,7 @@ def test_decoder_round_trips_every_token_size():
         steps[[0, 256]] = rng.integers(-limit, limit, 2)
         return np.concatenate([np.cumsum(steps[:256]), np.cumsum(steps[256:])])
 
-    rows = [np.zeros(width, dtype=np.int64), row(12), row(3000), row(900_000), row(200_000_000)]
+    rows = [np.zeros(width, dtype=np.int64), row(12), row(3000), row(900_000), row(4_000_000)]
     raw = b''.join(_frame(row, width) for row in rows)
     matrix = lr.decode_matrix(raw, width, len(rows))
     assert np.array_equal(matrix, np.array(rows))
@@ -71,6 +71,9 @@ def test_decoder_rejects_damaged_data_instead_of_returning_garbage():
         lr.decode_matrix(raw, width, n_frames=2)                           # wrong declared frame count
     with pytest.raises(lr.LcdFormatError):
         lr.decode_matrix(raw, 100)                                         # implausible wavelength count
+    huge = _frame(np.concatenate([np.cumsum(np.full(256, 200_000_000)), np.zeros(44, dtype=np.int64)]), 300)
+    with pytest.raises(lr.LcdFormatError):
+        lr.decode_matrix(huge, 300)                                        # beyond what the instrument can record
 
 
 def test_sample_record_decodes_hex_text_numbers_and_times():

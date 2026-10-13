@@ -86,7 +86,7 @@ def _decode_group(buf: bytes, start: int, stop: int, count: int, out: np.ndarray
 
 
 def decode_matrix(raw: bytes, n_wavelengths: int, n_frames: Optional[int] = None) -> np.ndarray:
-    """All frames of ``3D Raw Data`` as an ``(n_frames, n_wavelengths)`` int64 array in uAU."""
+    """All frames of ``3D Raw Data`` as an ``(n_frames, n_wavelengths)`` int32 array in uAU (a 10 min run is 40 MB)."""
     if n_wavelengths <= FIRST_GROUP or n_wavelengths > 4096:
         raise LcdFormatError('Unexpected number of PDA wavelengths.')
     second = n_wavelengths - FIRST_GROUP
@@ -104,7 +104,9 @@ def decode_matrix(raw: bytes, n_wavelengths: int, n_frames: Optional[int] = None
             raise LcdFormatError('The PDA data has too many frames.')
     if n_frames is not None and len(frames) != n_frames:
         raise LcdFormatError(f'The PDA data has {len(frames)} frames, the file declares {n_frames}.')
-    matrix = np.zeros((len(frames), n_wavelengths), dtype=np.int64)
+    matrix = np.zeros((len(frames), n_wavelengths), dtype=np.int32)
+    values = np.zeros(n_wavelengths, dtype=np.int64)
+    limit = np.iinfo(np.int32).max
     for row, (start, length) in enumerate(frames):
         la = struct.unpack_from('<H', raw, start + 24)[0]
         first_start = start + 26
@@ -116,8 +118,11 @@ def decode_matrix(raw: bytes, n_wavelengths: int, n_frames: Optional[int] = None
         end = second_start + lb
         if end + 2 != start + length or struct.unpack_from('<H', raw, end)[0] != lb:
             raise LcdFormatError('A PDA frame has an inconsistent group length.')
-        _decode_group(raw, first_start, mid, FIRST_GROUP, matrix[row], 0)
-        _decode_group(raw, second_start, end, second, matrix[row], FIRST_GROUP)
+        _decode_group(raw, first_start, mid, FIRST_GROUP, values, 0)
+        _decode_group(raw, second_start, end, second, values, FIRST_GROUP)
+        if np.abs(values).max() > limit:
+            raise LcdFormatError('A PDA value is outside the expected range.')
+        matrix[row] = values
     return matrix
 
 
@@ -310,7 +315,7 @@ def channel_trace(matrix_uau: np.ndarray, wavelengths_nm: np.ndarray, wavelength
 # ---------------------------------------------------------------------------
 
 def read_lcd(source: Union[str, Path, bytes]) -> Dict[str, Any]:
-    """Read an ``.lcd``. Returns a dict with ``time_min``, ``wavelength_nm``, ``matrix_uau`` (int64), ``interval_ms``,
+    """Read an ``.lcd``. Returns a dict with ``time_min``, ``wavelength_nm``, ``matrix_uau`` (int32), ``interval_ms``,
     ``channels`` (wavelength, bandwidth), ``sample`` (record fields) and ``instrument``.
     """
     try:

@@ -55,7 +55,9 @@ class ShimadzuLCDPreset(FormatPreset):
         from services.lcd_reader import read_lcd, channel_trace
         lcd = read_lcd(path)
         time, wavelength = lcd['time_min'], lcd['wavelength_nm']
-        absorbance = lcd['matrix_uau'].astype(float) * UAU_TO_MAU
+        # float32 keeps every micro-AU count exactly (they are integers below 2**24) and halves the memory of a run:
+        # a 10 min run is 24001 x 412 values.
+        absorbance = np.multiply(lcd['matrix_uau'], UAU_TO_MAU, dtype=np.float32, casting='unsafe')
         start, end = lcd['scan_range_nm']
         source = {'Interval(msec)': str(lcd['interval_ms']), 'Start Time(min)': '0',
                   'End Time(min)': f'{time[-1]:.3f}', 'Start Wavelength(nm)': f'{start:g}',
@@ -84,10 +86,11 @@ class ShimadzuLCDPreset(FormatPreset):
                              'data': pd.DataFrame({'Time (min)': time, 'Absorbance (mAU)': trace * UAU_TO_MAU}),
                              'column_roles': dict(_ROLES), 'metadata': channel_meta})
         metadata['pda'] = pda
+        del lcd['matrix_uau']                    # only the float32 copy stays in memory
         if not channels:
             index = int(np.argmin(abs(wavelength - 254)))
             channels.append({'name': f'PDA {wavelength[index]:g} nm',
-                             'data': pd.DataFrame({'Time (min)': time, 'Absorbance (mAU)': absorbance[:, index]}),
+                             'data': pd.DataFrame({'Time (min)': time, 'Absorbance (mAU)': absorbance[:, index].astype(float)}),
                              'column_roles': dict(_ROLES),
                              'metadata': {'detector_channel': 'PDA', 'wavelength_nm': float(wavelength[index]),
                                           **_acquisition_extent(source, time), 'derived_from': 'PDA 3D',
