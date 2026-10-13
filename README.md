@@ -15,6 +15,23 @@ python app.py
 
 Open http://127.0.0.1:8052 and drag files onto the drop zone.
 
+### Install for the group
+
+Each person runs their own copy (the app keeps one workspace per running process, so a shared server would mix everyone's
+data):
+
+```bash
+git clone -b ui-professional-workspace https://github.com/glebo309/GeckoPlotter.git
+cd GeckoPlotter
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+python app.py
+```
+
+The repository is private: collaborators need to be added on GitHub first. Settings: `GECKO_PORT` (default 8052),
+`GECKO_HOST` (`0.0.0.0` makes it reachable from the local network, one shared workspace for everyone who opens it),
+`GECKO_DEBUG=0` (turn the developer debugger off, always do this on a network).
+
 ## Supported Formats
 
 | Format | Instrument / Source | Extension |

@@ -2165,4 +2165,7 @@ clientside_callback(
 if __name__ == '__main__':
     log.info("Starting GeckoPlotter V2...")
     log.info("Upload TXT chromatograms or CSV UV-Vis files to get started!")
-    app.run(debug=True, port=8052)
+    # Local use by default. GECKO_HOST=0.0.0.0 serves the local network (the app keeps one workspace per process,
+    # so everyone who opens it shares it); GECKO_DEBUG=0 turns the Werkzeug debugger off, which a shared server needs.
+    app.run(host=os.environ.get('GECKO_HOST', '127.0.0.1'), port=int(os.environ.get('GECKO_PORT', '8052')),
+            debug=os.environ.get('GECKO_DEBUG', '1') != '0')
