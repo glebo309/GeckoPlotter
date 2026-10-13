@@ -7,7 +7,11 @@
 //  * autosave:   ~20 s after the last change one write to `session-autosave-fire` runs the server autosave
 //                (debounced here, so no polling and no dcc.Interval ticking while idle)
 //  * unload:     the tab asks for confirmation only while there are unsaved changes
-//  * open:       dropping or picking a .gecko file shows "Opening ..." at once; the server callbacks route the file
+//  * open:       dropping or picking a .gecko file (or a FAIR package .zip that holds one) shows "Opening ..." at once;
+//                the server callbacks route the file
+//  * guard:      opening while there are unsaved changes first asks (plain-HTML bar #session-confirm): Save first /
+//                Open anyway / Cancel. Picker, drop, banner Restore and the recent menu all go through it; an empty
+//                or clean workspace opens without asking. No server round trip: the bar is driven from here.
 (function () {
     'use strict';
 
@@ -19,7 +23,8 @@
     var CONTENT_IDS = ['loaded-files', 'peak-change-trigger', 'current-plot-settings', 'file-order', 'plot-tabs',
                        'cal-revision', 'hidden-files'];
 
-    var state = {dirty: false, lastChange: 0, lastActivity: 0, quietUntil: 0, timer: null, seen: {}, settle: null};
+    var state = {dirty: false, lastChange: 0, lastActivity: 0, quietUntil: 0, timer: null, seen: {}, settle: null,
+                 pending: null, lastStampTs: null, bypass: false};
 
     function dc() { return window.dash_clientside || {}; }
     function nu() { return dc().no_update; }
@@ -34,8 +39,9 @@
     }
 
     // ---- file names ---------------------------------------------------------
+    // A project is a .gecko, or a FAIR package (.zip) that carries one (the server looks inside the zip).
     function isSessionFile(name) {
-        return typeof name === 'string' && /\.gecko$/i.test(name.trim());
+        return typeof name === 'string' && /\.(gecko|zip)$/i.test(name.trim());
     }
     function sessionFileIn(list) {
         for (var i = 0; list && i < list.length; i++) {
@@ -46,6 +52,69 @@
     }
     function showOpening(file) {
         setProps('session-status', {children: 'Opening ' + file.name + '…'});
+    }
+
+
+    // ---- unsaved-changes guard ----------------------------------------------------
+    // `pending` = {run: fn that performs the open, saving: bool, stampTs}. The bar is plain HTML (#session-confirm).
+    function showConfirm(show) { setProps('session-confirm', {hidden: !show}); }
+    function setConfirmText(text) { setProps('session-confirm-text', {children: text}); }
+    var CONFIRM_TEXT = 'Opening replaces the current workspace. Unsaved changes will be lost.';
+
+    // Runs `run` now when nothing would be lost; otherwise asks first. Returns true when it asked (caller must stop).
+    function guardOpen(run) {
+        if (state.bypass || !state.dirty) return false;
+        state.pending = {run: run, saving: false, stampTs: null};
+        setConfirmText(CONFIRM_TEXT);
+        showConfirm(true);
+        return true;
+    }
+    function resolvePending(proceed) {
+        var pending = state.pending;
+        state.pending = null;
+        showConfirm(false);
+        if (!pending || !proceed) return;
+        state.bypass = true;
+        try { pending.run(); } finally { state.bypass = false; }
+    }
+    function confirmAction(action) {
+        var pending = state.pending;
+        if (!pending) { showConfirm(false); return; }
+        if (action === 'cancel') { resolvePending(false); return; }
+        if (action === 'discard') { resolvePending(true); return; }
+        if (action === 'save') {
+            pending.saving = true;
+            pending.stampTs = state.lastStampTs;
+            setConfirmText('Saving… the project opens as soon as it is saved.');
+            savePressed();
+        }
+    }
+    // Called from statusText on every dirty/stamp change: a finished save continues the open, a failed one stops waiting.
+    function afterStatus(dirty, stamp) {
+        state.lastStampTs = stamp ? stamp.ts : null;
+        var pending = state.pending;
+        if (!pending || !pending.saving) return;
+        if (stamp && stamp.ts !== pending.stampTs) {
+            if (stamp.kind === 'saved' && !dirty) { resolvePending(true); return; }
+            if (stamp.kind === 'failed') {
+                pending.saving = false;
+                setConfirmText('Could not save. ' + CONFIRM_TEXT);
+            }
+        }
+    }
+
+    function readAsDataURL(file, done) {
+        var reader = new window.FileReader();
+        reader.onload = function () { done(String(reader.result)); };
+        reader.onerror = function () { setProps('session-status', {children: 'Could not read ' + file.name}); };
+        reader.readAsDataURL(file);
+    }
+    // Feed a user-chosen file to the Open flow (the same input the picker fills).
+    function openFile(file) {
+        showOpening(file);
+        readAsDataURL(file, function (contents) {
+            setProps('session-open-upload', {contents: contents, filename: file.name});
+        });
     }
 
     // ---- change tracking ------------------------------------------------------
@@ -152,6 +221,7 @@
     // Inputs: session-dirty, session-stamp. Output: session-status.children
     function statusText(dirty, stamp) {
         state.dirty = !!dirty;
+        afterStatus(state.dirty, stamp);
         var at = stamp && stamp.at ? ' ' + stamp.at : '';
         if (stamp && stamp.kind === 'failed') return stamp.message || 'Could not complete';
         if (dirty) {
@@ -184,6 +254,7 @@
     }
 
     function onKeyDown(e) {
+        if (e.key === 'Escape' && state.pending) { resolvePending(false); return; }
         if (!(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey) return;
         var key = String(e.key || '').toLowerCase();
         if (key !== 's' && key !== 'o') return;
@@ -199,15 +270,28 @@
         return '';
     }
 
+    function swallow(e) {
+        if (e.preventDefault) e.preventDefault();
+        if (e.stopPropagation) e.stopPropagation();
+        if (e.stopImmediatePropagation) e.stopImmediatePropagation();
+    }
     function onDrop(e) {
         var file = sessionFileIn(e.dataTransfer && e.dataTransfer.files);
-        if (file) showOpening(file);
+        if (!file) return;
+        if (guardOpen(function () { openFile(file); })) { swallow(e); return; }   // the dropzone never sees it
+        showOpening(file);
     }
     function onFileInput(e) {
         var target = e.target;
         if (!target || target.type !== 'file') return;
         var file = sessionFileIn(target.files);
-        if (file) showOpening(file);
+        if (!file) return;
+        if (guardOpen(function () { openFile(file); })) {
+            swallow(e);
+            try { target.value = ''; } catch (err) {}      // choosing the same file again must fire again
+            return;
+        }
+        showOpening(file);
     }
 
     function setMenu(open) { setProps('session-open-menu', {hidden: !open}); }
@@ -215,13 +299,19 @@
     function onClick(e) {
         var target = e.target && e.target.closest ? e.target : null;
         if (!target) return;
+        var choice = target.closest('[data-confirm]');
+        if (choice) { confirmAction(choice.getAttribute('data-confirm')); return; }
         var toggle = target.closest('#session-open-menu-btn');
         if (toggle) { menuOpen = !menuOpen; setMenu(menuOpen); return; }
+        var restore = target.closest('#session-banner-restore');
+        if (restore && guardOpen(function () { restore.click(); })) { swallow(e); return; }
         var item = target.closest('[data-session-action], [data-session-recent]');
         if (item) {
             var path = item.getAttribute('data-session-recent');
-            if (path) setProps('session-recent-pick', {data: {path: path, ts: now()}});
-            else if (item.getAttribute('data-session-action') === 'open-file') openPicker();
+            if (path) {
+                var pick = function () { setProps('session-recent-pick', {data: {path: path, ts: now()}}); };
+                if (!guardOpen(pick)) pick();
+            } else if (item.getAttribute('data-session-action') === 'open-file') openPicker();
         }
         if (menuOpen) { menuOpen = false; setMenu(false); }
     }
@@ -283,8 +373,8 @@
         sessionIO: {
             trackChange: trackChange, armRestore: armRestore, finishRestore: finishRestore,
             statusText: statusText, nameLabel: nameLabel,
-            isSessionFile: isSessionFile, sessionFileIn: sessionFileIn,
-            onKeyDown: onKeyDown, onBeforeUnload: onBeforeUnload, onDrop: onDrop, onFileInput: onFileInput,
+            isSessionFile: isSessionFile, sessionFileIn: sessionFileIn, guardOpen: guardOpen, confirmAction: confirmAction,
+            onClick: onClick, onKeyDown: onKeyDown, onBeforeUnload: onBeforeUnload, onDrop: onDrop, onFileInput: onFileInput,
             state: state,
             CONSTANTS: {AUTOSAVE_DELAY: AUTOSAVE_DELAY, SETTLE_MS: SETTLE_MS, QUIET_MS: QUIET_MS, CONTENT_IDS: CONTENT_IDS}
         }

@@ -32,7 +32,7 @@
 .session-overlays > * { pointer-events:auto; }
 .session-banner, .session-message { background:#2a2a2d; color:#f2f2f3; border-radius:8px;
   box-shadow:0 4px 16px rgba(0,0,0,.22); font-size:13px; }
-.session-banner[hidden], .session-message[hidden] { display:none; }
+.session-banner[hidden], .session-message[hidden], .session-confirm[hidden] { display:none; }
 .session-banner { display:flex; align-items:center; gap:10px; padding:7px 8px 7px 14px; }
 .session-banner-text { flex:1 1 auto; min-width:0; }
 .session-banner-btn { height:26px; padding:0 12px; border:1px solid rgba(255,255,255,.28); border-radius:6px; background:transparent;

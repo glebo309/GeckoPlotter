@@ -146,9 +146,10 @@ def register_upload_callbacks(app: dash.Dash, data_manager) -> None:
         if not contents_list or not filenames:
             return (dash.no_update,) * 9
 
-        # A project file (.gecko) is never ingested as data: hand it to the Open flow (callbacks/session_callbacks.py).
-        from services.session_files import is_session_filename, stash_session_upload
-        project = next(((c, f) for c, f in zip(contents_list, filenames) if is_session_filename(f)), None)
+        # A project file (.gecko, or a FAIR package .zip that holds one) is never ingested as data: hand it to the
+        # Open flow (callbacks/session_callbacks.py).
+        from services.session_files import is_project_upload, stash_session_upload
+        project = next(((c, f) for c, f in zip(contents_list, filenames) if is_project_upload(c, f)), None)
         if project is not None:
             try:
                 return (dash.no_update,) * 8 + (stash_session_upload(*project),)

@@ -3,6 +3,7 @@ import io
 import json
 import zipfile
 import pandas as pd
+import pytest
 from services.data_store import Bundle, BundleType, Component, ComponentRole, DataStore
 from services.research_package import build_research_package, record_analysis_state
 
@@ -86,3 +87,125 @@ def test_mutable_pda_payload_still_records_value_changes():
     pda['absorbance_mau'][0][0] = 9.
     new = _history_metadata({'pda': pda})['pda']['data_sha256']
     assert old != new and 'stale' not in (old, new)
+
+
+# ---------------------------------------------------------------------------
+# A FAIR package is also a reopenable project (session/project.gecko)
+# ---------------------------------------------------------------------------
+
+def _package_of_synthetic_workspace(**kwargs):
+    from test_session_service import synthetic_store
+    store, a, b = synthetic_store()
+    record_analysis_state(store, {'smooth_window': 9}, ['pt-smooth-window.value'])
+    return store, build_research_package(store, {'title': 'Ala study'}, None, [], **kwargs)
+
+
+def _peaks(store):
+    return {fid: [dict(vars(p)) for p in plist] for fid, plist in store.peak_service._peaks.items()}
+
+
+def test_package_contains_a_reopenable_project_listed_everywhere():
+    store, payload = _package_of_synthetic_workspace()
+    z = zipfile.ZipFile(io.BytesIO(payload))
+    assert 'session/project.gecko' in z.namelist()
+    manifest = pd.read_csv(io.BytesIO(z.read('dataset_manifest.csv')))
+    row = manifest[manifest.path == 'session/project.gecko'].iloc[0]
+    assert hashlib.sha256(z.read('session/project.gecko')).hexdigest() == row.sha256
+    assert 'reopenable' in row.source or 'reopenable' in row['kind']
+    assert 'session/project.gecko' in z.read('README.md').decode()
+    assert 'session/project.gecko' in z.read('report.html').decode()
+    meta = json.loads(z.read('metadata/dataset.json'))
+    assert meta['project_file'] == 'session/project.gecko' and meta['project_file_note'] is None
+    # State only: the instrument files are not stored a second time inside the project.
+    inner = zipfile.ZipFile(io.BytesIO(z.read('session/project.gecko')))
+    assert not any(n.startswith('raw/') for n in inner.namelist())
+
+
+def test_opening_a_package_restores_peaks_and_files():
+    from services import session_service as ss
+    store, payload = _package_of_synthetic_workspace()
+    info = ss.inspect_session(payload)
+    assert info.from_package and info.project_name == 'Ala study' and len(info.samples) == 2
+    fresh = DataStore()
+    report = ss.restore_session(fresh, payload)
+    assert report.ok, (report.errors, report.missing_files)
+    assert report.missing_files == [] and report.restored['bundles'] == 2
+    assert _peaks(fresh) == _peaks(store) and _peaks(fresh)
+    assert list(fresh.all_bundles()) == list(store.all_bundles())
+    for bundle in store.iter_bundles():
+        again = fresh.get_bundle(bundle.bundle_id)
+        pd.testing.assert_frame_equal(again.dataframe, bundle.dataframe)
+        assert [c.raw_bytes for c in again.component_list] == [c.raw_bytes for c in bundle.component_list]
+    assert 'path' not in fresh.session_meta       # a deposit is not "the project file" that Save would overwrite
+    assert fresh.calibration_service.serialize() == store.calibration_service.serialize()
+
+
+def test_package_opens_from_a_path_and_from_an_unzipped_folder(tmp_path):
+    from services import session_service as ss
+    store, payload = _package_of_synthetic_workspace()
+    zip_path = tmp_path / 'deposit.zip'
+    zip_path.write_bytes(payload)
+    first = DataStore()
+    assert ss.restore_session(first, zip_path).missing_files == []
+    assert _peaks(first) == _peaks(store)
+    folder = tmp_path / 'unzipped'
+    zipfile.ZipFile(zip_path).extractall(folder)
+    second = DataStore()
+    report = ss.restore_session(second, folder / 'session' / 'project.gecko')   # originals found at ../raw_data/originals
+    assert report.missing_files == [], report.missing_files
+    assert _peaks(second) == _peaks(store)
+
+
+def test_export_never_fails_when_the_project_cannot_be_built(monkeypatch):
+    from services import session_service as ss
+    def boom(*a, **k):
+        raise RuntimeError('disk on fire')
+    monkeypatch.setattr(ss, 'build_session', boom)
+    store, c = workspace()
+    payload = build_research_package(store, {'title': 'T'}, None, [])
+    z = zipfile.ZipFile(io.BytesIO(payload))
+    assert 'session/project.gecko' not in z.namelist()
+    meta = json.loads(z.read('metadata/dataset.json'))
+    assert meta['project_file'] is None and 'disk on fire' in meta['project_file_note']
+    assert 'disk on fire' in z.read('report.html').decode()
+    assert 'no reopenable project' in z.read('README.md').decode()
+    with pytest.raises(ss.SessionFormatError, match='does not contain a GeckoPlotter project'):
+        ss.restore_session(DataStore(), payload)
+
+
+def test_oversized_project_is_left_out_with_a_note(monkeypatch):
+    from services import research_package
+    monkeypatch.setattr(research_package, 'SESSION_MAX_BYTES', 10)
+    store, c = workspace()
+    z = zipfile.ZipFile(io.BytesIO(build_research_package(store, {}, None, [])))
+    assert 'session/project.gecko' not in z.namelist()
+    assert 'left out' in json.loads(z.read('metadata/dataset.json'))['project_file_note']
+
+
+def test_zip_with_unsafe_member_names_is_refused():
+    from services import session_service as ss
+    store, payload = _package_of_synthetic_workspace()
+    for bad in ('/etc/evil', '../evil', 'a/../../evil'):
+        out = io.BytesIO()
+        with zipfile.ZipFile(io.BytesIO(payload)) as src, zipfile.ZipFile(out, 'w') as dst:
+            for info in src.infolist():
+                dst.writestr(info.filename, src.read(info.filename))
+            dst.writestr(bad, b'x')
+        with pytest.raises(ss.SessionFormatError, match='outside the package'):
+            ss.restore_session(DataStore(), out.getvalue())
+
+
+def test_ordinary_zip_is_not_a_project():
+    import base64
+    from services import session_files as sf
+    from services import session_service as ss
+    plain_zip = io.BytesIO()
+    with zipfile.ZipFile(plain_zip, 'w') as z:
+        z.writestr('notes.txt', 'hello')
+    url = lambda data: 'data:application/zip;base64,' + base64.b64encode(data).decode()
+    _, payload = _package_of_synthetic_workspace()
+    assert sf.is_project_upload(url(payload), 'Ala study.zip')
+    assert not sf.is_project_upload(url(plain_zip.getvalue()), 'notes.zip')
+    assert sf.is_project_upload('data:,', 'x.gecko') and not sf.is_project_upload(url(payload), 'x.csv')
+    with pytest.raises(ss.SessionFormatError):
+        ss.restore_session(DataStore(), plain_zip.getvalue())

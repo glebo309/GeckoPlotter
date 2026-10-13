@@ -211,14 +211,27 @@ Everything needed (ids, peaks, calibrations) is in plain services; `state.json` 
 read directly (peaks keyed by peak-owner id). Remember `restore_session` replaces the store's content. Python
 `json` is used with NaN allowed (non-finite floats are written as `NaN`).
 
-## FAIR research package
+## FAIR research package (a deposit that can be reopened)
 
-`build_research_package` could embed the session as `session/project.gecko` (originals are already in the
-package, so build it with `embed_raw=False` and `source_paths` pointing at the package-relative
-`raw_data/originals/...` files, and have `restore_session` accept the package folder via `search_dirs`), and
-accept a session through the same `restore_session` for "re-run this analysis". The manifest's SHA-256 list is the
-same hash the package manifest records, so the two can be cross-checked. Nothing in the package format needs to
-change for that; it is intentionally not wired yet.
+`build_research_package` adds `session/project.gecko`, the workspace as a project (peaks, calibrations, names, figure
+settings, edited tables). It is built with `build_session(..., embed_raw=False, source_paths=...)`: the package
+already holds every original under `raw_data/originals/`, so the project stores those package-relative paths and
+SHA-256 instead of a second copy (no doubling of the ZIP). The file is listed in the manifest (with checksum), the
+README, the report and `metadata/dataset.json` (`project_file`, `project_file_note`). If building fails, or the result
+exceeds `research_package.SESSION_MAX_BYTES` (200 MB, only edited tables can get that large), the file is left out and
+the reason is added to the package issues, README, report and `project_file_note`; the export never fails because of it.
+
+Opening: `restore_session` / `inspect_session` accept a package `.zip` (or its path). `_Archive` detects a ZIP without a
+top-level `manifest.json`, requires `session/project.gecko` (a package without it gives "exported without a project";
+an unrelated ZIP gives the normal "not a session file" error), refuses a ZIP with absolute, drive-letter or `..` member
+names, and reads originals out of the outer ZIP (`_RawResolver`, exact member name). `SessionInfo.from_package` is set,
+and `store.session_meta` gets no `path`, so a deposit is never mistaken for "the project file". An unzipped
+package works too: opening `<root>/session/project.gecko` resolves the relative originals against `<root>`, and the
+"Locate folder" retry accepts the package root. The GUI Open path accepts `.zip` in the picker (`accept='.gecko,.zip'`),
+drops and the import zones (`session_files.is_project_upload` looks only at the ZIP's file list, so an ordinary ZIP is
+not taken for a project), and `stash_session_upload` keeps the `.zip` suffix. Tests: `tests/test_research_package.py`
+(last block), `tests/test_session_gui.py::test_fair_package_zip_is_routed_to_open_and_opens_the_project`.
+Existing research-package tests did not assert exact file lists, so none needed changing.
 
 ## GUI
 
@@ -304,11 +317,30 @@ edit would overwrite the restored settings), and (d) clears the unsaved flag.
   anything. The Open caret menu lists the last five **autosaves** instead (they live on the server and restore by path).
 * Uploaded `.gecko` files are kept as a temp copy (`<tmp>/geckoplotter-sessions/`) only while originals are missing, so
   Retry does not upload again; the copy is deleted when the open is complete (copies older than a day are swept).
-* Opening replaces the workspace without a confirmation prompt (the autosave is at most 20 s old).
+* Opening while the workspace has unsaved changes asks first (see "Open guard"); an empty or clean workspace opens
+  without asking.
+* A FAIR package is opened through the same Open flow; the package keeps its originals in the ZIP, the project inside
+  does not embed them again (decision: smaller package; the SHA-256 check still applies).
+* The guard also covers a non-project `.zip` dropped while dirty (no ZIP ingestion exists): it asks, then the Open flow
+  reports "not a session file" without touching the workspace.
 * A project name equal to "Autosave" (the engine's default for unnamed autosaves) is shown as Untitled project.
+
+### Open guard (unsaved changes)
+
+Clientside only (`session-io.js`, no new server callback). When `state.dirty` is true, every way of opening a
+project (picker `change`, window `drop`, banner **Restore**, recent-autosave menu item) is intercepted in the capture
+phase: the event is swallowed (the dropzone never sees the file; the file input is reset so the same file can be
+chosen again) and the plain-HTML bar `#session-confirm` (in `create_session_banner`, hidden by default) shows
+"Opening replaces the current workspace. Unsaved changes will be lost." with **Save first** / **Open anyway** /
+**Cancel** (Escape cancels). **Open anyway** reads the file in the browser and writes `contents` + `filename` of
+`session-open-upload`, so the ordinary Open callback runs (same for dropped files and the import zones). **Save first**
+presses the real Save button (an untitled project asks for its name first), waits for the next `saved` stamp with
+`dirty == false`, then continues; a failed save keeps the bar with "Could not save" so the user can still choose.
+Dirty state comes from the existing tracking, so an empty workspace is never dirty and never asks. The picker is
+guarded after the file is chosen. Tests: `tests/js/session-io.test.cjs` (guard block).
 
 ### Known gaps
 
-Opening while there are unsaved changes does not warn. The browser behaviour (store cascade after a restore, late
+If the guard swallows a drop, the drag overlay of a dropzone may need a mouse move to clear. The browser behaviour (store cascade after a restore, late
 step, drop routing, keyboard) is covered by unit tests of the functions and of the layout/callback wiring, not by a
 running browser; the first manual check should be: save, reload the page, press Restore, compare plots and tabs.

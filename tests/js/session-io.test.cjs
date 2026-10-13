@@ -207,3 +207,144 @@ test('project name label falls back to Untitled project and updates the window t
     assert.equal(env.io.nameLabel('  Ala 5 mM '), 'Ala 5 mM');
     assert.equal(env.document.title, 'Ala 5 mM - GeckoPlotter');
 });
+
+// ---- unsaved-changes guard ---------------------------------------------------------------
+function makeDirty(env) {
+    track(env, ['loaded-files']);                // dirty flag set by a content change
+    env.io.statusText(true, null);
+    assert.equal(env.io.state.dirty, true);
+    env.props.length = 0;
+}
+function fakeEvent(extra) {
+    const e = {prevented: 0, stopped: 0, preventDefault() { e.prevented++; }, stopPropagation() { e.stopped++; }, ...extra};
+    return e;
+}
+function fakeReader(env) {
+    env.window.FileReader = function () {
+        this.readAsDataURL = () => { this.result = 'data:application/zip;base64,QUJD'; this.onload(); };
+    };
+}
+const hidden = env => env.props.filter(p => p[0] === 'session-confirm').map(p => p[1].hidden);
+
+test('a clean or empty workspace opens without asking', () => {
+    const env = load();
+    const e = fakeEvent({dataTransfer: {files: [{name: 'p.gecko'}]}});
+    env.listeners.window.drop(e);
+    assert.equal(e.prevented + e.stopped, 0);                    // the dropzone gets the file untouched
+    assert.deepEqual(plain(env.props), [['session-status', {children: 'Opening p.gecko…'}]]);
+    assert.equal(env.io.guardOpen(() => { throw new Error('must not run here'); }), false);
+});
+
+test('.zip (FAIR package) counts as a project file by name', () => {
+    const env = load();
+    assert.ok(env.io.isSessionFile('Study.zip') && env.io.isSessionFile('A.ZIP'));
+    assert.ok(!env.io.isSessionFile('a.zip.csv'));
+});
+
+test('dropping a project over unsaved changes asks first and swallows the drop', () => {
+    const env = load();
+    makeDirty(env);
+    const e = fakeEvent({dataTransfer: {files: [{name: 'old.gecko'}]}});
+    env.listeners.window.drop(e);
+    assert.ok(e.prevented >= 1 && e.stopped >= 1);
+    assert.deepEqual(hidden(env), [false]);
+    assert.ok(env.props.some(p => p[0] === 'session-confirm-text' && /Unsaved changes will be lost/.test(p[1].children)));
+    assert.ok(!env.props.some(p => p[0] === 'session-open-upload'));      // nothing opened yet
+});
+
+test('Open anyway feeds the file to the Open flow; Cancel drops it', () => {
+    const env = load();
+    fakeReader(env);
+    makeDirty(env);
+    env.listeners.window.drop(fakeEvent({dataTransfer: {files: [{name: 'old.gecko'}]}}));
+    env.io.confirmAction('discard');
+    assert.deepEqual(plain(env.props.filter(p => p[0] === 'session-open-upload')),
+        [['session-open-upload', {contents: 'data:application/zip;base64,QUJD', filename: 'old.gecko'}]]);
+    assert.equal(hidden(env).pop(), true);
+
+    env.props.length = 0;
+    env.listeners.window.drop(fakeEvent({dataTransfer: {files: [{name: 'x.zip'}]}}));
+    env.io.confirmAction('cancel');
+    assert.ok(!env.props.some(p => p[0] === 'session-open-upload'));
+    assert.equal(hidden(env).pop(), true);
+    env.io.confirmAction('discard');                                       // nothing pending: harmless
+    assert.ok(!env.props.some(p => p[0] === 'session-open-upload'));
+});
+
+test('picker: a chosen project is held back and the input reset; other files are untouched', () => {
+    const env = load();
+    makeDirty(env);
+    const input = {type: 'file', value: 'C:\\fakepath\\p.gecko', files: [{name: 'p.gecko'}]};
+    const e = fakeEvent({target: input});
+    env.listeners.document.change(e);
+    assert.ok(e.stopped >= 1);
+    assert.equal(input.value, '');
+    assert.deepEqual(hidden(env), [false]);
+    env.io.confirmAction('cancel');
+    const csv = fakeEvent({target: {type: 'file', files: [{name: 'a.csv'}]}});
+    env.listeners.document.change(csv);
+    assert.equal(csv.stopped, 0);
+});
+
+test('Save first runs the save flow, then opens once the saved stamp arrives', () => {
+    const env = load();
+    fakeReader(env);
+    makeDirty(env);
+    env.io.statusText(true, {kind: 'autosaved', ts: 5, at: '10:00', fired: 1});   // an older stamp is already showing
+    env.listeners.window.drop(fakeEvent({dataTransfer: {files: [{name: 'old.gecko'}]}}));
+    env.io.confirmAction('save');
+    assert.deepEqual(env.clicks, ['save']);
+    env.io.statusText(true, {kind: 'autosaved', ts: 5, at: '10:00', fired: 1});   // same stamp: keep waiting
+    assert.ok(!env.props.some(p => p[0] === 'session-open-upload'));
+    env.io.statusText(false, {kind: 'saved', ts: 9, at: '10:01'});                 // the save finished
+    assert.equal(env.props.filter(p => p[0] === 'session-open-upload').length, 1);
+    assert.equal(hidden(env).pop(), true);
+});
+
+test('a failed Save keeps the bar so the user can still choose', () => {
+    const env = load();
+    fakeReader(env);
+    makeDirty(env);
+    env.listeners.window.drop(fakeEvent({dataTransfer: {files: [{name: 'old.gecko'}]}}));
+    env.io.confirmAction('save');
+    env.io.statusText(true, {kind: 'failed', ts: 11, message: 'Save failed'});
+    assert.ok(!env.props.some(p => p[0] === 'session-open-upload'));
+    assert.ok(env.props.some(p => p[0] === 'session-confirm-text' && /Could not save/.test(p[1].children)));
+    env.io.confirmAction('discard');
+    assert.equal(env.props.filter(p => p[0] === 'session-open-upload').length, 1);
+});
+
+test('recent menu and banner Restore are guarded too; Escape cancels', () => {
+    const env = load();
+    makeDirty(env);
+    const recentEl = {getAttribute: n => n === 'data-session-recent' ? '/tmp/a.gecko' : null};
+    const target = {closest: sel => sel.includes('data-session-recent') ? recentEl : null};
+    env.io.onClick(fakeEvent({target}));
+    assert.ok(!env.props.some(p => p[0] === 'session-recent-pick'));
+    env.io.confirmAction('discard');
+    assert.deepEqual(plain(env.props.filter(p => p[0] === 'session-recent-pick')).map(p => p[1].data.path), ['/tmp/a.gecko']);
+
+    env.props.length = 0;
+    let restored = 0;
+    const restoreEl = {click: () => { restored++; env.io.onClick(fakeEvent({target: restoreTarget})); }};
+    const restoreTarget = {closest: sel => sel.includes('session-banner-restore') ? restoreEl : null};
+    const e = fakeEvent({target: restoreTarget});
+    env.io.onClick(e);
+    assert.ok(e.stopped >= 1 && restored === 0);
+    env.listeners.window.keydown({key: 'Escape'});
+    assert.equal(hidden(env).pop(), true);
+    assert.equal(env.io.state.pending, null);
+
+    env.io.onClick(fakeEvent({target: restoreTarget}));
+    env.io.confirmAction('discard');
+    assert.equal(restored, 1);                       // re-clicked once, and let through the guard this time
+});
+
+test('data-confirm buttons are routed by the click handler', () => {
+    const env = load();
+    makeDirty(env);
+    env.listeners.window.drop(fakeEvent({dataTransfer: {files: [{name: 'p.gecko'}]}}));
+    const btn = {getAttribute: () => 'cancel'};
+    env.io.onClick(fakeEvent({target: {closest: sel => sel.includes('data-confirm') ? btn : null}}));
+    assert.equal(env.io.state.pending, null);
+});

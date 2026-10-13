@@ -20,3 +20,5 @@ Sources consulted:
 The NCCR policy distinguishes the dataset DOI from the article DOI, requires a root README linking back to the record, and asks for open representations, sufficient descriptions, a license, author identifiers and appropriate funding acknowledgement. The app prepares the files and exposes the missing metadata without claiming repository acceptance.
 
 The default package omits bundled source code and per-signal metadata copies. Signal metadata remains in dataset.json and the sample mapping. Unchanged current tables link to the raw CSV; edited tables keep their own copy. Complete edit history remains included. The ? link opens assets/fair-data.html in a new tab.
+
+The package also contains `session/project.gecko`, the workspace as a GeckoPlotter project. Open the package ZIP in GeckoPlotter (Open, or drop it in) to keep editing the figure and analysis years later; the instrument files are read from `raw_data/originals/` inside the ZIP. If it could not be built or is very large it is left out and the README and report say why. See `docs/SESSION_FORMAT.md`.

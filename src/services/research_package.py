@@ -5,6 +5,7 @@ import hashlib
 import html
 import io
 import json
+import logging
 import platform
 import re
 import zipfile
@@ -113,6 +114,31 @@ def record_analysis_state(store, settings=None, triggers=None):
         store._analysis_previous = state
 
 
+SESSION_PATH = 'session/project.gecko'
+SESSION_MAX_BYTES = 200_000_000
+
+
+def _package_session(store, metadata, original_paths_by_sha):
+    """The workspace as a reopenable ``.gecko`` for the package: ``(bytes | None, note)``.
+
+    Originals are not embedded a second time: the session refers to the package's own
+    ``raw_data/originals/...`` copies (same SHA-256), which ``restore_session`` reads out of the ZIP. A failure or an
+    oversized result skips the file and says why; it never fails the export.
+    """
+    try:
+        from services import session_service
+        data = session_service.build_session(
+            store, project_name=metadata.get('title') or None, embed_raw=False,
+            source_paths=original_paths_by_sha)
+    except Exception as exc:
+        logging.getLogger(__name__).exception('Could not build the project file for the research package')
+        return None, f'The reopenable project file could not be built ({exc}).'
+    if len(data) > SESSION_MAX_BYTES:
+        return None, (f'The reopenable project file would be {len(data) // 1_000_000} MB (edited tables), above the '
+                      f'{SESSION_MAX_BYTES // 1_000_000} MB limit; it was left out.')
+    return data, ''
+
+
 def build_research_package(store, metadata, figure_request=None, formats=None, include_code=False):
     if not store.all_bundles():
         raise ValueError('Load data before exporting a FAIR-data package.')
@@ -129,6 +155,7 @@ def build_research_package(store, metadata, figure_request=None, formats=None, i
         descriptions[path] = {'kind': kind, 'source': source}
     signals = []
     original_paths = {}
+    original_paths_by_sha = {}
     for bundle in store.iter_bundles():
         for c in bundle.component_list:
             key = safe_name(bundle.name)[:45] + '_' + safe_name(bundle.component_display_name(c))[:35] + '_' + safe_name(c.component_id)[:12]
@@ -138,6 +165,7 @@ def build_research_package(store, metadata, figure_request=None, formats=None, i
             if c.raw_bytes:
                 add(original_path, c.raw_bytes, 'original upload', c.component_id)
                 original_paths[c.component_id] = original_path
+                original_paths_by_sha.setdefault(hashlib.sha256(c.raw_bytes).hexdigest(), original_path)
             elif c.metadata.get('source_file_id') in original_paths:
                 original_path = original_paths[c.metadata['source_file_id']]
             if c.imported_csv is not None:
@@ -245,14 +273,21 @@ def build_research_package(store, metadata, figure_request=None, formats=None, i
             path = 'figures/'+result['filename']
             add(path, base64.b64decode(result['content']) if result.get('base64') else result['content'], 'publication figure', 'figures/figure.json')
             figure_files.append(path)
+    session_bytes, session_note = _package_session(store, metadata, original_paths_by_sha)
+    if session_bytes is not None:
+        add(SESSION_PATH, session_bytes, 'reopenable GeckoPlotter project (state only; originals are read from raw_data/originals/)',
+            'raw_data/originals/')
     issues = []
     for key, label in [('title','Dataset title'),('description','Dataset description'),('creators','Authors'),
                        ('record_url','Dataset record DOI or URL'),('license','License')]:
         if not metadata.get(key): issues.append(label+' is missing.')
     if not metadata.get('orcid'): issues.append('Add an NCCR-affiliated author ORCID for NCCR community submission.')
+    if session_note: issues.append(session_note)
     issues.append('Confirm applicable funding, sample/molecule identities and structure files before repository submission.')
     if any(not s['original_file'] for s in signals): issues.append('Some original upload bytes were unavailable; parsed CSV is included where available.')
-    document = {'schema_version':'1.1', 'includes_analysis_code':include_code, 'exported_at':exported, 'dataset':metadata, 'software':software,
+    document = {'schema_version':'1.1', 'project_file': SESSION_PATH if session_bytes is not None else None,
+        'project_file_note': session_note or None,
+        'includes_analysis_code':include_code, 'exported_at':exported, 'dataset':metadata, 'software':software,
         'signals':signals, 'figure_sources':figure_sources, 'figure_files':figure_files,
         'processing':{'smoothing':smoothing_fair_export_record(settings.get('smooth_window',0)),
             'uv_ms_timing_correction':{'applied':False,'status':'Not implemented'},
@@ -293,6 +328,12 @@ for path in metadata['figure_files']:
     if metadata.get('article_doi'): zenodo['related_identifiers']=[{'identifier':metadata['article_doi'],'relation':'isSupplementTo','scheme':'doi'}]
     add('metadata/zenodo.json',dumps(zenodo),'repository metadata draft')
     title=metadata.get('title') or 'Research dataset'
+    if session_bytes is not None:
+        project_line = ('- session/project.gecko: the whole workspace (peaks, calibrations, names, figure settings) as a GeckoPlotter project. '
+            'Open this ZIP in GeckoPlotter (Open, or drop it in) to keep editing; the instrument files are read from raw_data/originals/ '
+            'inside the package, so nothing is stored twice. Not a data file: use the CSV files for other software.')
+    else:
+        project_line = '- session/: no reopenable project file in this package. ' + session_note
     readme=f'''# {title}
 
 {metadata.get('description','Description not yet supplied.')}
@@ -312,6 +353,7 @@ Funding: {metadata.get('funding','Not supplied')}
 - processed_data/: edited tables only, before display smoothing. Unchanged tables link to their raw CSV without a second copy.
 - figures/: publication files, editable figure JSON, and exact displayed x/y source data. Axis labels and units are in figure.json; signal column names and instrument metadata are linked in metadata/dataset.json.
 - analysis/: complete peak results, baselines, deconvolution parameters, calibration data, plot settings, timestamped before/after history. Analysis code and the figure recreation script are included only when selected.
+{project_line}
 - experiment_metadata.csv: links samples, signals, original filenames, raw and processed CSV, and imported metadata.
 - dataset_manifest.csv: file descriptions, source links and SHA-256 checksums. The manifest excludes itself.
 - report.html: readable analysis report; open locally or print to PDF.
@@ -376,6 +418,8 @@ NCCR guidance: {POLICY}
     report+='<p>Figure smoothing preserves imported values. Detection parameters, baseline geometry, fitted components and calibrations are retained in the analysis files.</p>'
     report+='<h2>Samples</h2>'+pd.DataFrame([{'Sample':s['sample'],'Signal':s['signal'],'Source file':s['original_filename'],'Imported (UTC)':(s['imported_at'] or '').replace('T',' ')[:19]} for s in signals]).to_html(index=False,escape=True,border=0)
     report+='<h2>Peak results</h2>'+table+'<h2>Analysis history (UTC)</h2><table><tr><th>Time</th><th>Change</th></tr>'+event_rows+'</table><h2>Methods</h2><p>'+html.escape(metadata.get('methods','Not supplied'))+'</p><h2>Files and metadata</h2><p><a href="README.md">README</a> · <a href="metadata/dataset.json">Dataset metadata</a> · <a href="analysis/history.json">Full edit history</a> · <a href="experiment_metadata.csv">Sample mapping</a></p>'
+    report+=('<p>Reopenable project: <code>'+SESSION_PATH+'</code> (open this ZIP in GeckoPlotter to keep editing the figure and analysis).</p>' if session_bytes is not None
+             else '<p>Reopenable project: not included. '+html.escape(session_note)+'</p>')
     add('report.html',report,'readable analysis report')
     manifest=[{'path':path,**descriptions[path], 'bytes':len(content),'sha256':hashlib.sha256(content).hexdigest()} for path,content in files.items()]
     add('dataset_manifest.csv',csv_bytes(pd.DataFrame(manifest)),'manifest')

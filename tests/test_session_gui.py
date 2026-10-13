@@ -273,6 +273,25 @@ def test_gecko_in_the_file_import_zones_is_routed_to_open_not_ingested(monkeypat
     assert len(result_for(out, 'loaded-files.data')) == 2
 
 
+def test_fair_package_zip_is_routed_to_open_and_opens_the_project(monkeypatch):
+    from services.research_package import build_research_package
+    store = DataStore()
+    app = App()
+    register_upload_callbacks(app, store)
+    source, _, _ = stored_workspace()
+    package = build_research_package(source, {'title': 'Deposit'}, None, [])
+    out = app.functions['handle_file_upload']([upload_of(package)], ['Deposit.zip'], [0], [], 0)
+    assert all(x is dash.no_update for x in out[:8]) and out[8]['path'].endswith('.zip')
+    assert not list(store.iter_bundles())
+    handoff = out[8]
+    trigger(monkeypatch, 'session-upload-handoff.data')
+    fresh = DataStore()
+    out = callbacks(fresh)['open_project'](None, handoff, None, None, None, None, None, None, None, 0)
+    assert len(result_for(out, 'loaded-files.data')) == 2
+    assert result_for(out, 'session-name.data') == 'Deposit'
+    assert not Path(handoff['path']).exists()                              # temp copy is dropped after opening
+
+
 def test_ordinary_files_still_load_through_the_upload_callback(monkeypatch):
     import src.ingestion as real_ingestion      # tests/ingestion would shadow the package the callback imports
     monkeypatch.setitem(sys.modules, 'ingestion', real_ingestion)
@@ -409,13 +428,14 @@ def test_layout_has_the_project_controls_in_the_header(layout_facts):
     for needed in ('session-bar', 'session-name-btn', 'session-status', 'session-open-upload', 'session-open-btn',
                    'session-open-menu', 'session-recent-list', 'session-save-btn'):
         assert needed in header, needed
-    assert layout_facts['upload_accept'] == '.gecko'
+    assert layout_facts['upload_accept'] == '.gecko,.zip'   # .zip: a FAIR package that holds a project
     assert layout_facts['menu_hidden'] is True and layout_facts['banner_hidden'] is True
     ids = set(layout_facts['ids'])
     assert {'session-name', 'session-dirty', 'session-stamp', 'session-source', 'session-upload-handoff',
             'session-autosave-fire', 'session-download', 'session-name-modal', 'session-name-input',
             'session-missing-modal', 'session-search-dir', 'session-retry-btn', 'session-banner',
-            'session-banner-restore', 'session-banner-dismiss', 'session-message'} <= ids
+            'session-banner-restore', 'session-banner-dismiss', 'session-message', 'session-confirm',
+            'session-confirm-text'} <= ids
     assert not layout_facts['legacy'], 'the old placeholder Save/Load Session stubs are gone'
 
 

@@ -22,9 +22,9 @@ def create_session_header_controls():
                       **{'aria-live': 'polite'}),
             html.Div(className='session-open-group', children=[
                 dcc.Upload(
-                    id='session-open-upload', accept='.gecko', multiple=False, className='session-open-upload',
+                    id='session-open-upload', accept='.gecko,.zip', multiple=False, className='session-open-upload',
                     children=html.Button('Open', id='session-open-btn', type='button', className='session-btn',
-                                         title='Open a project (.gecko file) - Cmd/Ctrl+O')),
+                                         title='Open a project (.gecko file, or a FAIR package .zip made by GeckoPlotter) - Cmd/Ctrl+O')),
                 html.Button('▾', id='session-open-menu-btn', type='button', className='session-btn session-menu-btn',
                             title='Recent autosaves', **{'aria-haspopup': 'menu', 'aria-label': 'Recent autosaves'}),
                 popup_menu('session-open-menu', [
@@ -53,6 +53,18 @@ def create_session_banner():
                                      className='session-banner-btn session-banner-primary'),
                          html.Button('Start fresh', id='session-banner-dismiss', type='button', n_clicks=0,
                                      className='session-banner-btn'),
+                     ]),
+            # Unsaved-changes guard before opening a project; driven entirely by session-io.js (data-confirm buttons).
+            html.Div(id='session-confirm', className='session-banner session-confirm', role='alertdialog', hidden=True,
+                     **{'aria-label': 'Unsaved changes'}, children=[
+                         html.Span('Opening replaces the current workspace. Unsaved changes will be lost.',
+                                   id='session-confirm-text', className='session-banner-text'),
+                         html.Button('Save first', type='button', className='session-banner-btn session-banner-primary',
+                                     **{'data-confirm': 'save'}),
+                         html.Button('Open anyway', type='button', className='session-banner-btn',
+                                     **{'data-confirm': 'discard'}),
+                         html.Button('Cancel', type='button', className='session-banner-btn',
+                                     **{'data-confirm': 'cancel'}),
                      ]),
             html.Div(id='session-message', className='session-message', role='status', hidden=True, children=[
                 html.Div(className='session-message-head', children=[

@@ -2,10 +2,12 @@
 from __future__ import annotations
 
 import base64
+import io
 import os
 import re
 import tempfile
 import time
+import zipfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
@@ -20,6 +22,29 @@ _UNSAFE = re.compile(r'[^\w\-. ()]+', re.UNICODE)
 def is_session_filename(name) -> bool:
     """True for a file name that is a GeckoPlotter project (``.gecko``), whatever the case."""
     return isinstance(name, str) and name.strip().lower().endswith(ss.EXTENSION)
+
+
+def is_package_filename(name) -> bool:
+    """True for a ``.zip`` name (a FAIR package *may* hold a project; see :func:`is_project_upload`)."""
+    return isinstance(name, str) and name.strip().lower().endswith('.zip')
+
+
+def is_project_upload(contents, name) -> bool:
+    """Is this uploaded file a project to open: a ``.gecko``, or a ``.zip`` that is a FAIR package with a project.
+
+    Decided by extension for ``.gecko``; a ``.zip`` is looked into (its file list only), because ordinary zips
+    are not projects. ``contents`` is the dcc.Upload data URL.
+    """
+    if is_session_filename(name):
+        return True
+    if not is_package_filename(name) or not isinstance(contents, str) or ',' not in contents:
+        return False
+    try:
+        data = base64.b64decode(contents.split(',', 1)[1])
+        with zipfile.ZipFile(io.BytesIO(data)) as archive:
+            return ss.PACKAGE_SESSION in archive.namelist()
+    except Exception:
+        return False
 
 
 def safe_project_filename(name: Optional[str]) -> str:
@@ -49,13 +74,14 @@ def stash_session_upload(contents: str, filename: str) -> Dict[str, Any]:
     data = base64.b64decode(encoded)
     folder = sessions_temp_dir()
     cutoff = time.time() - 24 * 3600
-    for old in folder.glob(f'*{ss.EXTENSION}'):
+    for old in [*folder.glob(f'*{ss.EXTENSION}'), *folder.glob('*.zip')]:
         try:
             if old.stat().st_mtime < cutoff:
                 old.unlink()
         except OSError:
             pass
-    fd, name = tempfile.mkstemp(suffix=ss.EXTENSION, dir=folder)
+    suffix = '.zip' if is_package_filename(filename) else ss.EXTENSION
+    fd, name = tempfile.mkstemp(suffix=suffix, dir=folder)
     with os.fdopen(fd, 'wb') as handle:
         handle.write(data)
     return {'path': name, 'name': Path(filename or 'project').stem, 'upload': True, 'ts': int(time.time() * 1000)}
@@ -67,7 +93,7 @@ def forget_stash(source: Optional[dict]) -> None:
         return
     try:
         path = Path(source['path'])
-        if path.parent == sessions_temp_dir() and path.suffix == ss.EXTENSION:
+        if path.parent == sessions_temp_dir() and path.suffix in (ss.EXTENSION, '.zip'):
             path.unlink()
     except (OSError, KeyError, TypeError):
         pass

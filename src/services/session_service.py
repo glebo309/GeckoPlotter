@@ -51,6 +51,9 @@ DEFAULT_RAW_LIMIT_BYTES = 400_000_000
 MANIFEST_NAME = 'manifest.json'
 STATE_NAME = 'state.json'
 CLIENT_STATE_NAME = 'client_state.json'
+#: Path of the embedded project inside a FAIR research package (``build_research_package``).
+PACKAGE_SESSION = 'session/project.gecko'
+PACKAGE_MARKER = 'dataset_manifest.csv'
 
 #: ``{from_version: fn}``. ``fn(session) -> session`` upgrades the in-memory
 #: ``{'manifest': dict, 'state': dict, 'client_state': dict}`` by exactly one
@@ -91,6 +94,7 @@ class SessionInfo:
     samples: List[str] = field(default_factory=list)
     raw_embedded: bool = True
     raw_cache: bool = False  # originals live in the autosave cache folder, not in the file
+    from_package: bool = False  # read from a FAIR research package (.zip); originals live in the package
     has_client_state: bool = False
     size_bytes: Optional[int] = None
     compatible: bool = True
@@ -328,12 +332,20 @@ def _newer_error(found: int, supported: int) -> SessionVersionError:
 # Archive access
 # ----------------------------------------------------------------------------
 
+def _unsafe_member(name: str) -> bool:
+    """A ZIP member name that is absolute, has a drive letter or climbs out with ``..``."""
+    text = str(name).replace('\\', '/')
+    return text.startswith('/') or bool(re.match(r'^[A-Za-z]:', text)) or '..' in text.split('/')
+
+
 class _Archive:
     """Read access to a .gecko file given as bytes or a path."""
 
     def __init__(self, data_or_path):
         self.path: Optional[Path] = None
         self.size: Optional[int] = None
+        self.package: Optional[zipfile.ZipFile] = None   # the outer zip when opened through a FAIR package
+        self.package_names: set = set()
         try:
             if isinstance(data_or_path, (bytes, bytearray, memoryview)):
                 data = bytes(data_or_path)
@@ -351,6 +363,33 @@ class _Archive:
             raise SessionFormatError(
                 'This is not a GeckoPlotter session file (.gecko), or it is damaged.') from exc
         self._names = set(self.zip.namelist())
+        if MANIFEST_NAME not in self._names:
+            self._enter_package()
+
+    def _enter_package(self) -> None:
+        """A FAIR package (.zip) carries the project as ``session/project.gecko``: read that instead."""
+        outer = self.zip
+        if PACKAGE_SESSION not in self._names:
+            if PACKAGE_MARKER in self._names:
+                outer.close()
+                raise SessionFormatError(
+                    'This FAIR package does not contain a GeckoPlotter project (session/project.gecko is '
+                    'missing). It was exported without one, so it cannot be reopened for editing.')
+            return    # not ours: manifest() reports "not a session file"
+        unsafe = [n for n in self._names if _unsafe_member(n)]
+        if unsafe:
+            outer.close()
+            raise SessionFormatError(
+                'This ZIP has file names that point outside the package (absolute or ".." paths), so it was not '
+                f'opened: {unsafe[0]!r}.')
+        try:
+            inner = outer.read(PACKAGE_SESSION)
+            self.zip = zipfile.ZipFile(io.BytesIO(inner))
+        except (zipfile.BadZipFile, zlib.error, KeyError) as exc:
+            outer.close()
+            raise SessionFormatError('The project file inside this FAIR package is damaged.') from exc
+        self.package, self.package_names = outer, set(self._names)
+        self._names = set(self.zip.namelist())
 
     def __enter__(self):
         return self
@@ -360,6 +399,8 @@ class _Archive:
 
     def close(self):
         self.zip.close()
+        if self.package is not None:
+            self.package.close()
 
     def has(self, name: str) -> bool:
         return name in self._names
@@ -417,6 +458,7 @@ def _info_from_manifest(manifest: dict, archive: Optional[_Archive] = None) -> S
         raw_embedded=bool(manifest.get('raw_embedded', True)),
         raw_cache=bool(manifest.get('raw_cache')),
         has_client_state=bool(manifest.get('has_client_state')),
+        from_package=archive is not None and archive.package is not None,
         size_bytes=archive.size if archive is not None else None,
         notes=list(manifest.get('notes') or []),
     )
@@ -921,6 +963,16 @@ class _RawResolver:
             return data
         searched: List[str] = []
         mismatched: Optional[Tuple[Path, bytes]] = None
+        member = entry.get('original_path')
+        if self.archive.package is not None and member in self.archive.package_names:
+            # FAIR package: the original sits next to the project inside the same ZIP.
+            try:
+                data = self.archive.package.read(member)
+            except (KeyError, zipfile.BadZipFile, zlib.error):
+                data = None
+            if data is not None:
+                self._verify(data, entry, f'package file {member}')
+                return data
         for folder in self.cache_dirs:
             cached = folder / entry['sha256']
             searched.append(str(cached))
@@ -968,9 +1020,19 @@ class _RawResolver:
             return path
 
         if entry.get('original_path'):
-            hit = offer(Path(entry['original_path']).expanduser())
-            if hit:
-                yield hit
+            stored = Path(entry['original_path']).expanduser()
+            if stored.is_absolute():
+                hit = offer(stored)
+                if hit:
+                    yield hit
+            else:
+                # Relative to a FAIR package root (the project file sits in <root>/session/): never to the cwd.
+                roots = ([self.archive.path.parent.parent]
+                         if self.archive.path is not None and self.archive.package is None else [])
+                for root in roots + self.dirs:
+                    hit = offer(root / stored)
+                    if hit:
+                        yield hit
         for folder in self.dirs:
             hit = offer(folder / name)
             if hit:
@@ -1372,7 +1434,7 @@ def restore_session(store, data_or_path, *, search_dirs: Iterable = (),
         report.client_state = client_state
         meta = {'project_name': manifest.get('project_name') or '', 'created_at': manifest.get('created_at'),
                 'saved_at': manifest.get('saved_at')}
-        if archive.path is not None:
+        if archive.path is not None and archive.package is None:   # a package is a deposit, not "the project file"
             meta['path'] = str(archive.path)
         store.session_meta = meta
         for cache in getattr(store, '_render_caches', []):
