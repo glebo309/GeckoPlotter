@@ -6,13 +6,14 @@ request and response size and the output it updates. Set ``GECKO_SLOW_MS`` to ch
 """
 from __future__ import annotations
 
+import json
 import logging
 import re
 import time
 
 log = logging.getLogger('geckoplotter.timing')
 CALLBACK_PATH = '/_dash-update-component'
-_OUTPUT = re.compile(r'"output"\s*:\s*"([^"]{1,300})"')
+_OUTPUT = re.compile(r'"output"\s*:\s*"([^"]{1,3000})"')
 
 
 def output_label(raw: bytes) -> str:
@@ -20,8 +21,26 @@ def output_label(raw: bytes) -> str:
     for part in (raw[:2000], raw[-2000:]):          # Dash puts "output" first or last depending on the version
         match = _OUTPUT.search(part.decode('utf-8', errors='ignore'))
         if match:
-            return match.group(1).strip('.')
+            label = match.group(1).strip('.')
+            return label if len(label) <= 90 else label[:87] + '...'     # multi-output callbacks list every output
     return '?'
+
+
+def largest_values(raw: bytes, count: int = 3, floor: int = 100_000) -> str:
+    """The biggest inputs/states a callback request carried, e.g. ``main-plot.figure 26.1 MB``.
+
+    A callback that is slow because the browser sends a big stored value back (a figure, a table) looks the same in
+    the log as a slow calculation, unless the request is taken apart. Only called for slow callbacks.
+    """
+    try:
+        body = json.loads(raw)
+        entries = list(body.get('inputs') or []) + list(body.get('state') or [])
+        sizes = [(len(json.dumps(e.get('value'), separators=(',', ':'))), f"{e.get('id')}.{e.get('property')}")
+                 for e in entries if isinstance(e, dict)]
+    except (ValueError, TypeError, AttributeError):
+        return ''
+    big = sorted((item for item in sizes if item[0] >= floor), reverse=True)[:count]
+    return '  carrying ' + ', '.join(f'{name} {_size(n)}' for n, name in big) if big else ''
 
 
 def _size(n: int) -> str:
@@ -42,6 +61,6 @@ def install(server, threshold_ms: float = 500.0) -> None:
             elapsed = (time.perf_counter() - started) * 1000.0
             if elapsed >= threshold_ms:
                 raw = request.get_data(cache=True)
-                log.warning('slow callback %5.0f ms  in %s  out %s  %s', elapsed, _size(len(raw)),
-                            _size(response.calculate_content_length() or 0), output_label(raw))
+                log.warning('slow callback %5.0f ms  in %s  out %s  %s%s', elapsed, _size(len(raw)),
+                            _size(response.calculate_content_length() or 0), output_label(raw), largest_values(raw))
         return response
