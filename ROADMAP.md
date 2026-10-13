@@ -20,10 +20,17 @@ The May/June notes below are historical. The current UI and source are ahead of 
 - [x] Axis-specific reset and stable X range while selecting/deselecting peaks.
 - [x] Text-edit toolbar mode for dataset names, titles, axis labels, and legend names. Dataset names synchronize with the file browser.
 
+- [x] LabSolutions method files (.lcm/.lcd): gradient, flow, oven, devices read and attached to samples (by the export's method file name or the run's own timestamps), saved with projects, written into the FAIR package as a journal-style methods paragraph plus the original file. Overlay dropdown in the Metadata tab: LC gradient (as programmed or shifted by the 715 uL dwell volume) and every pressure/temperature status trace. Group defaults (routine column, dwell volume) in `src/services/lab_defaults.json`.
+
 ### Still open or deferred
 
+- [ ] Read the raw signal inside an .lcd (PDA 3D data and status logs are binary/compressed) so an .lcd can be opened without the text export. Needs a real .lcd and its export from the same injection.
+- [ ] Show more of the method: autosampler program, PDA lamp/slit/response, the integration parameters LabSolutions applied, the method audit trail.
+- [ ] Compare GeckoPlotter integration with LabSolutions' own peak tables (already in the export).
+- [ ] Recipes: save the analysis steps (integration, grouping, calibration) and apply them to a new set of files.
+
 - [x] Session save/restore **engine** (`.gecko` project files: originals + parameters, ids preserved, schema versions + migrations, large-file relocation, autosave helpers). See docs/SESSION_FORMAT.md, `src/services/session_service.py`.
-- [ ] Session **GUI**: Save / Open buttons, autosave timer, "restore last session?" prompt, missing-file locator, client-state (plot tabs, zoom, ...) capture and re-apply. The old save callback still says it is not implemented; build it on `session_service`.
+- [x] Session **GUI**: Save / Open icon buttons (top left), autosave with a restore banner, unsaved-changes guard, FAIR packages reopen as projects (2026-10-13).
 - [ ] Named figure styles: Prism Classic, Nature, ACS, Angewandte, Presentation, Dark. Existing paper/slide size presets do not fulfill this style-preset request.
 - [ ] Advanced calibration: weighted regression, internal-standard normalization, LOD/LOQ. Force-through-zero is already implemented.
 - [ ] Clarify the historical "HMS analysis" item. The old roadmap never defines the acronym and no current implementation was found. Do not treat it as a scoped feature until identified.
