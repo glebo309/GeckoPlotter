@@ -3,6 +3,7 @@
 dash==3.0.4
 plotly>=6.1.1
 dash-mantine-components==2.3.0
+flask-compress>=1.13  # gzip for the page, layout and JS (Dash turns it on when installed)
 kaleido>=1.0.0
 
 # Data processing

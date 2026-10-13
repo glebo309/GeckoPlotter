@@ -57,9 +57,12 @@ from callbacks.publication_preview_callbacks import register_publication_preview
 from components.session_controls import create_session_header_controls, create_session_banner, create_session_status, create_session_support
 
 # App setup
-app = dash.Dash(__name__, suppress_callback_exceptions=True, assets_folder='src/assets', update_title=None)
+app = dash.Dash(__name__, suppress_callback_exceptions=True, assets_folder='src/assets', update_title=None,
+                 compress=True)
 from services.output_dedupe import install as _install_output_dedupe
 _install_output_dedupe(app)
+from services.request_timing import install as _install_request_timing
+_install_request_timing(app.server, float(os.environ.get('GECKO_SLOW_MS', '500')))
 app.config.suppress_callback_exceptions = True
 app.title = 'GeckoPlotter'
 
@@ -2165,7 +2168,8 @@ clientside_callback(
 if __name__ == '__main__':
     log.info("Starting GeckoPlotter V2...")
     log.info("Upload TXT chromatograms or CSV UV-Vis files to get started!")
-    # Local use by default. GECKO_HOST=0.0.0.0 serves the local network (the app keeps one workspace per process,
-    # so everyone who opens it shares it); GECKO_DEBUG=0 turns the Werkzeug debugger off, which a shared server needs.
+    # Fast and safe by default. GECKO_HOST=0.0.0.0 serves the local network (the app keeps one workspace per
+    # process, so everyone who opens it shares it). GECKO_DEBUG=1 is for development only: it makes the browser run
+    # Dash's slow development build, polls the server for file changes and exposes the Werkzeug debugger.
     app.run(host=os.environ.get('GECKO_HOST', '127.0.0.1'), port=int(os.environ.get('GECKO_PORT', '8052')),
-            debug=os.environ.get('GECKO_DEBUG', '1') != '0')
+            debug=os.environ.get('GECKO_DEBUG', '0') == '1')

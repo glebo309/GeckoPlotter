@@ -30,7 +30,7 @@ python app.py
 
 The repository is private: collaborators need to be added on GitHub first. Settings: `GECKO_PORT` (default 8052),
 `GECKO_HOST` (`0.0.0.0` makes it reachable from the local network, one shared workspace for everyone who opens it),
-`GECKO_DEBUG=0` (turn the developer debugger off, always do this on a network).
+`GECKO_DEBUG=1` (development only: slower in the browser, exposes the debugger; leave it unset on a network).
 
 ## Supported Formats
 
