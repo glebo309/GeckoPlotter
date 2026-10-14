@@ -419,7 +419,8 @@
     }
 
     function isDrawModifier(event) {
-        return !!(event && event.shiftKey);
+        // Shift held, or the experimental Auto mode (auto-integrate.js) found the pointer resting on a peak.
+        return !!(event && (event.shiftKey || window.__geckoAutoIntegrateNear === true));
     }
 
     function setMomentaryDrawActive(active) {

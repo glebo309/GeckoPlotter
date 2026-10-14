@@ -906,6 +906,10 @@ _layout_body = html.Div(
                                                         id='plot-tool-integrate', n_clicks=0,
                                                         className='plot-tool plot-tool-icon', title='Integrate peaks — drag across a peak. Shortcut: Shift-drag.',
                                                         **{'aria-pressed': 'false', 'aria-label': 'Integrate peaks'}),
+                                            html.Button('Auto', id='plot-tool-auto', className='plot-tool',
+                                                        title='Experimental: rest the pointer on a peak and drag to integrate it, '
+                                                              'no need to press Integrate or Shift. Over the baseline, drag still zooms.',
+                                                        **{'aria-pressed': 'false', 'aria-label': 'Auto-integrate near peaks'}),
                                             html.Button(_icon('tabler:pencil', width=20, height=20),
                                                         id='plot-tool-edit-text', className='plot-tool plot-tool-icon',
                                                         title='Edit text — click a name, title, axis label, or legend. Esc to finish.',

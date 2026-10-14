@@ -81,3 +81,6 @@
 /* Recipe: two buttons side by side, the upload wrapper must not add its own box */
 .integration-recipe .integration-actions { display: flex; gap: 6px; align-items: center; }
 .integration-recipe .recipe-apply-upload { display: inline-block; }
+
+/* Auto-integrate (experimental): the pointer rests on a peak, drag integrates. */
+.gecko-auto-near .nsewdrag { cursor: crosshair !important; }
