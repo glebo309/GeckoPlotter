@@ -2108,20 +2108,18 @@ def open_publication_preview(n_clicks, tabs, active_plot_tab, main_figure, figur
     return [*tabs, pub_tab], pub_id, figures, 'plot-tools'
 
 
-@app.callback(
+# Derive view-mode from the active plot tab type (backwards compat). In the browser: the plot settings of a new
+# plot wait for it, so a server round trip here delays the first plot.
+clientside_callback(
+    """function(activeTabId, tabs) {
+        var tab = (tabs || []).filter(function(t) { return t.id === activeTabId; })[0];
+        return tab && (tab.type === 'analysis' || tab.type === 'custom') ? 'analysis' : 'raw';
+    }""",
     Output('view-mode', 'data'),
     Input('active-plot-tab', 'data'),
     State('plot-tabs', 'data'),
     prevent_initial_call=True,
 )
-def derive_view_mode(active_tab_id, tabs):
-    """Derive view-mode from the active plot tab type (backwards compat)."""
-    if not active_tab_id or not tabs:
-        return 'raw'
-    tab = next((t for t in tabs if t['id'] == active_tab_id), None)
-    if tab and tab.get('type') in ('analysis', 'custom'):
-        return 'analysis'
-    return 'raw'
 
 @app.callback(
     Output('tab-panel-memory', 'data', allow_duplicate=True),

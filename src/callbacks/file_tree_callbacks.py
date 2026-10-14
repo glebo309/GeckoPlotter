@@ -105,6 +105,16 @@ def _apply_visibility(data_manager, file_id, new_visibility):
             for c in parent_bundle.component_list)
 
 
+def same_tree(tree, shown) -> bool:
+    """True when the rendered ``tree`` is what the browser shows (``shown``, the file-tree children as sent back)."""
+    import json
+    from plotly.utils import PlotlyJSONEncoder
+    try:
+        return json.loads(json.dumps(tree, cls=PlotlyJSONEncoder)) == shown
+    except (TypeError, ValueError):
+        return False
+
+
 def register_file_tree_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
     """Register file tree interaction callbacks."""
     @app.callback(
@@ -443,10 +453,11 @@ def register_file_tree_callbacks(app: dash.Dash, data_manager: DataManager) -> N
         [Input('loaded-files', 'data'),
          Input('active-plot-tab', 'data'),
          Input('file-order', 'data')],
-        [State('active-file', 'data')],
+        [State('active-file', 'data'),
+         State('file-tree', 'children')],
         prevent_initial_call=True
     )
-    def sync_file_tree_selection(loaded_files, active_plot_tab, file_order, active_file_id):
+    def sync_file_tree_selection(loaded_files, active_plot_tab, file_order, active_file_id, shown=None):
         """Re-render the file tree grouped by overlay type. Selection highlight
         is applied client-side via file-tree-ui.js (CSS-only, no re-render)."""
         ctx = dash.callback_context
@@ -457,9 +468,20 @@ def register_file_tree_callbacks(app: dash.Dash, data_manager: DataManager) -> N
         from callbacks.upload_callbacks import render_file_tree_with_bundles_selected
 
         records = loaded_files or []
-        return render_file_tree_with_bundles_selected(
+        if trigger == 'loaded-files' and active_file_id and not active_plot_tab:
+            # First data: sync_plot_tabs is about to open the active file's plot tab; draw the tree for it (as the
+            # upload did).
+            from callbacks.viz_callbacks import _get_active_file_group, _tab_id_from_group
+            group = _get_active_file_group(data_manager, active_file_id)
+            active_plot_tab = _tab_id_from_group(group) if group else active_plot_tab
+        tree = render_file_tree_with_bundles_selected(
             records, data_manager, active_file_id, active_plot_tab=active_plot_tab,
             file_order=file_order or {})
+        # A new tree re-fires every button callback of the tree (and what waits on them) for nothing; the upload
+        # usually sent this same tree a moment ago.
+        if shown is not None and same_tree(tree, shown):
+            raise PreventUpdate
+        return tree
 
     @app.callback(
         [Output('file-order', 'data', allow_duplicate=True),

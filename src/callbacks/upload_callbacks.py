@@ -257,10 +257,22 @@ def register_upload_callbacks(app: dash.Dash, data_manager) -> None:
                 auto_active_file = last_bundle_id or dash.no_update
             auto_table, table_editor, pub_data = dash.no_update, None, None
             if auto_active_file and auto_active_file != dash.no_update:
-                auto_table, table_editor, pub_data = build_active_file_views(data_manager, auto_active_file)
+                # The new active-file makes sync_table_to_active_file (viz_callbacks) build the metadata and the
+                # table; building them here as well only sent them to the browser twice.
+                from callbacks.viz_callbacks import prepare_table_data
+                from services import table_store
+                auto_table, table_editor = dash.no_update, dash.no_update
+                pub_data = table_store.remember(
+                    prepare_table_data(data_manager.get_data_by_id(auto_active_file), file_id=auto_active_file))
 
+            # Drawn for the plot tab that will open with the file, so the tree does not have to be sent again then.
+            plot_tab = None
+            if auto_active_file and auto_active_file != dash.no_update:
+                from callbacks.viz_callbacks import _get_active_file_group, _tab_id_from_group
+                group = _get_active_file_group(data_manager, auto_active_file)
+                plot_tab = _tab_id_from_group(group) if group else None
             tree_items = render_file_tree_with_bundles_selected(
-                loaded_files, data_manager, auto_active_file)
+                loaded_files, data_manager, auto_active_file, active_plot_tab=plot_tab)
 
             log.debug(f"Upload complete: {len(new_bundles)} bundles from {len(parsed_files)} files")
             return (loaded_files, tree_items, auto_active_file, auto_table,
