@@ -325,15 +325,20 @@ def prepare() -> subprocess.Popen:
     return process
 
 
-SHORTCUTS_VERSION = 2                                  # raise to rebuild everyone's shortcut once
+SHORTCUTS_VERSION = 3                                  # raise to rebuild everyone's shortcut once
+ICONS_VERSION = 2                                      # raise when the icon changes, so everyone fetches it again
 ICONS = ('icon.png', 'icon.ico', 'icon.icns')
 
 
 def fetch_icons() -> None:
     """The shortcut icon comes from GitHub too, so the download stays a handful of scripts."""
+    if os.environ.get('GECKO_SOURCE_ZIP'):
+        return
+    state = read_state()
+    fresh = state.get('icons') != ICONS_VERSION
     for name in ICONS:
         target = HOME / name
-        if target.exists() or os.environ.get('GECKO_SOURCE_ZIP'):
+        if target.exists() and not fresh:
             continue
         try:
             request = urllib.request.Request(
@@ -342,6 +347,9 @@ def fetch_icons() -> None:
                 target.write_bytes(response.read())
         except Exception as error:                             # noqa: BLE001 - a shortcut without icon still works
             log(f'could not fetch {name}: {error}')
+            return
+    state['icons'] = ICONS_VERSION
+    write_state(state)
 
 
 def create_shortcuts() -> None:

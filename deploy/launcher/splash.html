@@ -5,19 +5,17 @@
 <title>GeckoPlotter · starting</title>
 <link rel="icon" href="/icon.png">
 <style>
-  :root { --page:#eceef0; --window:#1d1d1f; --bar:#2a2c30; --ink:#e8eaec; --muted:#8d949b; --green:#7cc79a; --green-hi:#9be3b4; --green-lo:#355f49; --orange:#f0913a; --red:#ef6b6b; }
+  :root { --bg:#1d1d1f; --ink:#e8eaec; --muted:#8d949b; --line:#2e3034; --green:#7cc79a; --green-hi:#9be3b4; --orange:#f0913a; --red:#ef6b6b; }
   * { box-sizing:border-box; }
-  body { margin:0; min-height:100vh; display:grid; place-items:center; background:var(--page); color:#1d1d1f;
-         font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; padding:24px 16px; }
-  .wrap { width:min(860px,100%); }
-  .window { background:var(--window); border-radius:12px; overflow:hidden; box-shadow:0 24px 60px rgba(20,22,26,.28), 0 2px 6px rgba(20,22,26,.18); }
-  .titlebar { display:flex; align-items:center; gap:10px; height:38px; padding:0 14px; background:var(--bar); color:var(--muted);
-              font:12px/1 ui-monospace,"Cascadia Mono",Consolas,Menlo,monospace; }
-  .dots { display:flex; gap:7px; margin-right:6px; } .dots i { width:11px; height:11px; border-radius:50%; background:#4a4d52; }
-  .titlebar img { width:18px; height:18px; border-radius:4px; }
-  .titlebar b { color:var(--ink); font-weight:600; }
-  .screen { padding:18px 22px 20px; font:13px/1.55 ui-monospace,"Cascadia Mono",Consolas,Menlo,monospace; color:var(--ink); }
-  canvas { display:block; width:100%; height:auto; margin:0 auto 10px; }
+  html, body { margin:0; min-height:100%; background:var(--bg); color:var(--ink); }
+  body { font:15px/1.5 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif; }
+  main { max-width:860px; margin:0 auto; padding:40px 24px 32px; }
+  header { display:flex; align-items:center; gap:12px; padding-bottom:18px; border-bottom:1px solid var(--line); }
+  header img { width:40px; height:40px; }
+  header h1 { margin:0; font-size:22px; font-weight:650; letter-spacing:-.01em; }
+  header span { color:var(--muted); font-size:14px; }
+  .screen { padding-top:22px; font:13px/1.55 ui-monospace,"Cascadia Mono",Consolas,Menlo,monospace; }
+  canvas { display:block; width:100%; height:auto; margin:0 auto 14px; }
   .prompt { color:var(--muted); } .prompt b { color:var(--green); font-weight:normal; }
   .line { white-space:pre; overflow:hidden; text-overflow:ellipsis; }
   .ok { color:var(--green); } .run { color:var(--orange); } .todo { color:#5d6369; } .err { color:var(--red); }
@@ -25,22 +23,20 @@
   .log { color:#6f767d; min-height:5.5em; margin-top:6px; }
   .log .line::before { content:"  │ "; color:#454a50; }
   .done { color:var(--green-hi); }
-  .note { margin:14px 4px 0; color:#5b6168; font-size:13px; }
-  @media (max-width:600px) { .screen { padding:14px; font-size:11.5px; } }
+  .note { margin:22px 0 0; padding-top:14px; border-top:1px solid var(--line); color:var(--muted); font-size:13px; }
+  @media (max-width:600px) { main { padding:24px 16px; } .screen { font-size:11.5px; } }
 </style>
-<div class="wrap">
-  <div class="window">
-    <div class="titlebar"><span class="dots"><i></i><i></i><i></i></span><img src="/icon.png" alt=""><b>GeckoPlotter</b><span>· launcher</span></div>
-    <div class="screen">
-      <canvas id="art" width="784" height="420" aria-label="An ASCII gecko walking over a chromatogram while GeckoPlotter starts"></canvas>
-      <div class="line prompt">$ <b>geckoplotter</b> start</div>
-      <div id="steps"></div>
-      <div class="bar" id="bar"></div>
-      <div class="log" id="log"></div>
-    </div>
+<main>
+  <header><img src="/icon.png" alt=""><h1>GeckoPlotter</h1><span>starting on this computer</span></header>
+  <div class="screen">
+    <canvas id="art" width="784" height="360" aria-label="An ASCII gecko walking over a chromatogram while GeckoPlotter starts"></canvas>
+    <div class="line prompt">$ <b>geckoplotter</b> start</div>
+    <div id="steps"></div>
+    <div class="bar" id="bar"></div>
+    <div class="log" id="log"></div>
   </div>
   <p class="note" id="note">First start only: GeckoPlotter installs everything it needs (about 600 MB, a few minutes). After that it starts in seconds and updates itself from GitHub. It runs on this computer, so your data stays here.</p>
-</div>
+</main>
 <script>
 (() => {
   // ---------------------------------------------------------------- ASCII gecko + chromatogram
@@ -123,9 +119,9 @@
       const cover = sum / (255 * SX * SY);
       if (cover < 0.08) continue;
       const ch = RAMP[Math.min(RAMP.length - 1, Math.round(cover * (RAMP.length - 1)))];
-      const f = 1 - col / COLS;                          // the gecko fills in from its head
+      const f = col / COLS;                              // fills left to right, tail to head, like a progress bar
       const lit = !failed && f <= shown + 0.02;
-      const shade = lit ? (f < .5 ? lerp(HI, MID, f / .5) : lerp(MID, LO, (f - .5) / .5)) : OFF;
+      const shade = lit ? (f < .5 ? lerp(LO, MID, f / .5) : lerp(MID, HI, (f - .5) / .5)) : OFF;
       ctx.fillStyle = rgb(shade);
       ctx.fillText(ch, col * CW, row * CH);
     }
