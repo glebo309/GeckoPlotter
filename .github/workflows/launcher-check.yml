@@ -1,0 +1,53 @@
+name: Launcher check
+
+# Runs the one-click launcher from a clean machine on Windows, macOS and Linux: installs Python and every package in
+# requirements.txt, starts GeckoPlotter and waits until it answers. If someone adds an import without listing the
+# package, or breaks the launcher, this fails here instead of on a colleague's laptop.
+on:
+  push:
+    branches: [main, ui-professional-workspace]
+    paths: ['requirements.txt', 'deploy/launcher/**', 'app.py', 'src/**', '.github/workflows/launcher-check.yml']
+  workflow_dispatch:
+
+jobs:
+  clean-install:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v5
+
+      - name: Pack this checkout the way GitHub's zip download looks
+        shell: bash
+        run: |
+          python -c "
+          import os, zipfile
+          with zipfile.ZipFile('github-main.zip', 'w', zipfile.ZIP_DEFLATED) as z:
+              for root, dirs, files in os.walk('.'):
+                  dirs[:] = [d for d in dirs if d not in ('.git', '__pycache__', 'node_modules')]
+                  for f in files:
+                      if f != 'github-main.zip':
+                          p = os.path.join(root, f)
+                          z.write(p, 'GeckoPlotter-main/' + os.path.relpath(p, '.').replace(os.sep, '/'))
+          "
+
+      - name: Start with the launcher (clean install) and wait for the app
+        shell: bash
+        env:
+          GECKO_HOME: ${{ runner.temp }}/gecko-home
+          GECKO_NO_BROWSER: '1'
+        run: |
+          export GECKO_SOURCE_ZIP="$PWD/github-main.zip"
+          uv run --python 3.12 --no-project deploy/launcher/launcher.py > launcher.out 2>&1 &
+          for i in $(seq 1 240); do
+            if curl -fsS -o /dev/null http://127.0.0.1:8052/; then echo "GeckoPlotter answered after ~$((i*5)) s"; exit 0; fi
+            sleep 5
+          done
+          echo "---- launcher output"; cat launcher.out || true
+          echo "---- launcher.log";   cat "$GECKO_HOME/launcher.log" || true
+          echo "---- app.log";        cat "$GECKO_HOME/app.log" || true
+          exit 1
