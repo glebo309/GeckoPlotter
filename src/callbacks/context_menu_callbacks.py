@@ -285,7 +285,7 @@ def register_context_menu_callbacks(app: dash.Dash, data_manager) -> None:
     # ── Show Mass: switch to Peak Mass tab and select this peak ──────
     @app.callback(
         [Output('context-menu', 'hidden', allow_duplicate=True),
-         Output('analysis-tabs', 'value', allow_duplicate=True),
+         Output('side-tabs', 'value', allow_duplicate=True),
          Output('peak-mass-selector', 'value', allow_duplicate=True)],
         Input('ctx-show-mass-item', 'n_clicks'),
         State('context-menu-store', 'data'),

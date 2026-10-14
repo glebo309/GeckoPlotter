@@ -152,33 +152,59 @@ def arrange_workspace(root):
                 if getattr(child,'children',None)=='File Explorer':child.children='Files'
     nodes['left-vertical-divider'].__setattr__('data-label-below','Inspector')
     nodes['left-vertical-divider'].__setattr__('data-label-above','Files')
-    # Available analysis views use one horizontally scrolling tab row.
-    # Keep the mounted panels and tab values so switching figures retains context.
+    # Two docks. The Results pane under the plot keeps the table tabs (Data, Peaks, Compare samples, Calibration);
+    # the Views panel on the right holds the signal views (PDA, MS scan, Peak mass, EIC, Metadata) and stays
+    # beside the plot. Panels keep their component ids, so every callback that fills them is unchanged.
     tabs = nodes['analysis-tabs']
     nav = tabs.children[0]
     labels = {'data-overview':'Data', 'peak-analysis':'Peaks', 'metadata':'Metadata',
               'across-samples':'Compare samples', 'calibration':'Calibration',
-              'pda':'PDA', 'ms-scan':'MS scan', 'ms-eic':'EIC', 'ms-peak-mass':'Peak mass spectrum'}
+              'pda':'PDA', 'ms-scan':'MS scan', 'ms-eic':'EIC', 'ms-peak-mass':'Peak mass'}
     for tab in nav.children:
         tab.children = labels.get(getattr(tab, 'value', None), tab.children)
         tab.style = {'flexShrink':0, 'whiteSpace':'nowrap'}
         if getattr(tab, 'value', None) in ('ms-scan','ms-eic','ms-peak-mass','pda'):
             tab.id = 'analysis-nav-' + tab.value
             tab.style['display'] = 'none'
-    analysis_order = ['data-overview','peak-analysis','across-samples','calibration',
-                      'pda','ms-scan','ms-peak-mass','ms-eic','metadata']
-    nav.children = sorted(nav.children, key=lambda tab: analysis_order.index(tab.value))
+    SIDE_ORDER = ['metadata', 'pda', 'ms-scan', 'ms-peak-mass', 'ms-eic']
+    TABLE_ORDER = ['data-overview', 'peak-analysis', 'across-samples', 'calibration']
+    side_tab_buttons = sorted([t for t in nav.children if t.value in SIDE_ORDER], key=lambda t: SIDE_ORDER.index(t.value))
+    nav.children = sorted([t for t in nav.children if t.value in TABLE_ORDER], key=lambda t: TABLE_ORDER.index(t.value))
     nav.style = {'flexWrap':'nowrap', 'width':'max-content', 'minWidth':'100%'}
+    side_panels = [p for p in tabs.children[1:] if getattr(p, 'value', None) in SIDE_ORDER]
+    tabs.children = [tabs.children[0]] + [p for p in tabs.children[1:] if getattr(p, 'value', None) not in SIDE_ORDER]
+    assert len(side_panels) == len(SIDE_ORDER) and len(side_tab_buttons) == len(SIDE_ORDER), \
+        'a signal view was lost while arranging the side panel'
     tabs.children[0] = html.Div([
         html.Div(nav, style={'overflowX':'auto', 'overflowY':'hidden', 'minWidth':0, 'flex':1}),
-        html.Div([
-            dmc.SegmentedControl(id='analysis-dock', value='below', size='xs',
-                data=[{'label':'Below', 'value':'below'}, {'label':'Right', 'value':'right'}],
-                **{'aria-label':'Analysis pane position'}),
-            dcc.Store(id='analysis-dock-owner'),
-        ], title='Position the analysis pane', style={'flexShrink':0, 'padding':'4px 8px'}),
+        # Kept (hidden) only because the layout callbacks still read and write it; the pane no longer docks.
+        html.Div([dmc.SegmentedControl(id='analysis-dock', value='below', size='xs',
+                    data=[{'label':'Below', 'value':'below'}], **{'aria-label':'Analysis pane position'}),
+                  dcc.Store(id='analysis-dock-owner')], style={'display':'none'}),
     ], className='results-navigation',
        style={'display':'flex', 'alignItems':'center', 'minWidth':0})
+    side_tabs = dmc.Tabs(
+        id='side-tabs', value='metadata', keepMounted=True, className='tab-header side-tabs',
+        style={'display':'flex', 'flexDirection':'column', 'height':'100%', 'overflow':'hidden', 'minWidth':0},
+        children=[
+            html.Div([
+                html.Div(dmc.TabsList(side_tab_buttons), style={'overflowX':'auto', 'overflowY':'hidden', 'minWidth':0, 'flex':1}),
+                html.Button('\u203a', id='side-panel-collapse', className='side-panel-collapse', n_clicks=0,
+                            title='Hide this panel', **{'aria-label':'Hide the views panel'}),
+            ], className='results-navigation side-navigation', style={'display':'flex', 'alignItems':'center', 'minWidth':0}),
+            *side_panels])
+    side_panel = html.Div([
+        html.Button([html.Span('\u2039', className='side-rail-chevron'), html.Span('Views', className='side-rail-label')],
+                    id='side-panel-rail', className='side-panel-rail', n_clicks=0,
+                    title='Show the views panel: PDA, MS scan, EIC, Metadata', **{'aria-label':'Show the views panel'}),
+        html.Div(side_tabs, id='side-panel-body', className='side-panel-body'),
+    ], id='side-panel', className='side-panel', role='complementary', **{'aria-label':'Views'})
+    side_divider = html.Div(id='side-divider', className='divider divider-horizontal side-divider', role='separator',
+                            tabIndex=0, title='Drag to resize. Double-click to hide or show.',
+                            **{'aria-orientation':'vertical', 'aria-label':'Resize the views panel'})
+    row = next(n for n in walk(root) if isinstance(getattr(n, 'children', None), list)
+               and any(getattr(c, 'id', None) == 'right-column' for c in n.children))
+    row.children = [*row.children, side_divider, side_panel]
     nodes['peak-analysis-container'].children.append(html.Div(
         'No peaks yet. Use Integrate or Shift-drag across a signal to add one.',
         id='peak-analysis-empty', className='inspector-empty', role='status'))

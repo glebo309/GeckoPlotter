@@ -115,8 +115,8 @@ def register_workspace_callbacks(app, data_manager):
     @app.callback(
         [Output('analysis-nav-ms-scan','style'), Output('analysis-nav-ms-eic','style'),
          Output('analysis-nav-ms-peak-mass','style'),
-         Output('analysis-tabs','value',allow_duplicate=True)],
-        [Input('active-file','data'), Input('loaded-files','data'), Input('analysis-tabs','value')],
+         Output('side-tabs','value',allow_duplicate=True)],
+        [Input('active-file','data'), Input('loaded-files','data'), Input('side-tabs','value')],
         prevent_initial_call=True,
     )
     def analysis_capabilities(active_file, _loaded_files, selected):
@@ -125,7 +125,7 @@ def register_workspace_callbacks(app, data_manager):
         style = {'flexShrink':0, 'whiteSpace':'nowrap'}
         if not available:
             style['display'] = 'none'
-        fallback = 'data-overview' if not available and selected in MS_ANALYSIS_TABS else no_update
+        fallback = 'metadata' if not available and selected in MS_ANALYSIS_TABS else no_update
         return dict(style), dict(style), dict(style), fallback
 
     @app.callback(Output('figure-action-status', 'children', allow_duplicate=True),

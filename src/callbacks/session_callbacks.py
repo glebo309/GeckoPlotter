@@ -42,6 +42,7 @@ CLIENT_STATE_STORES = [
     ('plot-settings-cache', 'plot-settings-cache', 'data', None),   # applied late by session-io.js
     ('pda-colormap', 'pda-colormap', 'data', _KEEP),
     ('analysis-tabs.value', 'analysis-tabs', 'value', _KEEP),
+    ('side-tabs.value', 'side-tabs', 'value', _KEEP),
     ('analysis-dock.value', 'analysis-dock', 'value', _KEEP),
     ('custom-plot-figures', 'custom-plot-figures', 'data', {}),
     ('custom-plot-counter', 'custom-plot-counter', 'data', 0),

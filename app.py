@@ -982,7 +982,7 @@ _layout_body = html.Div(
                                     id='right-vertical-divider',
                                     className='divider divider-vertical',
                                     **{'data-label-above': 'Plot',
-                                       'data-label-below': 'Analysis'},
+                                       'data-label-below': 'Results'},
                                     children=[html.Span(className='divider-label')],
                                 ),
                                 html.Div(
@@ -2029,6 +2029,22 @@ def analysis_tab_to_store(tab_value, current):
     if tab_value and tab_value != current:
         return tab_value
     return dash.no_update
+
+
+SIDE_VIEWS = ('metadata', 'pda', 'ms-scan', 'ms-peak-mass', 'ms-eic')
+
+
+@app.callback(
+    [Output('analysis-tabs', 'value', allow_duplicate=True), Output('side-tabs', 'value', allow_duplicate=True)],
+    Input('analysis-tabs', 'value'),
+    prevent_initial_call=True,
+)
+def keep_signal_views_in_the_side_panel(tab_value):
+    """The Results pane only has table tabs. A restored session or an old shortcut that asks for a signal view
+    (Metadata, PDA, MS scan, EIC, Peak mass) opens it in the side panel instead."""
+    if tab_value in SIDE_VIEWS:
+        return 'data-overview', tab_value
+    return dash.no_update, dash.no_update
 
 
 @app.callback(

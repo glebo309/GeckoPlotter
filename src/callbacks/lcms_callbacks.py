@@ -244,7 +244,7 @@ def register_lcms_callbacks(app, data_manager):
         """,
         Output('lcms-scan-cursor-overlay', 'style'),
         [Input('ms-scan-slider', 'value'),
-         Input('active-tab', 'data'),
+         Input('side-tabs', 'value'),
          Input('active-file', 'data'),
          Input('ms-active-subplot-idx', 'data')],
         State('main-plot', 'figure'),

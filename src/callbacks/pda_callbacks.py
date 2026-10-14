@@ -68,13 +68,13 @@ def register_pda_callbacks(app, data_manager):
         app.server.add_url_rule('/_pda/chromatograms', 'pda_chromatograms', pda_chromatograms)
 
     @app.callback(
-        [Output('analysis-nav-pda', 'style'), Output('analysis-tabs', 'value', allow_duplicate=True)],
+        [Output('analysis-nav-pda', 'style'), Output('side-tabs', 'value', allow_duplicate=True)],
         [Input('active-file', 'data'), Input('loaded-files', 'data')],
-        State('analysis-tabs', 'value'), prevent_initial_call=True)
+        State('side-tabs', 'value'), prevent_initial_call=True)
     def show_pda_tab(active_file, loaded_files, analysis_tab):
         available = resolve_pda_source(data_manager, active_file) is not None
         style = {'flexShrink': 0, 'whiteSpace': 'nowrap', 'display': '' if available else 'none'}
-        return style, 'data-overview' if not available and analysis_tab == 'pda' else dash.no_update
+        return style, 'metadata' if not available and analysis_tab == 'pda' else dash.no_update
 
     @app.callback(
         [Output('pda-heatmap', 'figure'),
@@ -85,7 +85,7 @@ def register_pda_callbacks(app, data_manager):
         [Input('active-file', 'data'), Input('pda-wavelength', 'value'), Input('pda-time', 'value'),
          Input('pda-heatmap', 'clickData'), Input('pda-spectrum', 'clickData'),
          Input('main-plot', 'clickData'),
-         Input('selected-peak-idx', 'data'), Input('analysis-tabs', 'value'), Input('pda-colormap', 'data')],
+         Input('selected-peak-idx', 'data'), Input('side-tabs', 'value'), Input('pda-colormap', 'data')],
         [State('pda-context', 'data'), State('main-inspector-context', 'data'), State('view-mode', 'data'), Input('pda-cursor-event', 'data'),
          Input('pda-heatmap-event', 'data')],
         prevent_initial_call=True)
@@ -137,7 +137,7 @@ def register_pda_callbacks(app, data_manager):
             if not clicked_source or clicked_source[0] != source_id:
                 raise dash.exceptions.PreventUpdate
             time = point.get('x', time)
-        if trigger in ('selected-peak-idx', 'analysis-tabs', 'active-file') and selected_peak:
+        if trigger in ('selected-peak-idx', 'side-tabs', 'active-file') and selected_peak:
             bundle = data_manager.get_bundle_for_component(source_id)
             owners = [bundle.bundle_id] + [component.component_id for component in bundle.component_list] if bundle else [source_id]
             peak = next((peak for owner in owners for peak in data_manager.peak_service.get_peaks(owner)
@@ -183,7 +183,7 @@ def register_pda_callbacks(app, data_manager):
     @app.callback(
         [Output('pda-preview', 'data'), Output('pda-main-cursor', 'data')],
         [Input('pda-context', 'data'), Input('pda-live', 'checked'),
-         Input('analysis-tabs', 'value'), Input('active-file', 'data'), Input('baseline-mode', 'data')])
+         Input('side-tabs', 'value'), Input('active-file', 'data'), Input('baseline-mode', 'data')])
     def sync_pda_main_view(context, live, analysis_tab, active_file, mode):
         source = resolve_pda_source(data_manager, active_file)
         if (analysis_tab != 'pda' or not context or not source
