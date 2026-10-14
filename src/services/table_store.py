@@ -18,7 +18,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 import pandas as pd
 
-MAX_TABLES = 16
+MAX_TABLES = 64                 # shared by every browser of one server; a few MB each at most
 PAGE_SIZE = 50
 
 _lock = threading.Lock()
