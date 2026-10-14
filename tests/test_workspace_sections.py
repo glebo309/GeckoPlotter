@@ -63,6 +63,8 @@ print(json.dumps({
                  for n in walk(next(n for n in nodes if getattr(n,'id',None)=='side-tabs')) if type(n).__name__=='TabsTab'],
     'side_panels':[n.value for n in walk(next(n for n in nodes if getattr(n,'id',None)=='side-tabs')) if type(n).__name__=='TabsPanel'],
     'side_keepMounted':next(n for n in nodes if getattr(n,'id',None)=='side-tabs').keepMounted,
+    'kept_drawn':[n.value for n in walk(next(n for n in nodes if getattr(n,'id',None)=='side-tabs'))
+                  if type(n).__name__=='TabsPanel' and getattr(n,'keepMounted',None)],
     'row':[getattr(c,'id',None) for c in next(n for n in nodes if isinstance(getattr(n,'children',None),list)
            and any(getattr(c,'id',None)=='right-column' for c in n.children)).children],
 }))
@@ -88,7 +90,9 @@ def test_results_pane_holds_the_tables_and_the_views_panel_holds_the_signal_view
         assert (tab['style'].get('display') == 'none') == (tab['value'] != 'metadata')
     assert not analysis_navigation['dropdown']
     assert analysis_navigation['scroll']
-    assert analysis_navigation['keepMounted'] and analysis_navigation['side_keepMounted']
+    # Inactive panels are not drawn (panel-refresh.js keeps their contents current); PDA stays drawn for its cursors.
+    assert analysis_navigation['keepMounted'] is False and analysis_navigation['side_keepMounted'] is False
+    assert analysis_navigation['kept_drawn'] == ['pda']
     # The Views panel is its own column to the right of the plot column.
     row = analysis_navigation['row']
     assert row.index('right-column') < row.index('side-divider') < row.index('side-panel')

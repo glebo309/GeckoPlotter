@@ -197,7 +197,7 @@ def arrange_workspace(root):
     ], className='results-navigation',
        style={'display':'flex', 'alignItems':'center', 'minWidth':0})
     side_tabs = dmc.Tabs(
-        id='side-tabs', value='metadata', keepMounted=True, className='tab-header side-tabs',
+        id='side-tabs', value='metadata', keepMounted=False, className='tab-header side-tabs',
         style={'display':'flex', 'flexDirection':'column', 'height':'100%', 'overflow':'hidden', 'minWidth':0},
         children=[
             html.Div([

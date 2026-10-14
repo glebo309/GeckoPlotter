@@ -18,15 +18,18 @@ PAGE_COLUMN_GAP = PAGE_PX_PER_MM * 6
 
 
 def _paragraph(lines, last_width=55):
-    """Justified paragraph: full-width lines + shorter last line."""
-    items = []
-    for i in range(lines):
-        w = last_width if i == lines - 1 else 100
-        items.append(html.Div(style={
-            'background': '#d5d5d5', 'height': '3.5px',
-            'width': f'{w}%', 'marginBottom': '2.5px', 'borderRadius': '0.5px',
-        }))
-    return html.Div(items, style={'marginBottom': '4px'})
+    """Justified paragraph: full-width lines + shorter last line (3.5 px bars, 6 px apart).
+
+    One element painted with CSS gradients, not one per line: every Dash component on the page is re-checked on each
+    store update, and the ~200 bars of this mock were a seventh of all components.
+    """
+    bar = 'linear-gradient(#d5d5d5, #d5d5d5)'
+    full = (lines - 1) * 6
+    return html.Div(style={
+        'height': f'{full + 3.5}px', 'marginBottom': '6.5px',
+        'background': (f'{bar} left bottom / {last_width}% 3.5px no-repeat, '
+                       f'repeating-linear-gradient(#d5d5d5 0 3.5px, transparent 3.5px 6px) left top / 100% {full}px no-repeat'),
+    })
 
 
 def _section_header(text):

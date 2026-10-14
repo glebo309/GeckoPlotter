@@ -369,12 +369,14 @@ _layout_body = html.Div(
                                     style={'height': '65%', 'display': 'flex', 'flexDirection': 'column'},
                                     children=[
                                         html.Div('Toolbox', className='panel-header'),
-                                        # Toolbox tabs (DMC). keepMounted keeps inactive panels mounted so
-                                        # callbacks reading controls in other panels keep working off-tab.
+                                        # Toolbox tabs (DMC). Inactive panels are not drawn: every drawn Dash component is
+                                        # re-checked on each store update, so hidden controls slowed every callback. Callbacks
+                                        # still read and write them (the values live in Dash's store, not in the page).
+                                        # Inspector and Integration stay drawn: the plot toolbar and keys use them off-tab.
                                         dmc.Tabs(
                                             id='toolbox-tabs',
                                             value='plot-tools',
-                                            keepMounted=True,
+                                            keepMounted=False,
                                             className='toolbox-tabs',
                                             style={'display': 'flex', 'flexDirection': 'column',
                                                    'flex': '1', 'overflow': 'hidden'},
@@ -395,7 +397,7 @@ _layout_body = html.Div(
                                                 ),
                                             ]),
                                             # Plot Settings Tab
-                                            dmc.TabsPanel(value="plot-tools", style={'flex': '1', 'overflow': 'auto'}, children=[
+                                            dmc.TabsPanel(value="plot-tools", keepMounted=True, style={'flex': '1', 'overflow': 'auto'}, children=[
                                                 html.Div(
                                                     id='plot-tools-container',
                                                     className='toolbox-tab-content',
@@ -705,7 +707,7 @@ _layout_body = html.Div(
                                                 ),
                                             ]),
                                             # Integration Tab
-                                            dmc.TabsPanel(value="integration", style={'flex': '1', 'overflow': 'auto'}, children=[
+                                            dmc.TabsPanel(value="integration", keepMounted=True, style={'flex': '1', 'overflow': 'auto'}, children=[
                                                 html.Div(id='integration-container', className='toolbox-tab-content integration-panel', children=[
                                                     html.Div(id='int-detection-target', className='integration-target', children='Select a signal in Files'),
                                                     html.Section(className='integration-section', children=[
@@ -997,12 +999,13 @@ _layout_body = html.Div(
                                             className='panel-content',
                                             style={'display': 'flex', 'flexDirection': 'column', 'height': '100%'},
                                             children=[
-                                                # Analysis tabs (DMC). keepMounted keeps inactive panels mounted so
-                                                # callbacks referencing pub-table/peak-table/etc. work off-tab.
+                                                # Analysis tabs (DMC). Inactive panels are not drawn (see toolbox-tabs); callbacks
+                                                # still read and write pub-table/peak-table/etc. off-tab. PDA stays drawn: its
+                                                # cursor scripts follow the heatmap and redrawing it costs more than keeping it.
                                                 dmc.Tabs(
                                                     id='analysis-tabs',
                                                     value='peak-analysis',
-                                                    keepMounted=True,
+                                                    keepMounted=False,
                                                     className='tab-header',
                                                     style={'display': 'flex', 'flexDirection': 'column',
                                                            'height': '100%', 'overflow': 'hidden'},
@@ -1018,7 +1021,7 @@ _layout_body = html.Div(
                                                         dmc.TabsTab("Peak Mass", value="ms-peak-mass"),
                                                         dmc.TabsTab("PDA", value="pda"),
                                                     ]),
-                                                    dmc.TabsPanel(create_pda_explorer(), value="pda", style={'flex':'1', 'height':'100%', 'minHeight':0, 'overflow':'auto'}),
+                                                    dmc.TabsPanel(create_pda_explorer(), value="pda", keepMounted=True, style={'flex':'1', 'height':'100%', 'minHeight':0, 'overflow':'auto'}),
                                                     # Data Overview Tab
                                                     dmc.TabsPanel(value="data-overview", style={'flex': '1', 'overflow': 'auto'}, children=[
                                                     html.Div(id="data-overview-content", className="tab-content active", style={
