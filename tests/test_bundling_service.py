@@ -56,7 +56,7 @@ def test_lcms_cdf_files_are_grouped_by_base_name():
     parsed_files = [
         (
             filename,
-            b"cdf",
+            b"cdf:" + filename.encode(),          # each channel is its own file
             make_result(
                 filename,
                 detected_format="lcms_cdf",
@@ -159,23 +159,16 @@ def test_explicit_ms_polarity_metadata_overrides_misleading_export_name():
     assert assign_bundles([('Run_VWD1B.cdf', b'', uv)])[0].primary.role == ComponentRole.VWD_B
 
 
-def test_the_same_export_dropped_twice_is_one_component_not_a_doubled_trace():
-    from services.bundling_service import assign_bundles
-    import pandas as pd
-    from ingestion.types import StandardizedResult, ColumnRole, FileIdentity, PlotHint, SourceCategory
-
-    def result(name):
-        frame = pd.DataFrame({'Time (min)': [0.0, 1.0, 2.0], 'Ion Count': [1.0, 5.0, 2.0]})
+def test_the_same_signal_dropped_twice_is_one_component_not_a_doubled_trace():
+    def result(name, scale=1.0):
+        frame = pd.DataFrame({'Time (min)': [i * 0.1 for i in range(50)],
+                              'Ion Count': [scale * (i % 7) for i in range(50)]})
         return StandardizedResult(data=frame, column_roles={'Time (min)': ColumnRole.X, 'Ion Count': ColumnRole.Y},
-                                  identity=FileIdentity(name, 'cdf', 'lcms_cdf', 2), plot_hint=PlotHint.LINE
-                                  if hasattr(PlotHint, 'LINE') else list(PlotHint)[0],
-                                  source_category=SourceCategory.LCMS_MS if hasattr(SourceCategory, 'LCMS_MS')
-                                  else list(SourceCategory)[0], sample_name='Pep C',
+                                  identity=FileIdentity(name, 'cdf', 'lcms_cdf', 2),
+                                  source_category=SourceCategory.LCMS_MS, sample_name='Pep C',
                                   metadata={'experiment_title': 'LCMS-2025-05-07 13-36-40+02-00-03.dx'})
 
-    other = result('run_002.cdf')
-    other.data['Ion Count'] = [3.0, 9.0, 4.0]
     bundles = assign_bundles([('run_001.cdf', b'export of Monday', result('run_001.cdf')),
                               ('run_001 (1).cdf', b'export of Tuesday', result('run_001 (1).cdf')),   # same signal
-                              ('run_002.cdf', b'another channel', other)])
+                              ('run_002.cdf', b'another channel', result('run_002.cdf', scale=3.0))])
     assert sum(len(b.component_list) for b in bundles) == 2

@@ -91,6 +91,8 @@ def assign_bundles(parsed_files: List[ParsedFile]) -> List[Bundle]:
 def _content_digest(raw_bytes: bytes, standardized: StandardizedResult) -> str:
     """What the file contains as a signal (column names and values), so a re-export with a new header matches."""
     data = getattr(standardized, 'data', None)
+    if data is None or not hasattr(data, 'columns') or len(data) < 20:
+        return hashlib.sha256(raw_bytes or b'').hexdigest()     # tables and stubs: only identical files match
     try:
         import pandas as pd
         values = pd.util.hash_pandas_object(data, index=False).values.tobytes()
