@@ -56,24 +56,35 @@ print(json.dumps({
             for n in walk(nav) if type(n).__name__=='TabsTab'],
     'dropdown':any(getattr(n,'id',None)=='results-more' for n in nodes),
     'scroll':any(getattr(n,'style',{}).get('overflowX')=='auto' for n in walk(nav)),
-    'panels':[n.value for n in walk(tabs) if type(n).__name__=='TabsPanel']
+    'panels':[n.value for n in walk(tabs) if type(n).__name__=='TabsPanel'],
+    'side_tabs':[{'value':n.value,'label':n.children,'style':getattr(n,'style',{})}
+                 for n in walk(next(n for n in nodes if getattr(n,'id',None)=='side-tabs')) if type(n).__name__=='TabsTab'],
+    'side_panels':[n.value for n in walk(next(n for n in nodes if getattr(n,'id',None)=='side-tabs')) if type(n).__name__=='TabsPanel'],
+    'side_keepMounted':next(n for n in nodes if getattr(n,'id',None)=='side-tabs').keepMounted,
+    'row':[getattr(c,'id',None) for c in next(n for n in nodes if isinstance(getattr(n,'children',None),list)
+           and any(getattr(c,'id',None)=='right-column' for c in n.children)).children],
 }))
 '''
     result = subprocess.run([sys.executable,'-B','-c',script],capture_output=True,text=True,check=True)
     return json.loads(result.stdout)
 
 
-def test_analysis_views_have_direct_tabs_and_keep_panels_mounted(analysis_navigation):
-    expected = {'data-overview':'Data','peak-analysis':'Peaks','metadata':'Metadata',
-                'across-samples':'Compare samples','calibration':'Calibration',
-                'ms-scan':'MS scan','ms-eic':'EIC','ms-peak-mass':'Peak mass spectrum','pda':'PDA'}
-    assert {tab['value']:tab['label'] for tab in analysis_navigation['tabs']} == expected
-    for tab in analysis_navigation['tabs']:
-        assert (tab['style'].get('display') == 'none') == (tab['value'].startswith('ms-') or tab['value']=='pda')
+def test_results_pane_holds_the_tables_and_the_views_panel_holds_the_signal_views(analysis_navigation):
+    tables = {'data-overview':'Data','peak-analysis':'Peaks','across-samples':'Compare samples','calibration':'Calibration'}
+    views = {'metadata':'Metadata','pda':'PDA','ms-scan':'MS scan','ms-peak-mass':'Peak mass','ms-eic':'EIC'}
+    assert {tab['value']:tab['label'] for tab in analysis_navigation['tabs']} == tables
+    assert {tab['value']:tab['label'] for tab in analysis_navigation['side_tabs']} == views
+    assert set(analysis_navigation['panels']) == set(tables)
+    assert set(analysis_navigation['side_panels']) == set(views)
+    # MS and PDA views appear only for data that has them; Metadata is always there.
+    for tab in analysis_navigation['side_tabs']:
+        assert (tab['style'].get('display') == 'none') == (tab['value'] != 'metadata')
     assert not analysis_navigation['dropdown']
     assert analysis_navigation['scroll']
-    assert analysis_navigation['keepMounted']
-    assert set(analysis_navigation['panels']) == set(expected)
+    assert analysis_navigation['keepMounted'] and analysis_navigation['side_keepMounted']
+    # The Views panel is its own column to the right of the plot column.
+    row = analysis_navigation['row']
+    assert row.index('right-column') < row.index('side-divider') < row.index('side-panel')
 
 
 def test_mass_polarity_and_peak_empty_state_are_reachable(analysis_navigation):

@@ -40,7 +40,7 @@ def test_other_loaded_ms_files_never_enable_scan_tabs_for_unrelated_source(activ
     callback = capability_callback(store_with_scan_bundle())
     result = callback(active,[], 'ms-peak-mass')
     assert all(style['display']=='none' for style in result[:3])
-    assert result[3] == 'data-overview'
+    assert result[3] == 'metadata'
 
 
 @pytest.mark.parametrize('arrays',[
@@ -51,7 +51,7 @@ def test_tic_only_or_empty_spectral_metadata_does_not_offer_ms_tools(arrays):
     callback = capability_callback(store_with_scan_bundle(arrays))
     result = callback('uv',[], 'ms-scan')
     assert all(style['display']=='none' for style in result[:3])
-    assert result[3]=='data-overview'
+    assert result[3]=='metadata'
 
 
 @pytest.mark.parametrize('tab',['data-overview','peak-analysis','metadata','across-samples','calibration'])

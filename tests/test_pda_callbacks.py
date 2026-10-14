@@ -58,7 +58,7 @@ def test_non_pda_selection_hides_tab_and_returns_to_data(monkeypatch):
     _, fns = callbacks(monkeypatch, 'active-file.data')
     style, selected = fns['show_pda_tab']('missing', [], 'pda')
     assert style['display'] == 'none'
-    assert selected == 'data-overview'
+    assert selected == 'metadata'
 
 
 def test_peak_and_channel_selection_in_one_update_uses_selected_apex(monkeypatch):
