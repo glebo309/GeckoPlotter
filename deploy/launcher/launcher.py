@@ -325,18 +325,37 @@ def prepare() -> subprocess.Popen:
     return process
 
 
+SHORTCUTS_VERSION = 2                                  # raise to rebuild everyone's shortcut once
+ICONS = ('icon.png', 'icon.ico', 'icon.icns')
+
+
+def fetch_icons() -> None:
+    """The shortcut icon comes from GitHub too, so the download stays a handful of scripts."""
+    for name in ICONS:
+        target = HOME / name
+        if target.exists() or os.environ.get('GECKO_SOURCE_ZIP'):
+            continue
+        try:
+            request = urllib.request.Request(
+                f'https://raw.githubusercontent.com/{REPO}/{BRANCH}/deploy/launcher/icon/{name}', headers=USER_AGENT)
+            with urllib.request.urlopen(request, timeout=20) as response:
+                target.write_bytes(response.read())
+        except Exception as error:                             # noqa: BLE001 - a shortcut without icon still works
+            log(f'could not fetch {name}: {error}')
+
+
 def create_shortcuts() -> None:
     """Once per computer: a GeckoPlotter entry with the gecko icon (Start menu and Desktop on Windows, an app in
     ~/Applications on macOS, the applications menu on Linux) that runs the Start script kept in the home folder."""
     if os.environ.get('GECKO_NO_SHORTCUTS'):
         return
     state = read_state()
-    if state.get('shortcuts') == 1:
+    if state.get('shortcuts') == SHORTCUTS_VERSION:
         return
     system = platform.system()
     try:
         if system == 'Windows':
-            script, icon = HOME / 'Start GeckoPlotter.bat', asset('icon.ico')
+            script, icon = HOME / 'start-windows.bat', asset('icon.ico')
             if not script.exists():
                 return
             ps = ("$w = New-Object -ComObject WScript.Shell; "
@@ -347,7 +366,7 @@ def create_shortcuts() -> None:
             subprocess.run(['powershell', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', ps],
                            check=True, capture_output=True, timeout=60)
         elif system == 'Darwin':
-            script = HOME / 'Start GeckoPlotter.command'
+            script = HOME / 'start-mac.command'
             if not script.exists():
                 return
             app = Path.home() / 'Applications' / 'GeckoPlotter.app'
@@ -370,7 +389,7 @@ def create_shortcuts() -> None:
             runner.write_text(f'#!/bin/sh\nexec open -a Terminal "{script}"\n', encoding='utf-8')
             runner.chmod(0o755)
         else:
-            script = HOME / 'start-geckoplotter.sh'
+            script = HOME / 'start-linux.sh'
             if not script.exists():
                 return
             entries = Path(os.environ.get('XDG_DATA_HOME') or Path.home() / '.local' / 'share') / 'applications'
@@ -379,26 +398,11 @@ def create_shortcuts() -> None:
                 '[Desktop Entry]\nType=Application\nName=GeckoPlotter\nComment=HPLC and LC-MS data, plotted\n'
                 f'Exec=bash "{script}"\nIcon={asset("icon.png") or ""}\nTerminal=true\nCategories=Science;Education;\n',
                 encoding='utf-8')
-        state['shortcuts'] = 1
+        state['shortcuts'] = SHORTCUTS_VERSION
         write_state(state)
         log('created the GeckoPlotter shortcut')
     except Exception as error:                                 # noqa: BLE001 - a missing shortcut never blocks the app
         log(f'could not create the shortcut: {error}')
-
-
-BANNER = r"""
-        _/          _/
-   ____/ \_________/ \__
-  <o___                 )=======-------~~~      GeckoPlotter
-       \_/~~~~~~~~~\_/                          your chromatograms, on this computer
-        \           \
-"""
-
-
-def banner() -> None:
-    if IS_WINDOWS:
-        os.system('')                                          # lets the Windows console show colours
-    print('\033[32m' + BANNER + '\033[0m', flush=True)
 
 
 def ensure_chrome() -> None:
@@ -420,7 +424,6 @@ def ensure_chrome() -> None:
 def main() -> int:
     HOME.mkdir(parents=True, exist_ok=True)
     splash = start_splash()
-    banner()
     print('GeckoPlotter is starting. Your browser opens in a moment.', flush=True)
     print(f'(If it does not, open {splash} yourself.)', flush=True)
     print('Keep this window open while you work. Close it to stop GeckoPlotter.\n', flush=True)
@@ -439,6 +442,8 @@ def main() -> int:
         return 1
     print(f'GeckoPlotter is running at {STATUS.url}', flush=True)
     threading.Thread(target=ensure_chrome, daemon=True).start()
+    if not os.environ.get('GECKO_NO_SHORTCUTS'):
+        fetch_icons()
     create_shortcuts()
     try:
         return process.wait()

@@ -18,8 +18,7 @@ Open http://127.0.0.1:8052 and drag files onto the drop zone.
 ### Install for the group (one click)
 
 Download [GeckoPlotter-Launcher.zip](https://github.com/glebo309/GeckoPlotter/raw/main/deploy/launcher/GeckoPlotter-Launcher.zip),
-unzip it, and double-click **Start GeckoPlotter** (`.bat` on Windows, `.command` on Mac, `start-geckoplotter.sh` on
-Linux). The first start installs a private Python and the packages (about 600 MB, a few minutes); every later start takes
+unzip it, and double-click the start file for your system (`start-windows.bat`, `start-mac.command` or `start-linux.sh`). The first start installs a private Python and the packages (about 600 MB, a few minutes); every later start takes
 seconds and pulls the newest version from this repository's `main` branch by itself. Everything runs on that person's own
 computer, so it is as fast as their laptop. Nothing is installed system-wide and no admin rights are needed. Details and
 the first-run warnings (Windows SmartScreen, macOS "Open") are in `deploy/launcher/README.txt`; if the Start scripts change,

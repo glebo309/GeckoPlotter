@@ -3,10 +3,10 @@ GeckoPlotter launcher
 
 Needs: the internet (first start only: about 600 MB), nothing else. No admin rights, nothing system-wide.
 
-Windows : double-click "Start GeckoPlotter.bat".
+Windows : double-click "start-windows.bat".
           If Windows says "protected your PC": More info, then Run anyway (once).
-Mac     : right-click "Start GeckoPlotter.command", choose Open, then Open again (once).
-Linux   : run  bash start-geckoplotter.sh
+Mac     : right-click "start-mac.command", choose Open, then Open again (once).
+Linux   : run  bash start-linux.sh
 
 After the first start there is a GeckoPlotter shortcut with the gecko icon (Start menu and Desktop on
 Windows, Applications folder on Mac, the app menu on Linux): use that from then on.

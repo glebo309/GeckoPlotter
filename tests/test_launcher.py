@@ -86,13 +86,13 @@ def test_the_mac_shortcut_is_an_app_with_the_gecko_icon_that_runs_the_start_scri
     monkeypatch.setattr(launcher.platform, 'system', lambda: 'Darwin')
     monkeypatch.setattr(launcher.Path, 'home', lambda: tmp_path / 'user')
     launcher.HOME.mkdir(parents=True)
-    (launcher.HOME / 'Start GeckoPlotter.command').write_text('#!/bin/bash\n')
+    (launcher.HOME / 'start-mac.command').write_text('#!/bin/bash\n')
     launcher.create_shortcuts()
     app = tmp_path / 'user' / 'Applications' / 'GeckoPlotter.app' / 'Contents'
     runner = app / 'MacOS' / 'GeckoPlotter'
-    assert 'Start GeckoPlotter.command' in runner.read_text() and runner.stat().st_mode & 0o111
+    assert 'start-mac.command' in runner.read_text() and runner.stat().st_mode & 0o111
     assert '<string>icon</string>' in (app / 'Info.plist').read_text() and (app / 'Resources' / 'icon.icns').exists()
-    assert launcher.read_state()['shortcuts'] == 1
+    assert launcher.read_state()['shortcuts'] == launcher.SHORTCUTS_VERSION
     (runner).unlink()
     launcher.create_shortcuts()                                # only once: a removed shortcut is not forced back
     assert not runner.exists()
@@ -102,7 +102,7 @@ def test_the_linux_shortcut_is_a_menu_entry(launcher, tmp_path, monkeypatch):
     monkeypatch.setattr(launcher.platform, 'system', lambda: 'Linux')
     monkeypatch.setenv('XDG_DATA_HOME', str(tmp_path / 'share'))
     launcher.HOME.mkdir(parents=True)
-    (launcher.HOME / 'start-geckoplotter.sh').write_text('#!/bin/sh\n')
+    (launcher.HOME / 'start-linux.sh').write_text('#!/bin/sh\n')
     launcher.create_shortcuts()
     entry = (tmp_path / 'share' / 'applications' / 'geckoplotter.desktop').read_text()
-    assert 'Name=GeckoPlotter' in entry and 'start-geckoplotter.sh' in entry and 'icon.png' in entry
+    assert 'Name=GeckoPlotter' in entry and 'start-linux.sh' in entry and 'icon.png' in entry
