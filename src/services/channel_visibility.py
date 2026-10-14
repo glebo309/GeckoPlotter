@@ -108,6 +108,20 @@ def set_sample_visibility(store, bundle_id, visible):
     store.visibility_state[bundle_id] = bool(visible)
 
 
+def show_channel(store, component_id):
+    """Switch one channel on. In a sample hidden with its eye it stays hidden and is shown again with the sample:
+    adding a wavelength in the PDA view (to every sample) must not bring hidden samples back into the plot."""
+    source = store.peak_owner_id(component_id)
+    bundle = store.get_bundle_for_component(component_id)
+    masks = getattr(store, '_hidden_sample_channels', {})
+    if bundle is not None and (bundle.bundle_id in masks or store.visibility_state.get(bundle.bundle_id, True) is False):
+        masks.setdefault(bundle.bundle_id, {})[source] = True
+        store._hidden_sample_channels = masks
+        store.visibility_state[source] = False
+    else:
+        store.visibility_state[source] = True
+
+
 def choose_channel(store, bundle_ids, channel_key, combine=False):
     controls = channel_controls(store, bundle_ids)
     target = next((c for c in controls if c['key'] == channel_key), None)

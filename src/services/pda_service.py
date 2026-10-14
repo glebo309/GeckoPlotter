@@ -132,6 +132,7 @@ def add_pda_chromatogram(store, file_id, wavelength_nm):
     """Add one independently integrable wavelength to the existing sample bundle."""
     from .data_store import Component, ComponentRole, ColumnRole, SourceCategory
     from .research_package import now
+    from .channel_visibility import show_channel
     from src.ingestion.types import StandardizedResult, FileIdentity
 
     resolved = resolve_pda_source(store, file_id)
@@ -146,7 +147,7 @@ def add_pda_chromatogram(store, file_id, wavelength_nm):
     for component in bundle.component_list:
         meta = component.metadata or {}
         if meta.get('pda_source_id') == source_id and meta.get('pda_extracted') and meta.get('wavelength_nm') == actual:
-            store.visibility_state[component.component_id] = True
+            show_channel(store, component.component_id)
             return component.component_id
     # The instrument already exported this wavelength as a channel (Ch2 263 nm): use that signal instead of adding
     # a second, nearly identical trace of the same sample.
@@ -154,7 +155,7 @@ def add_pda_chromatogram(store, file_id, wavelength_nm):
         meta = component.metadata or {}
         if (meta.get('detector_channel') and not meta.get('pda_extracted') and meta.get('wavelength_nm') is not None
                 and round(float(meta['wavelength_nm'])) == round(actual)):
-            store.visibility_state[component.component_id] = True
+            show_channel(store, component.component_id)
             return component.component_id
     source = store.get_data_by_id(source_id)
     component_id = str(uuid4())
@@ -178,7 +179,7 @@ def add_pda_chromatogram(store, file_id, wavelength_nm):
     bundle.component_list.append(component)
     bundle.components.setdefault(component.role, component)
     store.add_bundle(bundle)
-    store.visibility_state[component_id] = True
+    show_channel(store, component_id)
     parameters = {'source_id': source_id, 'signal_id': component_id,
                   'wavelength_nm': actual, 'method': 'nearest measured wavelength'}
     store.analysis_history.append({'at': now(), 'trigger': ['pda-add-chromatogram'],

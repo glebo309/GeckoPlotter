@@ -370,3 +370,16 @@ def test_lcms_channel_toggles_replace_redundant_polarity_filter():
         [{'id':tab,'type':'raw','group_key':group}],'uv',store.get_loaded_files_list(),context)
     assert result[0]=={'display':'none'}
     assert result[4]['ms_polarity']=='both'
+
+
+def test_switching_a_channel_on_keeps_a_hidden_sample_hidden_until_it_is_shown():
+    from services.channel_visibility import set_sample_visibility, show_channel
+    store = samples()
+    store.visibility_state['b263'] = False
+    set_sample_visibility(store, 'b', False)            # eye off on sample b
+    show_channel(store, 'b263')                         # e.g. "Add 263 nm channel" in the PDA view, for every sample
+    assert store.visibility_state['b263'] is False      # b stays out of the plot
+    show_channel(store, 'a263')
+    assert store.visibility_state['a263'] is True       # visible samples get the channel at once
+    set_sample_visibility(store, 'b', True)
+    assert store.visibility_state['b263'] is True       # and b shows it when it comes back
