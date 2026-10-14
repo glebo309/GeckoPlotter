@@ -198,13 +198,15 @@ def register_upload_callbacks(app: dash.Dash, data_manager) -> None:
             filenames = [f for f in filenames if not is_method_upload(f)]
             _register_methods(data_manager, method_uploads)
             if not contents_list:
+                # Redraw: a gradient overlay that had no method to draw from can be drawn now.
+                redraw = (render_counter or 0) + 1
                 if active_file:
                     try:
                         return (dash.no_update,) * 3 + (build_active_file_views(data_manager, active_file)[0],) \
-                            + (dash.no_update,) * 5
+                            + (dash.no_update,) * 2 + (redraw,) + (dash.no_update,) * 2
                     except Exception:
                         log.exception("Could not refresh the metadata after reading a method file")
-                return (dash.no_update,) * 9
+                return (dash.no_update,) * 6 + (redraw,) + (dash.no_update,) * 2
 
         try:
             import base64

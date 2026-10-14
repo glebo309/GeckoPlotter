@@ -102,7 +102,7 @@
         // Deterministic restore positions. Collapsed panels should reopen to the
         // familiar working layout, not to the last near-edge drag position.
         var defaults = {
-            leftCol: 24, rightCol: 76,
+            leftCol: 20, rightCol: 80,
             topLeft: 35, bottomLeft: 65,
             topRight: 60, bottomRight: 40
         };

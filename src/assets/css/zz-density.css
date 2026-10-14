@@ -104,6 +104,9 @@
 /* Metadata tab: choose what to overlay on the plot */
 .metadata-overlay-bar { display: flex; align-items: center; gap: 8px; padding: 8px 15px 0; }
 .metadata-overlay-bar .form-label { margin: 0; white-space: nowrap; }
+.overlay-note { margin: 6px 15px 0; padding: 6px 10px; border-radius: 6px; font-size: 12px; line-height: 1.4;
+    background: var(--warning-bg, #fff4e5); color: var(--warning-fg, #8a4b00); border: 1px solid var(--warning-border, #f3c98b); }
+.overlay-note:empty { display: none; }
 
 /* Views panel: a permanent column to the right of the plot (PDA, MS scan, Peak mass, EIC, Metadata). */
 .side-panel { position:relative; flex:0 0 auto; width:420px; min-width:0; display:flex; flex-direction:column;

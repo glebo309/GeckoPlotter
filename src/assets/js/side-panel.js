@@ -15,7 +15,8 @@
 
     function maxWidth() { return Math.max(MIN, Math.min(900, Math.round(window.innerWidth * 0.6))); }
     function clamp(width) { return Math.max(MIN, Math.min(maxWidth(), Math.round(width))); }
-    function defaultWidth() { return Math.max(MIN, Math.min(420, Math.round(window.innerWidth * 0.26))); }
+    // About 28% of the window: the spectra and metadata here need the room more than the tools on the left do.
+    function defaultWidth() { return Math.max(MIN, Math.min(640, Math.round(window.innerWidth * 0.28))); }
 
     function save() {
         try { window.localStorage.setItem(KEY, JSON.stringify(state)); } catch (e) { /* not persisted */ }

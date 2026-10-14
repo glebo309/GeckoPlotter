@@ -726,15 +726,22 @@ def compose_raw_figure(data_manager, plot_manager, active_tab_id, group_key, s, 
 
     _apply_pda_main_cursor(figure, pda_cursor)
     overlay = next((o[len('overlay:'):] for o in (display_opts or []) if str(o).startswith('overlay:')), None)
-    if overlay and layout_mode != 'stacked':
+    missing = None                      # why the chosen overlay is not drawn, shown under its selector (app.py)
+    if overlay and layout_mode == 'stacked':
+        missing = 'stacked'
+    elif overlay:
         from services.shimadzu_method import add_gradient_overlay, add_status_overlay
         overlay_entries = [e for files in visible_files.values() for e in files]
         if overlay in ('gradient', 'gradient_column'):
             from services.lab_defaults import dwell_volume_ul
-            add_gradient_overlay(figure, data_manager, overlay_entries,
-                                 dwell_volume_ul() if overlay == 'gradient_column' else None)
+            if not add_gradient_overlay(figure, data_manager, overlay_entries,
+                                        dwell_volume_ul() if overlay == 'gradient_column' else None):
+                missing = 'method'
         elif overlay.startswith('status:'):
-            add_status_overlay(figure, overlay_entries, overlay[len('status:'):])
+            if not add_status_overlay(figure, overlay_entries, overlay[len('status:'):]):
+                missing = 'status'
+    if missing:
+        figure.update_layout(meta={**(figure.layout.meta or {}), 'gecko_overlay_missing': missing})
     return figure
 
 

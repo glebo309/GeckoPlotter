@@ -283,7 +283,7 @@ _layout_body = html.Div(
                         html.Div(
                             id='left-column',
                             className='left-column',
-                            style={'display': 'flex', 'flexDirection': 'column', 'minWidth': '260px', 'width': '24%'},
+                            style={'display': 'flex', 'flexDirection': 'column', 'minWidth': '260px', 'width': '20%'},
                             children=[
                                 html.Div(
                                     id='left-top-panel',
@@ -885,7 +885,7 @@ _layout_body = html.Div(
                         html.Div(
                             id='right-column',
                             className='right-column',
-                            style={'display': 'flex', 'flexDirection': 'column', 'width': '76%'},
+                            style={'display': 'flex', 'flexDirection': 'column', 'width': '80%'},
                             children=[
                                 html.Div(
                                     id='right-top-panel',
@@ -1180,6 +1180,7 @@ _layout_body = html.Div(
                                                                           ('PDA Lamp Housing Temp.', 'PDA lamp housing temperature'),
                                                                           ('Room Temp.', 'Room temperature'))]]),
                                                         ]),
+                                                        html.Div(id='overlay-note', className='overlay-note', role='status'),
                                                         html.Div(
                                                             id='metadata-container',
                                                             style={'padding': '15px', 'width': '100%', 'boxSizing': 'border-box'},
@@ -1984,6 +1985,23 @@ clientside_callback(
     Output('overlay-select', 'value'),
     Input('int-display-opts', 'value'),
     State('overlay-select', 'value'),
+)
+
+# The chosen overlay could not be drawn (compose_raw_figure records why): say what is missing under the selector.
+clientside_callback(
+    """function(figure, choice) {
+        var why = ((figure || {}).layout || {}).meta;
+        why = why && why.gecko_overlay_missing;
+        if (!why || !choice || choice === 'none') return '';
+        if (why === 'stacked') return 'Overlays are drawn in the Overlay layout. Switch from Separate to Overlay to see it.';
+        if (why === 'method') return 'No LC method for the samples in this plot, so there is no gradient to draw. ' +
+            'Drop the method file (.lcm) or the run (.lcd) into Files and the gradient appears.';
+        return 'This trace is not in the files of these samples. It comes with the LabSolutions ASCII export of the ' +
+            'run when the instrument status was exported.';
+    }""",
+    Output('overlay-note', 'children'),
+    Input('main-plot', 'figure'),
+    Input('overlay-select', 'value'),
 )
 
 clientside_callback(

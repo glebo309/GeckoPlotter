@@ -165,6 +165,20 @@ def baseline_edit_values(peak, time_arr, signal_arr, display_p0, display_p1,
 # Shared: get X/Y arrays from any file
 # ---------------------------------------------------------------------------
 
+def _not_above_signal(time_arr, signal_arr, points):
+    """Baseline ends dragged above the signal moved down onto it at their times (linear interpolation of the full
+    data). A line starting above the curve only cuts off the peak's cap: a 50 mAU peak integrated as 0.001."""
+    t = np.asarray(time_arr, dtype=float)
+    y = np.asarray(signal_arr, dtype=float)
+    order = np.argsort(t, kind='stable')
+    t, y = t[order], y[order]
+    keep = np.isfinite(t) & np.isfinite(y)
+    t, y = t[keep], y[keep]
+    if len(t) < 2:
+        return points
+    return [(x, min(float(py), float(np.interp(x, t, y)))) for x, py in points]
+
+
 def get_xy_arrays(data_manager, file_id):
     """Extract (x, y) arrays from any loaded file using pipeline metadata.
 
@@ -476,6 +490,10 @@ def register_baseline_callbacks(app: dash.Dash, data_manager) -> None:
             time_arr, signal_arr = _get_chrom(target_file)
             if time_arr is None:
                 return abandon()
+            # A baseline end dragged above the signal drops onto it (full data); one below the signal stays.
+            display_pts = _not_above_signal(time_arr, signal_arr, display_pts)
+            if not (easy_mode is True or easy_mode == 'zero'):
+                calc_pts = display_pts
 
             res, q1, q2 = _area_with_constraints(time_arr, signal_arr, *calc_pts)
             if not res:

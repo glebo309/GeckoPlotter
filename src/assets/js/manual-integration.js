@@ -561,6 +561,26 @@
         return svg;
     }
 
+    // A baseline end dragged above the signal drops onto it (only the cap above the line would be integrated);
+    // one dragged below the signal stays where it is. Returns the screen y to draw the end at.
+    function notAboveCurve(sp, trace, clientX, clientY) {
+        if (!sp || !trace || !sp.yaxis) return clientY;
+        var x = Number(axisPixelToData(sp.xaxis, clientX - sp.bounds.left, sp.bounds.width, false));
+        var mouse = Number(axisPixelToData(sp.yaxis, clientY - sp.bounds.top, sp.bounds.height, true));
+        var xs = Array.prototype.slice.call(trace.x || []), ys = Array.prototype.slice.call(trace.y || []);
+        var y = null;
+        for (var i = 1; i < xs.length; i++) {
+            var a = Number(xs[i - 1]), b = Number(xs[i]);
+            if ((x - a) * (x - b) <= 0 && a !== b) {
+                y = Number(ys[i - 1]) + (Number(ys[i]) - Number(ys[i - 1])) * (x - a) / (b - a);
+                break;
+            }
+        }
+        if (y === null || !isFinite(y) || !isFinite(mouse) || mouse <= y) return clientY;
+        var pixel = typeof sp.yaxis.d2p === 'function' ? sp.yaxis.d2p(y) : sp.yaxis.l2p(y);
+        return isFinite(pixel) ? sp.bounds.top + pixel : clientY;
+    }
+
     function updatePreviewLine(x0, y0, x1, y1) {
         var svg = previewLineElement();
         var line = svg.querySelector('line');
@@ -599,14 +619,19 @@
             fileId: source && traceFileId(source),
             tabId: gd.dataset && gd.dataset.workspacePlot,
             startSubplot: startSp,
+            // Plotly's decoded copy of the trace: gd.data may hold the arrays still binary-encoded.
+            source: ((gd._fullData || []).find(function (t) { return t._input === source; })) || source,
             momentary: isDrawModifier(event) && gd.__geckoManualIntegrationMode !== 'draw'
         };
+        gd.__geckoManualIntegrationDrawing.startClientY = notAboveCurve(
+            startSp, gd.__geckoManualIntegrationDrawing.source, event.clientX, event.clientY);
         if (gd.__geckoManualIntegrationDrawing.momentary) {
             setMomentaryDrawActive(true);
         }
         setDragBoxSuppressed(gd, true);
         syncInteractionDragmode(gd);
-        updatePreviewLine(event.clientX, event.clientY, event.clientX, event.clientY);
+        updatePreviewLine(event.clientX, gd.__geckoManualIntegrationDrawing.startClientY,
+            event.clientX, gd.__geckoManualIntegrationDrawing.startClientY);
 
         var clampToSubplot = function (clientX, clientY) {
             var drawing = gd.__geckoManualIntegrationDrawing;
@@ -624,6 +649,8 @@
             if (!gd.__geckoManualIntegrationDrawing) return;
             stopPlotlyGesture(moveEvent);
             var clamped = clampToSubplot(moveEvent.clientX, moveEvent.clientY);
+            var drawingNow = gd.__geckoManualIntegrationDrawing;
+            clamped.y = notAboveCurve(drawingNow.startSubplot, drawingNow.source, clamped.x, clamped.y);
             updatePreviewLine(
                 gd.__geckoManualIntegrationDrawing.startClientX,
                 gd.__geckoManualIntegrationDrawing.startClientY,
