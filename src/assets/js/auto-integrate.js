@@ -1,5 +1,5 @@
 /*
- * auto-integrate.js  (experimental, off by default; the "Auto" button next to Integrate turns it on)
+ * auto-integrate.js  (on by default; the wand button next to Integrate switches it off and on)
  *
  * With Auto on, resting the pointer on a peak (on its flank, top or just above it) behaves as if Shift were held:
  * the cursor becomes a crosshair, the Integrate button lights up, and dragging draws an integration baseline.
@@ -11,7 +11,7 @@
     'use strict';
     var KEY = 'gecko.autoIntegrate';
     var enabled = false;
-    try { enabled = window.localStorage.getItem(KEY) === '1'; } catch (e) { /* private mode: stays off */ }
+    try { enabled = window.localStorage.getItem(KEY) !== '0'; } catch (e) { enabled = true; }
     window.__geckoAutoIntegrateNear = false;
 
     var TYPED = { f8: Float64Array, f4: Float32Array, i4: Int32Array, i2: Int16Array, i1: Int8Array,

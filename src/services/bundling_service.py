@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import os
 import re
 import uuid
@@ -42,6 +43,7 @@ CHROMELEON_AUXILIARY_PATTERNS = [
 def assign_bundles(parsed_files: List[ParsedFile]) -> List[Bundle]:
     groups: "OrderedDict[Tuple[BundleType, str], List[Component]]" = OrderedDict()
     fallback_index = 0
+    seen_content: Dict[Tuple[BundleType, str], set] = {}
 
     for parsed_file in parsed_files:
         filename, raw_bytes, standardized = _unpack_parsed_file(parsed_file)
@@ -62,6 +64,12 @@ def assign_bundles(parsed_files: List[ParsedFile]) -> List[Bundle]:
         else:
             group_key = (bundle_type, base_name)
 
+        # The same signal dropped twice (a "(1)" download copy, or a re-export whose file differs only in its export
+        # time) would draw every trace twice: keep the first.
+        digest = _content_digest(raw_bytes, standardized)
+        if digest in seen_content.setdefault(group_key, set()):
+            continue
+        seen_content[group_key].add(digest)
         component = _create_component(filename, raw_bytes, standardized)
         groups.setdefault(group_key, []).append(component)
 
@@ -78,6 +86,17 @@ def assign_bundles(parsed_files: List[ParsedFile]) -> List[Bundle]:
         )
 
     return bundles
+
+
+def _content_digest(raw_bytes: bytes, standardized: StandardizedResult) -> str:
+    """What the file contains as a signal (column names and values), so a re-export with a new header matches."""
+    data = getattr(standardized, 'data', None)
+    try:
+        import pandas as pd
+        values = pd.util.hash_pandas_object(data, index=False).values.tobytes()
+        return hashlib.sha256('|'.join(map(str, data.columns)).encode() + values).hexdigest()
+    except Exception:                                          # noqa: BLE001 - unusual data: compare the file bytes
+        return hashlib.sha256(raw_bytes or b'').hexdigest()
 
 
 def _channel_components(filename, raw_bytes, standardized, channels):

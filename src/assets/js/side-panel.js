@@ -1,13 +1,15 @@
 /*
  * side-panel.js
- * The Views panel to the right of the plot: drag its left edge to resize, click the arrow (or double-click the
- * edge) to hide it, click the slim bar to bring it back. Width and state are remembered per browser.
- * It also reopens itself when a tab inside it is chosen while it is hidden (for example "Show mass" on a peak).
+ * The Views panel to the right of the plot. Drag its left edge to resize; the arrow in its tab row (or a
+ * double-click on the edge) hides it. Hidden, it behaves like every other panel dragged shut: hovering the right
+ * edge shows a dark "Views" label, a click brings the panel back. Width and state are remembered per browser.
+ * It also reopens when one of its tabs is chosen while hidden (for example "Show mass" on a peak).
  */
 (function () {
     'use strict';
     var KEY = 'gecko.sidePanel';
     var MIN = 280;
+    var DOCK = 46;                       // same hover band as the other docks (resize-handler.js)
     var state = { width: 0, collapsed: false };
     try { state = Object.assign(state, JSON.parse(window.localStorage.getItem(KEY) || '{}')); } catch (e) { /* defaults */ }
 
@@ -23,11 +25,40 @@
         window.requestAnimationFrame(function () { window.dispatchEvent(new Event('resize')); });
     }
 
+    function hoverZone(divider) {
+        var zone = divider.querySelector('.divider-hover-zone');
+        if (!zone) {
+            zone = document.createElement('div');
+            zone.className = 'divider-hover-zone';
+            divider.appendChild(zone);
+        }
+        return zone;
+    }
+
     function apply(panel, divider) {
         if (!state.width) state.width = defaultWidth();
+        var label = divider.querySelector('.divider-label');
+        hoverZone(divider);
+        panel.style.display = state.collapsed ? 'none' : '';
         panel.style.width = state.collapsed ? '' : clamp(state.width) + 'px';
-        panel.classList.toggle('collapsed', state.collapsed);
+        divider.classList.toggle('has-label', state.collapsed);
+        divider.classList.toggle('hidden-second', state.collapsed);
+        if (!state.collapsed) divider.classList.remove('dock-hover');
+        if (label) {
+            label.textContent = state.collapsed ? 'Views' : '';
+            ['visible', 'collapsed-state', 'collapse-left'].forEach(function (name) {
+                label.classList.toggle(name, state.collapsed);
+            });
+        }
+        if (state.collapsed) {
+            divider.style.setProperty('--dock-width', DOCK + 'px');
+            divider.style.setProperty('--dock-height', Math.max(1, Math.round(divider.getBoundingClientRect().height)) + 'px');
+        } else {
+            divider.style.removeProperty('--dock-width');
+            divider.style.removeProperty('--dock-height');
+        }
         divider.setAttribute('aria-expanded', state.collapsed ? 'false' : 'true');
+        divider.title = state.collapsed ? 'Show Views' : 'Drag to resize. Double-click to hide.';
         refreshPlots();
     }
 
@@ -44,6 +75,15 @@
         panel.__geckoSideInstalled = true;
         apply(panel, divider);
 
+        var label = divider.querySelector('.divider-label');
+        if (label) {
+            label.addEventListener('mousedown', function (event) { event.stopPropagation(); });
+            label.addEventListener('click', function (event) {
+                event.stopPropagation();
+                setCollapsed(panel, divider, false);
+            });
+        }
+
         var dragging = false;
         divider.addEventListener('mousedown', function (event) {
             if (event.button !== 0 || state.collapsed) return;
@@ -53,9 +93,17 @@
             document.body.style.cursor = 'col-resize';
         });
         document.addEventListener('mousemove', function (event) {
-            if (!dragging) return;
-            state.width = clamp(window.innerWidth - event.clientX);
-            panel.style.width = state.width + 'px';
+            if (dragging) {
+                state.width = clamp(window.innerWidth - event.clientX);
+                panel.style.width = state.width + 'px';
+                return;
+            }
+            if (!state.collapsed) return;
+            // The soft band left of the edge lights up like the other docks.
+            var rect = divider.getBoundingClientRect();
+            var near = event.clientX >= rect.left - DOCK && event.clientX <= rect.right &&
+                event.clientY >= rect.top && event.clientY <= rect.bottom;
+            divider.classList.toggle('dock-hover', near);
         });
         document.addEventListener('mouseup', function () {
             if (!dragging) return;
@@ -76,10 +124,8 @@
             }
         });
         document.addEventListener('click', function (event) {
-            var target = event.target && event.target.closest ? event.target : null;
-            if (!target) return;
-            if (target.closest('#side-panel-collapse')) setCollapsed(panel, divider, true);
-            else if (target.closest('#side-panel-rail')) setCollapsed(panel, divider, false);
+            var target = event.target && event.target.closest ? event.target.closest('[data-hide-panel="side"]') : null;
+            if (target) setCollapsed(panel, divider, true);
         });
         window.addEventListener('resize', function () {
             if (!state.collapsed && panel.style.width) panel.style.width = clamp(state.width) + 'px';

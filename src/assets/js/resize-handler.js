@@ -357,6 +357,24 @@
             }
         }
 
+        // The arrow in a panel header hides that panel exactly like dragging its divider shut; the dark label on
+        // the divider brings it back. Spec: "<divider>:<first|second>".
+        window.GeckoPanels = {
+            hide: function (spec) {
+                var parts = String(spec || '').split(':');
+                if (['main', 'left-vertical', 'right-vertical'].indexOf(parts[0]) === -1) return false;
+                applyCollapse(parts[0], parts[1] === 'first' ? 0 : 100);
+                window.requestAnimationFrame(function () { window.dispatchEvent(new Event('resize')); });
+                return true;
+            }
+        };
+        document.addEventListener('click', function (e) {
+            var button = e.target && e.target.closest ? e.target.closest('[data-hide-panel]') : null;
+            if (!button || button.getAttribute('data-hide-panel') === 'side') return;
+            e.preventDefault();
+            window.GeckoPanels.hide(button.getAttribute('data-hide-panel'));
+        });
+
         // Click a hidden-panel label to restore that exact panel.
         function handleLabelClick(type) {
             var collapseKey = type === 'main' ? 'main'

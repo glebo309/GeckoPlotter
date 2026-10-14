@@ -4,6 +4,13 @@ import dash_mantine_components as dmc
 from components.axis_inspector import axis_inspector
 from components.ms_polarity_control import create_ms_polarity_control
 from components.file_removal_feedback import create_file_removal_feedback
+from dash_iconify import DashIconify
+
+
+def hide_button(target, icon, label):
+    """The small arrow that hides a panel. It comes back from the dark label on its divider, as when dragged shut."""
+    return html.Button(DashIconify(icon=icon, width=16, height=16), className='panel-hide-btn', n_clicks=0,
+                       title=f'Hide {label}', **{'data-hide-panel': target, 'aria-label': f'Hide the {label} panel'})
 
 
 def walk(node):
@@ -146,10 +153,15 @@ def arrange_workspace(root):
     nodes['left-bottom-panel'].style={**nodes['left-bottom-panel'].style,'height':'62%'}
     for node in walk(root):
         if getattr(node,'className','')=='panel-header' and getattr(node,'children',None)=='Toolbox':
-            node.children='Inspector'
+            node.children=[html.Span('Inspector'), hide_button('left-vertical:second', 'tabler:chevron-down', 'Inspector')]
+            node.style={**(getattr(node,'style',None) or {}),'display':'flex','alignItems':'center','justifyContent':'space-between'}
         if getattr(node,'className','')=='panel-header' and isinstance(getattr(node,'children',None),list):
             for child in node.children:
-                if getattr(child,'children',None)=='File Explorer':child.children='Files'
+                if getattr(child,'children',None)=='File Explorer':
+                    child.children='Files'
+                    buttons=next((c for c in node.children if isinstance(getattr(c,'children',None),list)),None)
+                    if buttons is not None:
+                        buttons.children=[*buttons.children, hide_button('left-vertical:first', 'tabler:chevron-up', 'Files')]
     nodes['left-vertical-divider'].__setattr__('data-label-below','Inspector')
     nodes['left-vertical-divider'].__setattr__('data-label-above','Files')
     # Two docks. The Results pane under the plot keeps the table tabs (Data, Peaks, Compare samples, Calibration);
@@ -181,6 +193,7 @@ def arrange_workspace(root):
         html.Div([dmc.SegmentedControl(id='analysis-dock', value='below', size='xs',
                     data=[{'label':'Below', 'value':'below'}], **{'aria-label':'Analysis pane position'}),
                   dcc.Store(id='analysis-dock-owner')], style={'display':'none'}),
+        hide_button('right-vertical:second', 'tabler:chevron-down', 'Results'),
     ], className='results-navigation',
        style={'display':'flex', 'alignItems':'center', 'minWidth':0})
     side_tabs = dmc.Tabs(
@@ -189,17 +202,16 @@ def arrange_workspace(root):
         children=[
             html.Div([
                 html.Div(dmc.TabsList(side_tab_buttons), style={'overflowX':'auto', 'overflowY':'hidden', 'minWidth':0, 'flex':1}),
-                html.Button('\u203a', id='side-panel-collapse', className='side-panel-collapse', n_clicks=0,
-                            title='Hide this panel', **{'aria-label':'Hide the views panel'}),
+                html.Button(DashIconify(icon='tabler:chevron-right', width=16, height=16), id='side-panel-collapse',
+                            className='panel-hide-btn', n_clicks=0, title='Hide Views',
+                            **{'data-hide-panel':'side', 'aria-label':'Hide the Views panel'}),
             ], className='results-navigation side-navigation', style={'display':'flex', 'alignItems':'center', 'minWidth':0}),
             *side_panels])
     side_panel = html.Div([
-        html.Button([html.Span('\u2039', className='side-rail-chevron'), html.Span('Views', className='side-rail-label')],
-                    id='side-panel-rail', className='side-panel-rail', n_clicks=0,
-                    title='Show the views panel: PDA, MS scan, EIC, Metadata', **{'aria-label':'Show the views panel'}),
         html.Div(side_tabs, id='side-panel-body', className='side-panel-body'),
     ], id='side-panel', className='side-panel', role='complementary', **{'aria-label':'Views'})
-    side_divider = html.Div(id='side-divider', className='divider divider-horizontal side-divider', role='separator',
+    side_divider = html.Div(html.Span(className='divider-label', **{'data-label': 'Views'}),
+                            id='side-divider', className='divider divider-horizontal side-divider', role='separator',
                             tabIndex=0, title='Drag to resize. Double-click to hide or show.',
                             **{'aria-orientation':'vertical', 'aria-label':'Resize the views panel'})
     row = next(n for n in walk(root) if isinstance(getattr(n, 'children', None), list)
