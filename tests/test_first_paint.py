@@ -1,12 +1,20 @@
 """A dropped file's plot is drawn from the upload response, and it is the figure the normal render builds."""
 import base64
+import sys
 from unittest.mock import patch
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from services.data_store import Bundle, BundleType, Component, ComponentRole, DataStore
 from src.ingestion.types import ColumnRole, SourceCategory, StandardizedResult, FileIdentity
+
+
+@pytest.fixture(autouse=True)
+def ingestion_import(monkeypatch):
+    import src.ingestion.types as types
+    monkeypatch.setitem(sys.modules, 'ingestion.types', types)
 
 
 def _run(identifier='run', n=24001):

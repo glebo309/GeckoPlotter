@@ -21,7 +21,7 @@ function setup() {
     }
     elements.set('plot-workspace', element());
     const window = {dash_clientside: {no_update: {}, set_props(id, value) {props.push([id, value]);}},
-        Plotly: {async react(gd, data, layout) {renders++; gd.data=data; gd.layout=layout;},
+        Plotly: {async react(gd, data, layout) {renders++; gd.data=data; gd.layout=layout; gd._fullLayout=layout;},
             purge() {}, Plots: {resize() {resizes++;}}}, addEventListener() {}};
     const document = {getElementById: id => elements.get(id), createElement: element,
         dispatchEvent() {}, addEventListener(name, handler) {listeners[name] = handler;}};
@@ -29,7 +29,7 @@ function setup() {
         {window, document, CustomEvent: function(type) {this.type=type;}, ResizeObserver: class {
             constructor(callback) {resizeObserver = callback;} observe() {}},
             requestAnimationFrame: fn => fn(), console, setTimeout, structuredClone,
-            JSON: {parse: JSON.parse, stringify(value) {serializations++; return JSON.stringify(value);}}});
+            JSON: {parse: JSON.parse, stringify(...args) {serializations++; return JSON.stringify(...args);}}});
     return {window, document, props, listeners, host: elements.get('plot-workspace'), renders: () => renders,
         resizes: () => resizes, serializations: () => serializations, panelResize: () => resizeObserver()};
 }
@@ -214,4 +214,31 @@ test('visibility and delete controls never trigger an optimistic file switch', a
  await api.update(figure('lcms'),'lcms',tabs); const first=s.window.geckoActivePlot();
  s.listeners.click({target:{closest:()=>null}});
  assert.equal(s.window.geckoActivePlot(),first);
+});
+
+test('a tab drawn from the upload stays on screen until the full render replaces it', async () => {
+    const s = setup();
+    const ws = s.window.dash_clientside.plotWorkspace;
+    await ws.update(figure('lcms'), 'lcms', [tabs[0]]);
+    const drawn = figure('new');
+    assert.equal(await ws.preview({tab: 'new', figure: drawn}), null);         // drawn, and the store is cleared
+    const early = s.window.geckoActivePlot();
+    assert.equal(early.dataset.workspacePlot, 'new');
+    // The tab list and the active tab have not caught up yet: the new canvas is neither removed nor hidden.
+    await ws.update(figure('lcms'), 'lcms', [tabs[0]]);
+    assert.equal(s.window.geckoActivePlot(), early);
+    assert.ok(!early.removed);
+    // An empty placeholder for the new tab does not blank it.
+    await ws.update({data: [], layout: {meta: {gecko_tab_id: 'new'}}}, 'new', [tabs[0], {id: 'new', type: 'raw'}]);
+    assert.equal(early.data.length, 1);
+    // The full render differing only by its render stamp keeps the canvas as drawn.
+    const renders = s.renders();
+    const full = figure('new'); full.layout.meta.gecko_render_revision = 'abc';
+    await ws.update(full, 'new', [tabs[0], {id: 'new', type: 'raw'}]);
+    assert.equal(s.renders(), renders);
+    // A later change of that tab is drawn normally.
+    const changed = figure('new'); changed.data[0].y = [5, 6]; changed.layout.meta.gecko_render_revision = 'def';
+    await ws.update(changed, 'new', [tabs[0], {id: 'new', type: 'raw'}]);
+    assert.equal(s.renders(), renders + 1);
+    assert.deepEqual(early.data[0].y, [5, 6]);
 });
