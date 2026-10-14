@@ -173,13 +173,16 @@ def add_peak_traces(fig, all_peaks, time_arr, signal_arr, selected_peak_id=None,
                 showlegend=False, meta='peak_overlay',
             ), **add_kw)
             if has_custom_label:
+                # Above the highest point of the peak (the filled outline follows the signal), never on it.
+                label_y = max((v for v in poly_y if v is not None), default=peak.height)
                 fig.add_trace(go.Scatter(
                     x=[peak.rt],
-                    y=[peak.height],
+                    y=[label_y],
                     mode='text',
                     text=[peak_text],
                     textposition='top center',
-                    textfont=dict(size=9, color='#333'),
+                    cliponaxis=False,
+                    textfont=dict(size=10, color='#333'),
                     hoverinfo='skip',
                     showlegend=False,
                     meta='peak_overlay',
@@ -195,7 +198,8 @@ def add_peak_traces(fig, all_peaks, time_arr, signal_arr, selected_peak_id=None,
                 mode='text',
                 text=[peak_text],
                 textposition='top center',
-                textfont=dict(size=9, color='#333'),
+                cliponaxis=False,
+                textfont=dict(size=10, color='#333'),
                 hovertemplate=f'{peak.name} ({peak.source})<br>RT: {peak.rt:.3f} min<br>Area: {peak.area:.1f}<extra></extra>',
                 showlegend=False,
                 meta='peak_overlay',

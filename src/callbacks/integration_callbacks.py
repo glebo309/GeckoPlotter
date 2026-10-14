@@ -125,6 +125,7 @@ def register_integration_callbacks(app: dash.Dash, data_manager) -> None:
         )
 
         settings = data_manager.integration_service.get_settings(active_file)
+        data_manager.peak_service.save_undo()                   # Cmd/Ctrl-Z brings the previous peaks back
         peaks = data_manager.peak_service.detect_peaks(
             file_id=active_file,
             signal=processed.corrected,
@@ -164,6 +165,7 @@ def register_integration_callbacks(app: dash.Dash, data_manager) -> None:
             return dash.no_update, dash.no_update
 
         active_file, target_name = target(active_file)
+        data_manager.peak_service.save_undo()
         data_manager.peak_service.clear_detected_peaks(active_file)
         data_manager.integration_service.clear_processed_signal(active_file)
         data_manager.peak_service.group_peaks_across_samples(

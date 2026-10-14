@@ -48,6 +48,7 @@ def register_recipe_callbacks(app, data_manager):
             if len(encoded) > 14_000_000:
                 raise recipe_service.RecipeError('This recipe file is too large.')
             recipe = recipe_service.loads(base64.b64decode(encoded).decode('utf-8-sig'))
+            data_manager.peak_service.save_undo()               # one Cmd/Ctrl-Z undoes the whole recipe
             report = recipe_service.apply_recipe(data_manager, recipe)
         except (recipe_service.RecipeError, ValueError, IndexError) as exc:
             return dash.no_update, f'Recipe not applied: {exc}'
