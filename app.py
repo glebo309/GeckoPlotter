@@ -63,6 +63,8 @@ from services.output_dedupe import install as _install_output_dedupe
 _install_output_dedupe(app)
 from services.upload_stage import install as _install_upload_stage
 _install_upload_stage(app.server)
+from services.idle_exit import install as _install_idle_exit
+_install_idle_exit(app.server)
 from services.request_timing import install as _install_request_timing
 _install_request_timing(app.server, float(os.environ.get('GECKO_SLOW_MS', '500')))
 app.config.suppress_callback_exceptions = True

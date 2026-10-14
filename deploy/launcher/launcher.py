@@ -42,6 +42,9 @@ PYTHON_VERSION = '3.12'
 FIRST_PORT = 8052
 USER_AGENT = {'User-Agent': 'GeckoPlotter-launcher'}
 IS_WINDOWS = platform.system() == 'Windows'
+BACKGROUND = '--background' in sys.argv          # started from the icon: no window, stops itself when idle
+IDLE_EXIT_SECONDS = 180                          # after the last GeckoPlotter tab is closed (sleep does not count)
+NO_WINDOW = {'creationflags': 0x08000000} if IS_WINDOWS else {}   # helpers never open a console window
 
 
 def data_dir() -> Path:
@@ -58,6 +61,7 @@ HOME = data_dir()
 APP = HOME / 'app'
 VENV = HOME / 'venv'
 STATE_FILE = HOME / 'installed.json'
+RUNNING_FILE = HOME / 'running.json'
 LOG_FILE = HOME / 'launcher.log'
 VENV_PYTHON = VENV / ('Scripts/python.exe' if IS_WINDOWS else 'bin/python')
 
@@ -188,7 +192,7 @@ def http_get(url: str, timeout: int = 25, accept: str | None = None) -> bytes:
         command = [curl, '-fsSL', '--max-time', str(timeout * 4), '-H', 'User-Agent: GeckoPlotter-launcher']
         if accept:
             command += ['-H', f'Accept: {accept}']
-        done = subprocess.run(command + [url], capture_output=True)
+        done = subprocess.run(command + [url], capture_output=True, **NO_WINDOW)
         if done.returncode != 0:
             log(f'curl could not fetch {url} either: {done.stderr.decode("utf-8", "replace").strip()}')
             raise first
@@ -267,7 +271,7 @@ def run_logged(command: list[str], **kwargs) -> None:
     """Run a command, keep its output in the log and show its latest line on the page."""
     log('run: ' + ' '.join(command))
     process = subprocess.Popen(command, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True,
-                               encoding='utf-8', errors='replace', **kwargs)
+                               encoding='utf-8', errors='replace', **NO_WINDOW, **kwargs)
     for line in process.stdout:                               # type: ignore[union-attr]
         line = line.rstrip()
         if line:
@@ -337,10 +341,12 @@ def prepare() -> subprocess.Popen:
     port = free_port(FIRST_PORT)
     environment = {**os.environ, 'GECKO_HOST': '127.0.0.1', 'GECKO_PORT': str(port), 'GECKO_DEBUG': '0',
                    'PYTHONUNBUFFERED': '1', 'PYTHONUTF8': '1'}
+    if BACKGROUND:
+        environment['GECKO_EXIT_WHEN_IDLE'] = str(IDLE_EXIT_SECONDS)
     command = shlex.split(os.environ['GECKO_APP_CMD'].replace('{port}', str(port)), posix=not IS_WINDOWS) \
         if os.environ.get('GECKO_APP_CMD') else [str(VENV_PYTHON), 'app.py']
     out = open(HOME / 'app.log', 'a', encoding='utf-8')
-    process = subprocess.Popen(command, cwd=APP, env=environment, stdout=out, stderr=subprocess.STDOUT)
+    process = subprocess.Popen(command, cwd=APP, env=environment, stdout=out, stderr=subprocess.STDOUT, **NO_WINDOW)
     deadline = time.time() + 240
     while time.time() < deadline:
         if process.poll() is not None:
@@ -356,10 +362,14 @@ def prepare() -> subprocess.Popen:
     STATUS.set('start', 'done')
     STATUS.url = f'http://127.0.0.1:{port}/'
     log(f'running at {STATUS.url} (version {STATUS.version})')
+    try:
+        RUNNING_FILE.write_text(json.dumps({'url': STATUS.url, 'pid': process.pid}), encoding='utf-8')
+    except OSError:
+        pass
     return process
 
 
-SHORTCUTS_VERSION = 3                                  # raise to rebuild everyone's shortcut once
+SHORTCUTS_VERSION = 4                                  # raise to rebuild everyone's shortcut once
 ICONS_VERSION = 2                                      # raise when the icon changes, so everyone fetches it again
 ICONS = ('icon.png', 'icon.ico', 'icon.icns')
 
@@ -397,13 +407,18 @@ def create_shortcuts() -> None:
             script, icon = HOME / 'start-windows.bat', asset('icon.ico')
             if not script.exists():
                 return
+            # uvw is the windowless uv the installer puts next to uv: the icon starts GeckoPlotter without a console.
+            uvw = shutil.which('uvw') or next((str(p) for p in (Path.home() / '.local' / 'bin' / 'uvw.exe',
+                                                               Path.home() / '.cargo' / 'bin' / 'uvw.exe') if p.exists()), None)
+            target, arguments = (uvw, f'run --python {PYTHON_VERSION} --no-project "{HOME / "launcher.py"}" --background') \
+                if uvw else (str(script), '')
             ps = ("$w = New-Object -ComObject WScript.Shell; "
                   "foreach ($d in @([Environment]::GetFolderPath('Desktop'), [Environment]::GetFolderPath('Programs'))) { "
                   "$s = $w.CreateShortcut((Join-Path $d 'GeckoPlotter.lnk')); "
-                  f"$s.TargetPath = '{script}'; $s.WorkingDirectory = '{HOME}'; "
+                  f"$s.TargetPath = '{target}'; $s.Arguments = '{arguments}'; $s.WorkingDirectory = '{HOME}'; "
                   f"$s.IconLocation = '{icon or ''}'; $s.Description = 'GeckoPlotter'; $s.Save() }}")
             subprocess.run(['powershell', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', ps],
-                           check=True, capture_output=True, timeout=60)
+                           check=True, capture_output=True, timeout=60, **NO_WINDOW)
         elif system == 'Darwin':
             script = HOME / 'start-mac.command'
             if not script.exists():
@@ -425,7 +440,15 @@ def create_shortcuts() -> None:
                 '<key>CFBundleShortVersionString</key><string>1.0</string>'
                 '</dict></plist>\n', encoding='utf-8')
             runner = app / 'Contents' / 'MacOS' / 'GeckoPlotter'
-            runner.write_text(f'#!/bin/sh\nexec open -a Terminal "{script}"\n', encoding='utf-8')
+            launcher = HOME / 'launcher.py'
+            runner.write_text(
+                '#!/bin/sh\n'
+                '# Runs GeckoPlotter without a Terminal window; it stops itself after the last tab is closed.\n'
+                'UV="$HOME/.local/bin/uv"; [ -x "$UV" ] || UV="$HOME/.cargo/bin/uv"\n'
+                f'if [ -x "$UV" ] && [ -f "{launcher}" ]; then\n'
+                f'  exec "$UV" run --python {PYTHON_VERSION} --no-project "{launcher}" --background >> "{HOME / "launcher.out"}" 2>&1\n'
+                'fi\n'
+                f'exec open -a Terminal "{script}"\n', encoding='utf-8')
             runner.chmod(0o755)
         else:
             script = HOME / 'start-linux.sh'
@@ -460,12 +483,48 @@ def ensure_chrome() -> None:
         log(f'could not set up the figure-export browser: {error}')
 
 
+def running_instance() -> str | None:
+    """The address of a GeckoPlotter this launcher already started and that still answers, else None."""
+    try:
+        url = json.loads(RUNNING_FILE.read_text(encoding='utf-8')).get('url')
+        with urllib.request.urlopen(url, timeout=3):
+            return url
+    except Exception:                                          # noqa: BLE001 - none running
+        return None
+
+
+def refresh_self() -> bool:
+    """The icon skips the Start script that fetches the newest launcher, so do it here. True if a newer one was saved."""
+    if os.environ.get('GECKO_SOURCE_ZIP'):
+        return False
+    changed = False
+    for name in ('splash.html', 'launcher.py'):
+        try:
+            fresh = http_get(f'https://raw.githubusercontent.com/{REPO}/{BRANCH}/deploy/launcher/{name}', timeout=10)
+        except Exception:                                      # noqa: BLE001 - offline: keep what we have
+            return changed
+        target = HOME / name
+        if fresh and (not target.exists() or target.read_bytes() != fresh):
+            target.write_bytes(fresh)
+            changed = changed or (name == 'launcher.py' and Path(__file__).resolve() == target.resolve())
+    return changed
+
+
 def main() -> int:
     HOME.mkdir(parents=True, exist_ok=True)
+    already = running_instance()
+    if already:
+        webbrowser.open(already)
+        return 0
+    if BACKGROUND and refresh_self():
+        subprocess.Popen([sys.executable, str(Path(__file__).resolve()), *sys.argv[1:]], **NO_WINDOW)
+        return 0
     splash = start_splash()
     print('GeckoPlotter is starting. Your browser opens in a moment.', flush=True)
     print(f'(If it does not, open {splash} yourself.)', flush=True)
     print('Keep this window open while you work. Close it to stop GeckoPlotter.\n', flush=True)
+    if BACKGROUND:
+        log('started from the icon, without a window')
     if not (HOME / 'icon.png').exists() and not os.environ.get('GECKO_SOURCE_ZIP'):
         try:
             (HOME / 'icon.png').write_bytes(http_get(f'https://raw.githubusercontent.com/{REPO}/{BRANCH}/deploy/launcher/icon/icon.png', timeout=6))
@@ -494,6 +553,11 @@ def main() -> int:
     except KeyboardInterrupt:
         process.terminate()
         return 0
+    finally:
+        try:
+            RUNNING_FILE.unlink()
+        except OSError:
+            pass
 
 
 if __name__ == '__main__':

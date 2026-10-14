@@ -138,3 +138,39 @@ def test_curl_is_the_second_try_when_python_cannot_connect(launcher, monkeypatch
     monkeypatch.setattr(launcher.shutil, 'which', lambda name: '/usr/bin/curl')
     monkeypatch.setattr(launcher.subprocess, 'run', lambda cmd, **k: type('R', (), {'returncode': 0, 'stdout': b'ok', 'stderr': b''})())
     assert launcher.http_get('https://example.org/x') == b'ok'
+
+
+def test_starting_again_while_running_just_opens_the_running_copy(launcher, monkeypatch):
+    process = launcher.prepare()
+    opened = []
+    monkeypatch.setattr(launcher.webbrowser, 'open', lambda url: opened.append(url))
+    try:
+        assert launcher.running_instance() == launcher.STATUS.url
+        assert launcher.main() == 0 and opened == [launcher.STATUS.url]
+    finally:
+        process.terminate()
+        process.wait(timeout=10)
+    assert launcher.running_instance() is None                  # stopped: the next start launches it again
+
+
+def test_started_from_the_icon_the_app_is_told_to_stop_when_idle(launcher, monkeypatch, tmp_path):
+    seen = tmp_path / 'env.txt'
+    monkeypatch.setattr(launcher, 'BACKGROUND', True)
+    monkeypatch.setenv('GECKO_APP_CMD', f"sh -c 'echo $GECKO_EXIT_WHEN_IDLE > {seen}; exec {sys.executable} -m http.server {{port}} --bind 127.0.0.1'")
+    process = launcher.prepare()
+    try:
+        assert seen.read_text().strip() == str(launcher.IDLE_EXIT_SECONDS)
+    finally:
+        process.terminate()
+        process.wait(timeout=10)
+
+
+def test_the_mac_app_runs_without_terminal_and_keeps_terminal_as_fallback(launcher, tmp_path, monkeypatch):
+    monkeypatch.setattr(launcher.platform, 'system', lambda: 'Darwin')
+    monkeypatch.setattr(launcher.Path, 'home', lambda: tmp_path / 'user')
+    launcher.HOME.mkdir(parents=True)
+    (launcher.HOME / 'start-mac.command').write_text('#!/bin/bash\n')
+    launcher.create_shortcuts()
+    runner = (tmp_path / 'user' / 'Applications' / 'GeckoPlotter.app' / 'Contents' / 'MacOS' / 'GeckoPlotter').read_text()
+    assert '--background' in runner and 'launcher.py' in runner
+    assert runner.strip().endswith('start-mac.command"')                 # no uv yet: the visible start script
