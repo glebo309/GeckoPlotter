@@ -107,7 +107,7 @@
 
   function frame(ms) {
     const t = still ? 0.5 : ms / 1000;
-    shown += (progress - shown) * 0.05;
+    shown += (progress - shown) * (still ? 0.35 : 0.05);
     drawGecko(t);
     const data = o.getImageData(0, 0, off.width, off.height).data;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
@@ -140,7 +140,9 @@
       ctx.fillStyle = failed ? rgb(OFF) : 'rgba(240,145,58,.55)';
       ctx.fillText('─', col * CW, base * CH);
     }
-    if (!still || !frame.once) { frame.once = true; requestAnimationFrame(frame); }
+    // Reduced motion (Windows "Animation effects" off): the gecko holds still, but the fill and the peaks still
+    // follow the progress, so redraw a few times a second instead of stopping.
+    if (still) setTimeout(() => frame(performance.now()), 250); else requestAnimationFrame(frame);
   }
   requestAnimationFrame(frame);
 
