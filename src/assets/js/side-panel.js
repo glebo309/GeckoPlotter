@@ -94,7 +94,16 @@
         });
         document.addEventListener('mousemove', function (event) {
             if (dragging) {
-                state.width = clamp(window.innerWidth - event.clientX);
+                var wanted = window.innerWidth - event.clientX;
+                if (wanted < MIN / 2) {
+                    // Dragged well past its smallest width: hide it, like the other panels dragged shut.
+                    dragging = false;
+                    document.body.classList.remove('dragging');
+                    document.body.style.cursor = '';
+                    setCollapsed(panel, divider, true);
+                    return;
+                }
+                state.width = clamp(wanted);
                 panel.style.width = state.width + 'px';
                 return;
             }

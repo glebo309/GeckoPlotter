@@ -58,3 +58,13 @@ def test_tic_only_or_empty_spectral_metadata_does_not_offer_ms_tools(arrays):
 def test_general_analysis_tabs_retain_selection_when_capabilities_change(tab):
     callback = capability_callback(store_with_scan_bundle())
     assert callback('standalone',[],tab)[3] is no_update
+
+
+def test_opening_lcms_data_with_scans_shows_the_scan_viewer_and_keeps_a_chosen_ms_view():
+    from callbacks.workspace_callbacks import side_view_for
+    assert side_view_for(True, 'metadata', 'active-file') == 'ms-scan'
+    assert side_view_for(True, 'pda', 'loaded-files') == 'ms-scan'
+    assert side_view_for(True, 'ms-eic', 'active-file') is no_update          # the user chose EIC: keep it
+    assert side_view_for(True, 'metadata', 'side-tabs') is no_update          # the user clicked Metadata: keep it
+    assert side_view_for(False, 'ms-scan', 'active-file') == 'metadata'
+    assert side_view_for(False, 'metadata', 'active-file') is no_update
