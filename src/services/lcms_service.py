@@ -401,6 +401,8 @@ class LCMSService:
     def create_tic_figure(self, data: dict) -> go.Figure:
         """Create a TIC chromatogram figure."""
         time, intensity = self.extract_tic(data)
+        from services.decimation import for_display
+        time, intensity = for_display(time, intensity)          # drawing only, every peak top kept
 
         fig = go.Figure()
         fig.add_trace(

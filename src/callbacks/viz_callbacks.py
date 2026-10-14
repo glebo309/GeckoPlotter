@@ -454,10 +454,12 @@ def _add_signal_processing_overlays(figure, data_manager, file_id, display_opts)
         return figure
 
     fig = go.Figure(figure) if isinstance(figure, dict) else figure
+    from services.decimation import for_display
 
     if 'smoothed' in display_opts:
+        x_draw, y_draw = for_display(processed.time, processed.smoothed)
         fig.add_trace(go.Scatter(
-            x=processed.time, y=processed.smoothed,
+            x=x_draw, y=y_draw,
             mode='lines',
             line=dict(color='rgba(0, 100, 200, 0.7)', width=1.5),
             name='Smoothed',
@@ -466,8 +468,9 @@ def _add_signal_processing_overlays(figure, data_manager, file_id, display_opts)
         ))
 
     if 'baseline' in display_opts:
+        x_draw, y_draw = for_display(processed.time, processed.baseline)
         fig.add_trace(go.Scatter(
-            x=processed.time, y=processed.baseline,
+            x=x_draw, y=y_draw,
             mode='lines',
             line=dict(color='rgba(220, 50, 50, 0.6)', width=1.5, dash='dash'),
             name='Baseline',
@@ -476,8 +479,9 @@ def _add_signal_processing_overlays(figure, data_manager, file_id, display_opts)
         ))
 
     if 'corrected' in display_opts:
+        x_draw, y_draw = for_display(processed.time, processed.corrected)
         fig.add_trace(go.Scatter(
-            x=processed.time, y=processed.corrected,
+            x=x_draw, y=y_draw,
             mode='lines',
             line=dict(color='rgba(50, 180, 50, 0.7)', width=1.5),
             name='Corrected',

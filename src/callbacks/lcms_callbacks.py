@@ -966,9 +966,11 @@ def _build_eic_figure(eic_list):
         tolerance = float(eic.get('tolerance', 0.0))
         label = f"m/z {mz:.4g} +/- {tolerance:.3g}"
         color = colors[idx % len(colors)]
+        from services.decimation import for_display
+        time_draw, intensity_draw = for_display(time, intensity)       # drawing only; the apex below uses the full data
         fig.add_trace(go.Scatter(
-            x=time,
-            y=intensity,
+            x=time_draw,
+            y=intensity_draw,
             mode='lines',
             name=label,
             line=dict(color=color, width=1.6),

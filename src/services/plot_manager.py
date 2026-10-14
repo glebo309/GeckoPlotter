@@ -256,6 +256,7 @@ class PlotManager:
     def _add_traces(self, fig, name, file_data, color_offset=0):
         """Add traces from file_data to fig. Returns next color index."""
         from ingestion.types import PlotHint
+        from services.decimation import for_display
 
         sr = file_data.get('standardized')
         if sr is None:
@@ -304,13 +305,16 @@ class PlotManager:
                     meta={**trace_meta, 'y_column': y_col},
                 ))
             else:
+                y_vals = pd.to_numeric(df[y_col], errors="coerce")
+                # Draw at most ~3000 points per trace (every peak top kept); the data itself stays complete.
+                x_draw, y_draw = for_display(x_vals.to_numpy(), y_vals.to_numpy())
                 fig.add_trace(trace_cls(
-                    x=x_vals,
-                    y=pd.to_numeric(df[y_col], errors="coerce"),
+                    x=x_draw,
+                    y=y_draw,
                     mode="lines",
                     name=label,
                     line=dict(color=color, width=2),
-                    meta={**trace_meta, 'y_column': y_col},
+                    meta={**trace_meta, 'y_column': y_col, **({'full_points': len(y_vals)} if len(y_draw) < len(y_vals) else {})},
                 ))
             idx += 1
 
@@ -373,6 +377,7 @@ class PlotManager:
 
     def create_standardized_plot(self, result) -> go.Figure:
         """Create a plot from a StandardizedResult. Format-agnostic."""
+        from services.decimation import for_display
         from src.ingestion.types import ColumnRole, PlotHint
 
         fig = go.Figure()
@@ -415,9 +420,12 @@ class PlotManager:
                     hovertemplate=f"{col}<br>{x_title}: %{{x:.4g}}<br>%{{y:.4g}}<extra></extra>",
                 ))
             else:
+                y_vals = pd.to_numeric(df[col], errors="coerce")
+                x_draw, y_draw = ((x_vals, y_vals) if 'markers' in str(mode)
+                                  else for_display(pd.Series(x_vals).to_numpy(), y_vals.to_numpy()))
                 fig.add_trace(go.Scatter(
-                    x=x_vals,
-                    y=pd.to_numeric(df[col], errors="coerce"),
+                    x=x_draw,
+                    y=y_draw,
                     mode=mode,
                     name=col,
                     line=dict(color=color, width=2),
