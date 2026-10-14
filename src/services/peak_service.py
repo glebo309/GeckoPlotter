@@ -8,6 +8,7 @@ cross-sample grouping, and integration with calibration models.
 from __future__ import annotations
 
 import copy
+import re
 import uuid
 from dataclasses import dataclass, field, asdict, replace
 from typing import Dict, List, Optional, Tuple
@@ -258,6 +259,7 @@ class PeakService:
 
         peaks: List[Peak] = []
         existing_non_detected = [p for p in self._peaks.get(file_id, []) if p.source != 'detected']
+        previous_names = [p for p in self._peaks.get(file_id, []) if p.source == 'detected' and self.has_custom_name(p)]
         # Prominence-relative widths are independent of detector units. Bound
         # each integration by neighbouring valleys so large ion counts cannot
         # make every peak extend over the entire chromatogram.
@@ -372,6 +374,13 @@ class PeakService:
         # Rename after sorting
         for i, p in enumerate(peaks, start=1):
             p.name = f"Peak {i}"
+        # Detection runs again whenever a setting changes: peaks the user has named keep their name.
+        for old in previous_names:
+            nearest = min(peaks, key=lambda p: abs(p.rt - old.rt), default=None)
+            if nearest is not None and abs(nearest.rt - old.rt) <= max(0.05, 0.5 * (old.rt_end - old.rt_start)) \
+                    and not self.has_custom_name(nearest):
+                nearest.name = old.name
+                nearest.label = old.label or old.name
 
         # Append to existing peaks (don't overwrite imported/manual)
         self._peaks[file_id] = existing_non_detected + peaks
@@ -955,6 +964,7 @@ class PeakService:
         for p in self._peaks.get(fid, []):
             if p.peak_id == peak_id:
                 p.name = new_name
+                p.label = new_name                      # the plot shows the label; one name everywhere
                 target = p
                 break
         if target is None:
@@ -964,7 +974,13 @@ class PeakService:
                 for p in pks:
                     if p.group_id == target.group_id:
                         p.name = new_name
+                        p.label = new_name
         return True
+
+    @staticmethod
+    def has_custom_name(peak: "Peak") -> bool:
+        """True when the user (or a calibration) named the peak, i.e. it is not the automatic "Peak 3"."""
+        return re.fullmatch(r'Peak \d+', peak.name or '') is None and bool(peak.name or peak.label)
 
     def set_peak_color(
         self,

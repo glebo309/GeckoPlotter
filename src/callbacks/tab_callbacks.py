@@ -38,7 +38,7 @@ def _result_columns(frame, hidden):
     units = {str(v).strip() for v in frame.get('Concentration units', []) if pd.notna(v) and str(v).strip()}
     if len(units) <= 1:
         hidden.add('Concentration units')
-    labels = {'Peak Name': 'Peak', 'Concentration units': 'Units',
+    labels = {'Peak Name': 'Peak name', 'Concentration units': 'Units',
               'Within Sample (%)': 'Within sample (%)', 'Cross-Sample (%)': 'Across samples (%)',
               'Relative Area (%)': 'Area (%)', 'Relative Height (%)': 'Height (%)'}
     if len(units) == 1:

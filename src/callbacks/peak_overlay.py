@@ -157,7 +157,8 @@ def add_peak_traces(fig, all_peaks, time_arr, signal_arr, selected_peak_id=None,
         fill_color = rgba(base_color, 0.58 if is_selected else 0.30) if base_color else FILL_COLORS[i % len(FILL_COLORS)]
         line_color = (base_color or '#447da5') if is_selected or peak.source == 'deconvolved' else 'rgba(0,0,0,0)'
 
-        has_custom_label = bool(peak.label) if hasattr(peak, 'label') else False
+        has_custom_label = True                              # every peak shows its name (Peak 1, ...) or its own label
+        peak_text = (getattr(peak, 'label', '') or peak.name or '')
 
         if peak.poly_x and peak.poly_y:
             poly_x = list(peak.poly_x)
@@ -176,7 +177,7 @@ def add_peak_traces(fig, all_peaks, time_arr, signal_arr, selected_peak_id=None,
                     x=[peak.rt],
                     y=[peak.height],
                     mode='text',
-                    text=[peak.label],
+                    text=[peak_text],
                     textposition='top center',
                     textfont=dict(size=9, color='#333'),
                     hoverinfo='skip',
@@ -192,7 +193,7 @@ def add_peak_traces(fig, all_peaks, time_arr, signal_arr, selected_peak_id=None,
                 x=[peak.rt],
                 y=[marker_y],
                 mode='text',
-                text=[peak.label],
+                text=[peak_text],
                 textposition='top center',
                 textfont=dict(size=9, color='#333'),
                 hovertemplate=f'{peak.name} ({peak.source})<br>RT: {peak.rt:.3f} min<br>Area: {peak.area:.1f}<extra></extra>',
