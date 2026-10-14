@@ -16,11 +16,13 @@ jobs:
         with:
           python-version: '3.12'
       - name: Install requirements
-        run: uv pip install --system -r requirements.txt pytest
+        run: |
+          uv venv --python 3.12 .test-venv
+          uv pip install --python .test-venv/bin/python -r requirements.txt pytest
       - name: Python tests
         env:
           GECKO_AUTOSAVE_DIR: ${{ runner.temp }}/autosave
-        run: python -m pytest -q -x -p no:cacheprovider --ignore=tests/test_launcher.py
+        run: .test-venv/bin/python -m pytest -q -p no:cacheprovider --ignore=tests/test_launcher.py
 
   javascript:
     runs-on: ubuntu-latest
