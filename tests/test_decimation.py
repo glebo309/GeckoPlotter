@@ -40,3 +40,18 @@ def test_pandas_input_is_accepted():
     x, y = _run()
     xd, yd = dec.for_display(pd.Series(x), pd.Series(y))
     assert len(xd) < 3100 and np.nanmax(yd) == np.nanmax(y)
+
+
+def test_a_wide_peak_fill_is_drawn_with_fewer_points_and_keeps_its_top_and_baseline():
+    x, y = _run()
+    xs, ys = x[10000:15000], y[10000:15000]
+    base = np.linspace(ys[0], ys[-1], len(xs))
+    px, py = np.r_[xs, xs[::-1]].tolist(), np.r_[ys, base[::-1]].tolist()
+    dx, dy = dec.polygon_for_display(px, py)
+    assert len(dx) == len(dy) < 1000 and len(dx) % 2 == 0
+    half = len(dx) // 2
+    assert dx[:half] == dx[half:][::-1]                          # the baseline runs back over the same times
+    assert max(dy) == max(py) and dx[0] == px[0] and dx[half - 1] == px[len(px) // 2 - 1]
+    assert set(dx) <= set(px)
+    short = (px[:400], py[:400])
+    assert dec.polygon_for_display(*short) == short               # narrow peaks are left alone

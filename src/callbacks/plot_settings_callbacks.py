@@ -293,23 +293,7 @@ def register_plot_settings_callbacks(app, data_manager):
         _log = logging.getLogger('geckoplotter.settings')
         from callbacks.publication_callbacks import build_y1_series_controls
 
-        # Load from persistence (or defaults)
-        saved = _load_settings(data_manager, context_key)
-        snapshot = (custom_figures or {}).get(plot_tab, {})
-        if not saved and snapshot.get('figure'):
-            from services.figure_actions import publication_plot_settings
-            saved = snapshot.get('plot_settings') or publication_plot_settings(snapshot['figure'])
-        from services.axis_labels import label_modes
-        s = {**DEFAULT_PLOT_SETTINGS, **(saved or {}), '_context_key': context_key}
-        s['axis_label_modes'] = label_modes(saved or {})
-
-        if not saved and active_file:
-            from services.data_store import BundleType
-            bundle = data_manager.get_bundle_for_component(active_file) if hasattr(data_manager, 'get_bundle_for_component') else None
-            if not bundle:
-                bundle = data_manager.get_bundle(active_file) if hasattr(data_manager, 'get_bundle') else None
-            if bundle and bundle.bundle_type == BundleType.LCMS and len(bundle.component_list) > 1:
-                s['layout_mode'] = 'stacked'
+        s = settings_for_context(data_manager, context_key, active_file, (custom_figures or {}).get(plot_tab, {}))
         _log.debug(f"HYDRATE [{context_key}] y1_stats={s.get('y1_stats')} categorical_x={s.get('categorical_x')}")
 
         series_count = max(1, s.get('y1_series_count', 1))
@@ -677,6 +661,28 @@ def register_plot_settings_callbacks(app, data_manager):
 # ----------------------------------------------------------------------
 # Persistence helpers (keyed by context string)
 # ----------------------------------------------------------------------
+
+def settings_for_context(data_manager, context_key, active_file, snapshot=None):
+    """The plot settings a context opens with: its saved settings (or a custom figure's), else the defaults, with
+    LC-MS bundles of several signals stacked. Used by hydrate_plot_settings and by the upload's first paint."""
+    saved = _load_settings(data_manager, context_key)
+    snapshot = snapshot or {}
+    if not saved and snapshot.get('figure'):
+        from services.figure_actions import publication_plot_settings
+        saved = snapshot.get('plot_settings') or publication_plot_settings(snapshot['figure'])
+    from services.axis_labels import label_modes
+    s = {**DEFAULT_PLOT_SETTINGS, **(saved or {}), '_context_key': context_key}
+    s['axis_label_modes'] = label_modes(saved or {})
+
+    if not saved and active_file:
+        from services.data_store import BundleType
+        bundle = data_manager.get_bundle_for_component(active_file) if hasattr(data_manager, 'get_bundle_for_component') else None
+        if not bundle:
+            bundle = data_manager.get_bundle(active_file) if hasattr(data_manager, 'get_bundle') else None
+        if bundle and bundle.bundle_type == BundleType.LCMS and len(bundle.component_list) > 1:
+            s['layout_mode'] = 'stacked'
+    return s
+
 
 def _load_settings(data_manager, context_key):
     """Load persisted settings, leaving initial defaults to the hydrator."""

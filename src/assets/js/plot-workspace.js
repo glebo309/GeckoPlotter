@@ -5,6 +5,9 @@
     var plots = new Map();
     var activeId = null, lastTabs = [], updateVersion = 0, publishedTabs = '';
     var pendingId = null;
+    // A new file's tab drawn straight from the upload response (preview), before the tab list and the active tab
+    // arrive. Kept on screen and out of the clean-up below until the tab list has it, or for 15 s at most.
+    var previewId = null, previewAt = 0;
     var config = {responsive: true, displayModeBar: false, displaylogo: false,
         doubleClick: 'reset+autosize', scrollZoom: true, edits: {shapePosition: true}};
 
@@ -110,6 +113,8 @@
         lastTabs = tabs || [];
         var allowed = new Set(lastTabs.filter(function (tab) {return tab.type !== 'publication';})
             .map(function (tab) {return tab.id;}));
+        if (previewId && (tabId === previewId || Date.now() - previewAt > 15000)) previewId = null;
+        if (previewId) allowed.add(previewId);
         if (!tabId) allowed.add('__empty__');
         plots.forEach(function (entry, id) {
             if (!allowed.has(id)) {
@@ -120,7 +125,7 @@
         });
         publishRetainedTabs();
         if (pendingId && (!lastTabs.some(function (t) {return t.id === pendingId;}) || tabId === pendingId)) pendingId = null;
-        var nextId = pendingId || tabId || '__empty__';
+        var nextId = pendingId || previewId || tabId || '__empty__';
         var changed = activeId !== nextId;
         // Show the cached target before serializing data or awaiting any render.
         activate(nextId, false, false);
@@ -146,6 +151,16 @@
             var signature = isMirror || (entry.source === figure && !figureTriggered) ? entry.signature : JSON.stringify(figure);
             if (isMirror) entry.mirroredFigure = null;
             entry.source = figure;
+            if (entry.previewSignature && !(figure.data || []).length) {
+                // An empty placeholder for the new tab (sent while its file is still being selected) must not blank
+                // the plot drawn from the upload; the full render follows.
+                signature = entry.signature;
+            } else if (entry.previewSignature && entry.signature !== signature) {
+                // The full render of a tab drawn from the upload: when only its render stamp differs, keep the canvas.
+                var same = entry.previewSignature === withoutRevision(figure);
+                entry.previewSignature = null;
+                if (same) { entry.signature = signature; entry.figure = JSON.parse(signature); }
+            }
             if (entry.signature !== signature) {
                 entry.signature = signature;
                 entry.figure = JSON.parse(signature);
@@ -182,6 +197,42 @@
             }
         }
         return '';
+    }
+
+    function withoutRevision(figure) {
+        return JSON.stringify(figure, function (key, value) {return key === 'gecko_render_revision' ? undefined : value;});
+    }
+
+    // Draw a new file's tab from the upload response (upload_callbacks._first_paint), ahead of the tab list.
+    async function preview(data) {
+        var none = window.dash_clientside.no_update;
+        var host = document.getElementById('plot-workspace');
+        if (!data || !data.tab || !data.figure || !host || !window.Plotly) return none;
+        var current = lastTabs.find(function (t) {return t.id === activeId;});
+        if (current && current.type === 'publication') return null;        // stay on the publication page
+        var entry = plots.get(data.tab);
+        if (!entry) {
+            var gd = document.createElement('div');
+            gd.dataset.workspacePlot = data.tab;
+            gd.style.width = '100%'; gd.style.height = '100%';
+            gd.style.position = 'absolute'; gd.style.inset = '0';
+            host.appendChild(gd);
+            entry = {id: data.tab, gd: gd};
+            plots.set(data.tab, entry);
+        }
+        previewId = data.tab; previewAt = Date.now();
+        activate(data.tab, false, true);
+        var signature = JSON.stringify(data.figure);
+        entry.signature = signature;
+        entry.figure = JSON.parse(signature);
+        entry.source = null;
+        entry.previewSignature = withoutRevision(data.figure);
+        await window.Plotly.react(entry.gd, entry.figure.data || [], entry.figure.layout || {}, config);
+        bridge(entry);
+        var bounds = host.getBoundingClientRect();
+        if (bounds.width && bounds.height) entry.gd.__geckoWorkspaceSize = bounds.width + ':' + bounds.height;
+        document.dispatchEvent(new CustomEvent('gecko:plot-ready'));
+        return null;                                                        // the figure is drawn; free the store
     }
 
     function revealTab(id, mirror) {
@@ -231,7 +282,7 @@
     }, true);
 
     window.dash_clientside = Object.assign({}, window.dash_clientside, {
-        plotWorkspace: {update: update, activate: activate,
+        plotWorkspace: {update: update, activate: activate, preview: preview,
             switchTab: function (clicks, current) {
                 var ctx = window.dash_clientside.callback_context;
                 if (!(clicks || []).some(Boolean) || !ctx.triggered.length) return window.dash_clientside.no_update;

@@ -230,6 +230,7 @@ _layout_body = html.Div(
         dcc.Store(id='tab-file-memory', data={}),  # Maps tab_id → last selected file_id
         dcc.Store(id='tab-panel-memory', data={}),  # Maps tab_id → last active bottom panel
         dcc.Store(id='tab-zoom-memory', data={}),  # Maps tab_id → saved zoom ranges
+        dcc.Store(id='first-paint'),  # the new file's figure, drawn straight from the upload (upload_callbacks._first_paint)
         dcc.Store(id='file-order', data={}),  # Per-group file ordering {group_id: {sort_dir: 'asc'|'desc'|null, order: [id, ...]}}
         dcc.Store(id='file-reorder-event', data=None),  # JS drag-and-drop event {group_id, order: [id, ...]}
         dcc.Store(id='keyboard-delete-trigger', data=0),  # Counter bumped by JS on Backspace/Delete keypress
@@ -1989,6 +1990,13 @@ clientside_callback(
     ClientsideFunction(namespace='plotWorkspace', function_name='update'),
     Output('plot-workspace-sync', 'children'),
     [Input('main-plot', 'figure'), Input('active-plot-tab', 'data'), Input('plot-tabs', 'data')],
+)
+
+clientside_callback(
+    ClientsideFunction(namespace='plotWorkspace', function_name='preview'),
+    Output('first-paint', 'data', allow_duplicate=True),
+    Input('first-paint', 'data'),
+    prevent_initial_call=True,
 )
 
 clientside_callback(

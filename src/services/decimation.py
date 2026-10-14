@@ -36,14 +36,20 @@ def decimate_minmax(x, y, target: int = TARGET):
             return x, y                                        # not a time axis: leave it alone
     except (TypeError, ValueError):
         return x, y
+    keep = _minmax_keep(yf, target)
+    return x[keep], y[keep]
+
+
+def _minmax_keep(yf, target):
+    """Indices of each bin's lowest and highest point (plus the ends), in order, for about ``target`` points."""
+    n = len(yf)
     bins = max(2, target // 2)
     width = n // bins
     used = width * bins
     body = yf[:used].reshape(bins, width)
     low = np.where(np.isnan(body), np.inf, body).argmin(axis=1) + np.arange(bins) * width
     high = np.where(np.isnan(body), -np.inf, body).argmax(axis=1) + np.arange(bins) * width
-    keep = np.unique(np.concatenate([low, high, [0, n - 1], np.arange(used, n, max(1, (n - used) // 4 or 1))]))
-    return x[keep], y[keep]
+    return np.unique(np.concatenate([low, high, [0, n - 1], np.arange(used, n, max(1, (n - used) // 4 or 1))]))
 
 
 def for_display(x, y):
@@ -51,3 +57,27 @@ def for_display(x, y):
     if not ENABLED or len(y) <= ABOVE:
         return x, y
     return decimate_minmax(x, y)
+
+
+def polygon_for_display(px, py, target: int = 400):
+    """A filled peak outline (the signal forward, then its baseline back over the same times) with fewer points.
+
+    A peak a minute wide at 40 points per second is ~4,800 outline points; the outline is drawn from the same min/max
+    points of the signal as ``decimate_minmax`` keeps, with the baseline taken at those times, so the fill looks the
+    same. The peak's area is never computed from this. Other outlines are returned unchanged.
+    """
+    n = len(px) if px is not None else 0
+    if not ENABLED or n <= 2 * target or n % 2 or len(py) != n:
+        return px, py
+    try:
+        x = np.asarray(px, dtype=np.float64)
+        y = np.asarray(py, dtype=np.float64)
+    except (TypeError, ValueError):
+        return px, py
+    half = n // 2
+    if not np.array_equal(x[:half], x[half:][::-1]):
+        return px, py
+    keep = _minmax_keep(y[:half], target)
+    top_x, top_y, base_y = x[:half][keep], y[:half][keep], y[half:][::-1][keep]
+    # Lists, like the full outline: the browser's peak tools and Patch updates compare these traces as plain values.
+    return np.concatenate([top_x, top_x[::-1]]).tolist(), np.concatenate([top_y, base_y[::-1]]).tolist()

@@ -161,8 +161,8 @@ def add_peak_traces(fig, all_peaks, time_arr, signal_arr, selected_peak_id=None,
         peak_text = (getattr(peak, 'label', '') or peak.name or '')
 
         if peak.poly_x and peak.poly_y:
-            poly_x = list(peak.poly_x)
-            poly_y = list(peak.poly_y)
+            from services.decimation import polygon_for_display
+            poly_x, poly_y = polygon_for_display(peak.poly_x, peak.poly_y)     # drawing only; the area uses all points
             fig.add_trace(go.Scatter(
                 x=poly_x, y=poly_y,
                 fill='toself', fillcolor=fill_color,
@@ -174,7 +174,7 @@ def add_peak_traces(fig, all_peaks, time_arr, signal_arr, selected_peak_id=None,
             ), **add_kw)
             if has_custom_label:
                 # Above the highest point of the peak (the filled outline follows the signal), never on it.
-                label_y = max((v for v in poly_y if v is not None), default=peak.height)
+                label_y = max((v for v in peak.poly_y if v is not None), default=peak.height)
                 fig.add_trace(go.Scatter(
                     x=[peak.rt],
                     y=[label_y],

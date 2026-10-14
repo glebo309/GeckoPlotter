@@ -21,8 +21,12 @@
         }
     }
 
+    // Compressing pays off over a network (the shared lab server); when GeckoPlotter runs on this computer (the
+    // one-click launcher) it only costs time: 7 ASCII exports of 17.6 MB took ~3 s to gzip and unzip again.
+    var LOCAL = /^(localhost|127\.0\.0\.1|\[::1\])$/.test(window.location.hostname);
+
     function send(file) {
-        var compress = typeof CompressionStream === 'function' && file.size > MIN_COMPRESS;
+        var compress = !LOCAL && typeof CompressionStream === 'function' && file.size > MIN_COMPRESS;
         var body = compress
             ? new Response(file.stream().pipeThrough(new CompressionStream('gzip'))).blob()
             : Promise.resolve(file);

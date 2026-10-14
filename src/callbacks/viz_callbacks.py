@@ -555,8 +555,8 @@ def _apply_pda_main_preview(figure, data_manager, preview):
             continue
         trace, fid, _ = target
         bundle = data_manager.get_bundle(bundle_id)
-        trace.x = view['times'].tolist()
-        trace.y = view['chromatogram'].tolist()
+        from services.decimation import for_display
+        trace.x, trace.y = for_display(view['times'], view['chromatogram'])     # drawing only, every peak top kept
         sample = f'{bundle.name} · ' if len(sources) > 1 else ''
         trace.name = f"{sample}PDA {view['wavelength_nm']:.0f} nm · preview"
         previous = trace.meta if isinstance(trace.meta, dict) else {}
@@ -592,6 +592,150 @@ def _raw_render_settings(settings):
     if modes.get('y') == 'auto':
         result.pop('y1_label', None)
     return result
+
+
+def compose_raw_figure(data_manager, plot_manager, active_tab_id, group_key, s, active_file, loaded_files,
+                       file_order=None, selected_peak_id=None, baseline_mode=None, deconv_markers=None,
+                       deconv_result=None, display_opts=None, pda_preview=None, pda_cursor=None, link_x=None,
+                       y_scope=None, effective_zoom=None):
+    """The figure of a raw plot tab: its visible signals with their peaks, overlays and the tab's plot settings ``s``.
+
+    master_render draws every raw tab with it, and the upload draws the new tab with it before the rest of the app has
+    caught up (``first_paint``), so both are the same figure. None when no signal of the tab is visible.
+    """
+    from services.plot_settings_service import PlotSettingsService, DEFAULT_PLOT_SETTINGS
+    layout_mode = s.get('layout_mode', 'overlay')
+    visible_files = _collect_visible_files(
+        data_manager, active_file, loaded_files, target_group_override=group_key,
+        file_order=file_order)
+    from services.ms_polarity import filter_ms_polarity, entry_polarity
+    visible_files = filter_ms_polarity(visible_files, s.get('ms_polarity', 'both'))
+    if not visible_files:
+        return None
+
+
+    subplot_spacing = s.get('subplot_spacing', 0.08)
+    figure = plot_manager.create_multi_file_plot(visible_files, layout_mode, subplot_spacing=subplot_spacing)
+    if hasattr(figure, 'data'):
+        _assign_color_slots(figure, _trace_color_slots(data_manager, group_key, loaded_files, file_order))
+
+    smooth_window = s.get('smooth_window', 0)
+    if smooth_window >= 3:
+        fig_sm = go.Figure(figure) if isinstance(figure, dict) else figure
+        smooth_plotly_traces(fig_sm.data, smooth_window)
+        figure = fig_sm
+
+    preview_owner = _apply_pda_main_preview(figure, data_manager, pda_preview)
+
+    show_peaks = 'peaks' in (['peaks'] if display_opts is None else display_opts)
+
+    # If the user switched palette, update peak_service and re-group
+    # so peak.color reflects the new palette. Compare by name (robust).
+    from services.plot_settings_service import PlotSettingsService as _PSS
+    from services.plot_settings_service import DEFAULT_PALETTE as _DEFAULT_PALETTE
+    _pal_name = s.get('palette', _DEFAULT_PALETTE)
+    _ps = data_manager.peak_service
+    if getattr(_ps, '_palette_name', None) != _pal_name:
+        _ps.set_palette(_pal_name, _PSS.get_color_palette(_pal_name))
+        _ps.group_peaks_across_samples(
+            file_overlay_map=data_manager.build_file_overlay_map())
+
+    if show_peaks or deconv_result:
+        fig_obj_for_peaks = go.Figure(figure) if isinstance(figure, dict) else figure
+        cleanup_peak_traces(fig_obj_for_peaks)
+        flat_files = [entry for files in visible_files.values() for entry in files]
+        for row_idx, (_name, fdata) in enumerate(flat_files, start=1):
+            fid = _find_file_id(data_manager, fdata)
+            if not fid or fid in ([preview_owner] if isinstance(preview_owner, str) else (preview_owner or [])):
+                continue
+            peaks = data_manager.peak_service.get_peaks(fid)
+            preview_peak_id = (deconv_result or {}).get('peak_id', selected_peak_id)
+            deconvolving = bool(deconv_result) and any(p.peak_id == preview_peak_id for p in peaks)
+            if deconvolving:
+                peaks = [p for p in peaks if p.peak_id != preview_peak_id]
+            if not peaks and not deconvolving:
+                continue
+            time_arr, signal_arr = get_xy_arrays(data_manager, fid)
+            if time_arr is None:
+                continue
+            row = row_idx if layout_mode == 'stacked' else None
+            add_peak_traces(fig_obj_for_peaks, peaks, time_arr, signal_arr, selected_peak_id, row=row)
+            if deconvolving:
+                from callbacks.peak_overlay import add_deconv_overlays
+                add_deconv_overlays(fig_obj_for_peaks, deconv_markers, deconv_result,
+                                    time_arr, signal_arr, row=row)
+        figure = fig_obj_for_peaks
+
+    # LC-MS scan cursor is rendered as a DOM overlay in app.py /
+    # scan-line-constraint.js. Keep the Plotly figure free of old scan
+    # traces/shapes so no stale vertical line remains in the SVG.
+    if active_file:
+        _af_entry = data_manager.get_data_by_id(active_file)
+        if _af_entry and data_manager.lcms_service.has_spectral_data(_af_entry):
+            try:
+                fig_for_line = go.Figure(figure) if isinstance(figure, dict) else figure
+                fig_for_line.data = tuple(
+                    tr for tr in fig_for_line.data
+                    if getattr(tr, 'name', None) != 'lcms-scan-line'
+                )
+                if fig_for_line.layout.shapes:
+                    fig_for_line.update_layout(shapes=[
+                        sh for sh in fig_for_line.layout.shapes
+                        if getattr(sh, 'name', None) != 'lcms-scan-line'
+                    ])
+                figure = fig_for_line
+            except Exception:
+                pass
+
+    if s.get('layout_mode') == 'stacked' and s.get('subplot_rows', 1) * s.get('subplot_cols', 1) > 1:
+        from services.publication_figure import editable_publication_figure
+        source = figure.to_plotly_json() if hasattr(figure, 'to_plotly_json') else figure
+        figure = editable_publication_figure(source, s, {**s, 'subplot_rows':1, 'subplot_cols':1}, clean_output=False)
+
+    try:
+        fig_obj = go.Figure(figure) if isinstance(figure, dict) else figure
+        settings_for_style = dict(s, y_label=s.get('y1_label', 'Y1'))
+        if ((s.get('axis_label_modes') or {}).get('x') != 'custom'
+                and s.get('x_label') == DEFAULT_PLOT_SETTINGS['x_label'] and len(group_key) > 1):
+            settings_for_style['x_label'] = group_key[1]
+        ps = PlotSettingsService.from_dict(settings_for_style)
+        PlotSettingsService.apply_to_figure(fig_obj, ps)
+        from services.axis_linking import apply_axis_linking
+        apply_axis_linking(fig_obj, bool(link_x), y_scope == 'global')
+        PlotSettingsService.share_stacked_y_label(fig_obj, ps)
+        from services.signal_axis_range import apply_signal_x_bounds
+        apply_signal_x_bounds(fig_obj)
+        fig_obj.update_layout(uirevision=active_tab_id,
+            meta={**(fig_obj.layout.meta or {}), 'gecko_tab_id': active_tab_id})
+        if (effective_zoom and s.get('auto_range', True)
+                and effective_zoom.get('_axis_range_revision', 0) == s.get('_axis_range_revision', 0)):
+            _apply_zoom_state(fig_obj, effective_zoom)
+        elif s.get('auto_range', True):
+            fig_obj.update_layout(
+                xaxis=dict(autorange=True),
+                yaxis=dict(autorange=True),
+            )
+        from services.axis_inspector import apply_axis_overrides
+        apply_axis_overrides(fig_obj, s.get('axis_overrides', {}))
+        axis_revision = f"{active_tab_id}:range:{s.get('_axis_range_revision',0)}"
+        fig_obj.update_xaxes(uirevision=axis_revision)
+        fig_obj.update_yaxes(uirevision=axis_revision)
+        figure = fig_obj
+    except Exception:
+        log.exception("Failed to apply plot settings to raw figure")
+
+    _apply_pda_main_cursor(figure, pda_cursor)
+    overlay = next((o[len('overlay:'):] for o in (display_opts or []) if str(o).startswith('overlay:')), None)
+    if overlay and layout_mode != 'stacked':
+        from services.shimadzu_method import add_gradient_overlay, add_status_overlay
+        overlay_entries = [e for files in visible_files.values() for e in files]
+        if overlay in ('gradient', 'gradient_column'):
+            from services.lab_defaults import dwell_volume_ul
+            add_gradient_overlay(figure, data_manager, overlay_entries,
+                                 dwell_volume_ul() if overlay == 'gradient_column' else None)
+        elif overlay.startswith('status:'):
+            add_status_overlay(figure, overlay_entries, overlay[len('status:'):])
+    return figure
 
 
 def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
@@ -1431,143 +1575,21 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
             # the cached figure until the browser's figure acknowledges it.
             return render_cache.get(active_tab_id, render_inputs), set_zoom
 
-        visible_files = _collect_visible_files(
-            data_manager, active_file, loaded_files, target_group_override=group_key,
-            file_order=file_order)
-        from services.ms_polarity import filter_ms_polarity, entry_polarity
-        visible_files = filter_ms_polarity(visible_files, s.get('ms_polarity', 'both'))
-        if not visible_files:
-            figure = plot_manager.create_hidden_state_plot()
-            figure.update_layout(meta={'gecko_tab_id': active_tab_id, 'gecko_render_revision': render_revision})
-            render_cache.put(active_tab_id, render_inputs, figure)
-            return figure, set_zoom
-
-        subplot_spacing = s.get('subplot_spacing', 0.08)
-        figure = plot_manager.create_multi_file_plot(visible_files, layout_mode, subplot_spacing=subplot_spacing)
-        if hasattr(figure, 'data'):
-            _assign_color_slots(figure, _trace_color_slots(data_manager, group_key, loaded_files, file_order))
-
-        smooth_window = s.get('smooth_window', 0)
-        if smooth_window >= 3:
-            fig_sm = go.Figure(figure) if isinstance(figure, dict) else figure
-            smooth_plotly_traces(fig_sm.data, smooth_window)
-            figure = fig_sm
-
-        preview_owner = _apply_pda_main_preview(figure, data_manager, pda_preview)
-
-        show_peaks = 'peaks' in (['peaks'] if display_opts is None else display_opts)
-
-        # If the user switched palette, update peak_service and re-group
-        # so peak.color reflects the new palette. Compare by name (robust).
-        from services.plot_settings_service import PlotSettingsService as _PSS
-        from services.plot_settings_service import DEFAULT_PALETTE as _DEFAULT_PALETTE
-        _pal_name = s.get('palette', _DEFAULT_PALETTE)
-        _ps = data_manager.peak_service
-        if getattr(_ps, '_palette_name', None) != _pal_name:
-            _ps.set_palette(_pal_name, _PSS.get_color_palette(_pal_name))
-            _ps.group_peaks_across_samples(
-                file_overlay_map=data_manager.build_file_overlay_map())
-
-        if show_peaks or deconv_result:
-            fig_obj_for_peaks = go.Figure(figure) if isinstance(figure, dict) else figure
-            cleanup_peak_traces(fig_obj_for_peaks)
-            flat_files = [entry for files in visible_files.values() for entry in files]
-            for row_idx, (_name, fdata) in enumerate(flat_files, start=1):
-                fid = _find_file_id(data_manager, fdata)
-                if not fid or fid in ([preview_owner] if isinstance(preview_owner, str) else (preview_owner or [])):
-                    continue
-                peaks = data_manager.peak_service.get_peaks(fid)
-                preview_peak_id = (deconv_result or {}).get('peak_id', selected_peak_id)
-                deconvolving = bool(deconv_result) and any(p.peak_id == preview_peak_id for p in peaks)
-                if deconvolving:
-                    peaks = [p for p in peaks if p.peak_id != preview_peak_id]
-                if not peaks and not deconvolving:
-                    continue
-                time_arr, signal_arr = get_xy_arrays(data_manager, fid)
-                if time_arr is None:
-                    continue
-                row = row_idx if layout_mode == 'stacked' else None
-                add_peak_traces(fig_obj_for_peaks, peaks, time_arr, signal_arr, selected_peak_id, row=row)
-                if deconvolving:
-                    from callbacks.peak_overlay import add_deconv_overlays
-                    add_deconv_overlays(fig_obj_for_peaks, deconv_markers, deconv_result,
-                                        time_arr, signal_arr, row=row)
-            figure = fig_obj_for_peaks
-
-        # LC-MS scan cursor is rendered as a DOM overlay in app.py /
-        # scan-line-constraint.js. Keep the Plotly figure free of old scan
-        # traces/shapes so no stale vertical line remains in the SVG.
-        if active_file:
-            _af_entry = data_manager.get_data_by_id(active_file)
-            if _af_entry and data_manager.lcms_service.has_spectral_data(_af_entry):
-                try:
-                    fig_for_line = go.Figure(figure) if isinstance(figure, dict) else figure
-                    fig_for_line.data = tuple(
-                        tr for tr in fig_for_line.data
-                        if getattr(tr, 'name', None) != 'lcms-scan-line'
-                    )
-                    if fig_for_line.layout.shapes:
-                        fig_for_line.update_layout(shapes=[
-                            sh for sh in fig_for_line.layout.shapes
-                            if getattr(sh, 'name', None) != 'lcms-scan-line'
-                        ])
-                    figure = fig_for_line
-                except Exception:
-                    pass
-
-        if s.get('layout_mode') == 'stacked' and s.get('subplot_rows', 1) * s.get('subplot_cols', 1) > 1:
-            from services.publication_figure import editable_publication_figure
-            source = figure.to_plotly_json() if hasattr(figure, 'to_plotly_json') else figure
-            figure = editable_publication_figure(source, s, {**s, 'subplot_rows':1, 'subplot_cols':1}, clean_output=False)
-
         if is_tab_switch:
             effective_zoom = restored_zoom
         else:
             effective_zoom = zoom_state if zoom_matches_tab else None
-
-        try:
-            fig_obj = go.Figure(figure) if isinstance(figure, dict) else figure
-            settings_for_style = dict(s, y_label=s.get('y1_label', 'Y1'))
-            if ((s.get('axis_label_modes') or {}).get('x') != 'custom'
-                    and s.get('x_label') == DEFAULT_PLOT_SETTINGS['x_label'] and len(group_key) > 1):
-                settings_for_style['x_label'] = group_key[1]
-            ps = PlotSettingsService.from_dict(settings_for_style)
-            PlotSettingsService.apply_to_figure(fig_obj, ps)
-            from services.axis_linking import apply_axis_linking
-            apply_axis_linking(fig_obj, bool(link_x), y_scope == 'global')
-            PlotSettingsService.share_stacked_y_label(fig_obj, ps)
-            from services.signal_axis_range import apply_signal_x_bounds
-            apply_signal_x_bounds(fig_obj)
-            fig_obj.update_layout(uirevision=active_tab_id,
-                meta={**(fig_obj.layout.meta or {}), 'gecko_tab_id': active_tab_id})
-            if (effective_zoom and s.get('auto_range', True)
-                    and effective_zoom.get('_axis_range_revision', 0) == s.get('_axis_range_revision', 0)):
-                _apply_zoom_state(fig_obj, effective_zoom)
-            elif s.get('auto_range', True):
-                fig_obj.update_layout(
-                    xaxis=dict(autorange=True),
-                    yaxis=dict(autorange=True),
-                )
-            from services.axis_inspector import apply_axis_overrides
-            apply_axis_overrides(fig_obj, s.get('axis_overrides', {}))
-            axis_revision = f"{active_tab_id}:range:{s.get('_axis_range_revision',0)}"
-            fig_obj.update_xaxes(uirevision=axis_revision)
-            fig_obj.update_yaxes(uirevision=axis_revision)
-            figure = fig_obj
-        except Exception:
-            log.exception("Failed to apply plot settings to raw figure")
-
-        _apply_pda_main_cursor(figure, pda_cursor)
-        overlay = next((o[len('overlay:'):] for o in (display_opts or []) if str(o).startswith('overlay:')), None)
-        if overlay and layout_mode != 'stacked':
-            from services.shimadzu_method import add_gradient_overlay, add_status_overlay
-            overlay_entries = [e for files in visible_files.values() for e in files]
-            if overlay in ('gradient', 'gradient_column'):
-                from services.lab_defaults import dwell_volume_ul
-                add_gradient_overlay(figure, data_manager, overlay_entries,
-                                     dwell_volume_ul() if overlay == 'gradient_column' else None)
-            elif overlay.startswith('status:'):
-                add_status_overlay(figure, overlay_entries, overlay[len('status:'):])
+        figure = compose_raw_figure(
+            data_manager, plot_manager, active_tab_id, group_key, s, active_file, loaded_files,
+            file_order=file_order, selected_peak_id=selected_peak_id, baseline_mode=baseline_mode,
+            deconv_markers=deconv_markers, deconv_result=deconv_result, display_opts=display_opts,
+            pda_preview=pda_preview, pda_cursor=pda_cursor, link_x=link_x, y_scope=y_scope,
+            effective_zoom=effective_zoom)
+        if figure is None:
+            figure = plot_manager.create_hidden_state_plot()
+            figure.update_layout(meta={'gecko_tab_id': active_tab_id, 'gecko_render_revision': render_revision})
+            render_cache.put(active_tab_id, render_inputs, figure)
+            return figure, set_zoom
         figure.update_layout(meta={**(figure.layout.meta or {}), 'gecko_render_revision': render_revision})
         render_cache.put(active_tab_id, render_inputs, figure)
         return figure, set_zoom

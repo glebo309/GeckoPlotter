@@ -116,6 +116,33 @@ def build_active_file_views(data_manager, file_id):
 
 log = logging.getLogger(__name__)
 
+def _first_paint(data_manager, tab_id, group, active_file, loaded_files, file_order):
+    """Draw the new file's plot tab straight from the upload.
+
+    The normal render waits for the tab, the active file, the tab's settings and the PDA preview to arrive through
+    about ten callbacks one after another (about 1.4 s for one file). The same figure is built here with the settings
+    that tab will open with and handed to the browser (plot-workspace.js) with this response; the normal render
+    arrives later and replaces it.
+    """
+    try:
+        import dash
+        from services.plot_manager import PlotManager
+        from callbacks.viz_callbacks import compose_raw_figure
+        from callbacks.plot_settings_callbacks import settings_for_context
+        settings = settings_for_context(data_manager, f'shared:raw:{tab_id}', active_file)
+        figure = compose_raw_figure(data_manager, PlotManager(), tab_id, tuple(group), settings, active_file,
+                                    loaded_files, file_order=file_order)
+    except Exception:
+        log.exception('first paint of %s failed; the normal render draws it', tab_id)
+        return
+    if figure is None:
+        return
+    try:
+        dash.set_props('first-paint', {'data': {'tab': tab_id, 'figure': figure}})
+    except dash.exceptions.MissingCallbackContextException:
+        pass                                    # called outside a browser request (tests): nobody to draw it for
+
+
 def register_upload_callbacks(app: dash.Dash, data_manager) -> None:
     """Register upload-related callbacks."""
     
@@ -134,12 +161,13 @@ def register_upload_callbacks(app: dash.Dash, data_manager) -> None:
          State('upload-button', 'last_modified'),
          State('loaded-files', 'data'),
          State('render-trigger', 'data'),
-         State('active-file', 'data')],
+         State('active-file', 'data'),
+         State('file-order', 'data')],
         prevent_initial_call=True
     )
     def handle_file_upload(contents_list: List[str], filenames: List[str],
                           last_modified_list: List[int], existing_files: List[Dict[str, Any]],
-                          render_counter, active_file=None) -> tuple:
+                          render_counter, active_file=None, file_order=None) -> tuple:
         """Handle file upload via Bundle-first pipeline.
 
         1. Decode + parse each file via ingestion pipeline
@@ -273,6 +301,8 @@ def register_upload_callbacks(app: dash.Dash, data_manager) -> None:
                 plot_tab = _tab_id_from_group(group) if group else None
             tree_items = render_file_tree_with_bundles_selected(
                 loaded_files, data_manager, auto_active_file, active_plot_tab=plot_tab)
+            if plot_tab:
+                _first_paint(data_manager, plot_tab, group, auto_active_file, loaded_files, file_order)
 
             log.debug(f"Upload complete: {len(new_bundles)} bundles from {len(parsed_files)} files")
             return (loaded_files, tree_items, auto_active_file, auto_table,
