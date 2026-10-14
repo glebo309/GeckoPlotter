@@ -17,6 +17,9 @@ import numpy as np
 import pandas as pd
 from scipy.signal import find_peaks, peak_widths
 
+# NumPy 2 renamed trapz to trapezoid and later removed the old name; a clean install gets the new NumPy.
+_trapezoid = getattr(np, 'trapezoid', None) or np.trapz
+
 # Okabe-Ito colorblind-friendly palette
 OKABE_ITO_PALETTE = [
     "#E69F00",  # orange
@@ -445,7 +448,7 @@ class PeakService:
         y_right = float(ys[-1])
         baseline = y_left + (y_right - y_left) * (xs - xs[0]) / (xs[-1] - xs[0])
         diff = ys - baseline
-        area = float(np.trapz(np.maximum(diff, 0), xs))
+        area = float(_trapezoid(np.maximum(diff, 0), xs))
         height = float(diff.max())
 
         baseline_clamped = np.minimum(baseline, ys)
@@ -843,7 +846,7 @@ class PeakService:
         y_right = float(signal[right])
         baseline = y_left + (y_right - y_left) * (xs - xs[0]) / (xs[-1] - xs[0])
         diff = ys - baseline
-        area = float(np.trapz(np.maximum(diff, 0), xs))
+        area = float(_trapezoid(np.maximum(diff, 0), xs))
         if area <= 0:
             return None
 
@@ -1167,7 +1170,7 @@ class PeakService:
         if baseline is not None:
             s_seg = s_seg - baseline[mask]
 
-        area = float(np.trapz(s_seg, t_seg))
+        area = float(_trapezoid(s_seg, t_seg))
         return max(area, 0.0)
 
     @staticmethod
