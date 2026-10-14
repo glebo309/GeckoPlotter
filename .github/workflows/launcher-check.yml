@@ -5,7 +5,7 @@ name: Launcher check
 # package, or breaks the launcher, this fails here instead of on a colleague's laptop.
 on:
   push:
-    branches: [main, ui-professional-workspace]
+    branches: [main]
     paths: ['requirements.txt', 'deploy/launcher/**', 'app.py', 'src/**', '.github/workflows/launcher-check.yml']
   workflow_dispatch:
 
@@ -20,6 +20,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v5
+        with:
+          enable-cache: false
 
       - name: Pack this checkout the way GitHub's zip download looks
         shell: bash
@@ -43,8 +45,14 @@ jobs:
         run: |
           export GECKO_SOURCE_ZIP="$PWD/github-main.zip"
           uv run --python 3.12 --no-project deploy/launcher/launcher.py > launcher.out 2>&1 &
+          LAUNCHER=$!
           for i in $(seq 1 240); do
-            if curl -fsS -o /dev/null http://127.0.0.1:8052/; then echo "GeckoPlotter answered after ~$((i*5)) s"; exit 0; fi
+            if curl -fsS -o /dev/null http://127.0.0.1:8052/; then
+              echo "GeckoPlotter answered after ~$((i*5)) s"
+              curl -fsS http://127.0.0.1:8052/ | grep -q "_dash-" && echo "and it is the Dash app"
+              kill $LAUNCHER 2>/dev/null || true
+              exit 0
+            fi
             sleep 5
           done
           echo "---- launcher output"; cat launcher.out || true

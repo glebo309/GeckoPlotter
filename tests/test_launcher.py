@@ -38,11 +38,13 @@ def test_an_update_replaces_the_code_and_ignores_paths_that_climb_out(launcher, 
     launcher.APP.mkdir()
     (launcher.APP / 'old.txt').write_text('old')
     archive = _make_zip(tmp_path / 'u.zip', {'GeckoPlotter-main/app.py': 'new', 'GeckoPlotter-main/../evil.txt': 'x',
-                                             'GeckoPlotter-main/sub/b.py': 'b'})
+                                             'GeckoPlotter-main/sub/b.py': 'b',
+                                             'GeckoPlotter-main/Icon\r': '', 'GeckoPlotter-main/a:b.txt': ''})
     launcher.replace_app(archive)
     assert (launcher.APP / 'app.py').read_text() == 'new' and (launcher.APP / 'sub' / 'b.py').exists()
     assert not (launcher.APP / 'old.txt').exists() and not (launcher.HOME / 'evil.txt').exists()
     assert not (launcher.HOME / 'app.old').exists() and not (launcher.HOME / 'app.new').exists()
+    assert sorted(p.name for p in launcher.APP.iterdir()) == ['app.py', 'sub']     # names Windows rejects are skipped
 
 
 def test_packages_are_reinstalled_only_when_the_requirements_change(launcher):

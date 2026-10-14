@@ -9,3 +9,6 @@ build/
 .env
 uploads/
 *.cdf
+
+# macOS folder-icon files (named "Icon" + carriage return); Windows cannot check them out
+Icon?

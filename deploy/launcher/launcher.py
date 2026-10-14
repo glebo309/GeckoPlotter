@@ -196,6 +196,11 @@ def download_zip(target: Path) -> None:
         shutil.copyfileobj(response, out)
 
 
+def _portable(relative: str) -> bool:
+    """False for names Windows cannot create (a stray macOS "Icon\\r" file, "a:b", ...): those are skipped."""
+    return not any(ch in '<>:"|?*' or ord(ch) < 32 for ch in relative.replace('/', ''))
+
+
 def replace_app(zip_path: Path) -> None:
     """Unpack the zip next to the current code, then swap folders, so a failed download never breaks what works."""
     staging, old = HOME / 'app.new', HOME / 'app.old'
@@ -204,7 +209,7 @@ def replace_app(zip_path: Path) -> None:
         root = archive.namelist()[0].split('/')[0] + '/'
         for info in archive.infolist():
             relative = info.filename[len(root):] if info.filename.startswith(root) else ''
-            if not relative or '..' in Path(relative).parts:
+            if not relative or '..' in Path(relative).parts or not _portable(relative):
                 continue
             target = staging / relative
             if info.is_dir():
