@@ -18,6 +18,7 @@ import json
 import math
 import os
 import platform
+import re
 import shlex
 import shutil
 import socket
@@ -173,27 +174,57 @@ def write_state(state: dict) -> None:
     STATE_FILE.write_text(json.dumps(state, indent=1), encoding='utf-8')
 
 
+def http_get(url: str, timeout: int = 25, accept: str | None = None) -> bytes:
+    """Fetch a URL with Python; if that fails (old certificate store, proxy), try the system's curl once."""
+    headers = {**USER_AGENT, **({'Accept': accept} if accept else {})}
+    try:
+        with urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=timeout) as response:
+            return response.read()
+    except Exception as first:                                 # noqa: BLE001
+        log(f'Python could not fetch {url}: {first!r}')
+        curl = shutil.which('curl')
+        if not curl:
+            raise
+        command = [curl, '-fsSL', '--max-time', str(timeout * 4), '-H', 'User-Agent: GeckoPlotter-launcher']
+        if accept:
+            command += ['-H', f'Accept: {accept}']
+        done = subprocess.run(command + [url], capture_output=True)
+        if done.returncode != 0:
+            log(f'curl could not fetch {url} either: {done.stderr.decode("utf-8", "replace").strip()}')
+            raise first
+        return done.stdout
+
+
 def latest_sha() -> str | None:
-    """The newest commit on the branch, or None when GitHub cannot be reached (offline, rate limit)."""
+    """The newest commit on the branch, or None when GitHub cannot be reached (offline).
+
+    The API answers 403 once many computers share one address (a university network), so a plain git ref
+    listing, which has no such limit, is the second source.
+    """
     if SOURCE_ZIP:
         return hashlib.sha256(Path(SOURCE_ZIP).read_bytes()).hexdigest()[:40]
-    request = urllib.request.Request(f'https://api.github.com/repos/{REPO}/commits/{BRANCH}',
-                                     headers={**USER_AGENT, 'Accept': 'application/vnd.github.sha'})
     try:
-        with urllib.request.urlopen(request, timeout=10) as response:
-            return response.read().decode().strip() or None
-    except Exception as error:                                # noqa: BLE001 - any failure means "use what is installed"
-        log(f'could not ask GitHub for the latest version: {error}')
-        return None
+        text = http_get(f'https://api.github.com/repos/{REPO}/commits/{BRANCH}',
+                        accept='application/vnd.github.sha').decode().strip()
+        if re.fullmatch(r'[0-9a-f]{40}', text):
+            return text
+    except Exception as error:                                 # noqa: BLE001
+        log(f'GitHub API gave no version: {error!r}')
+    try:
+        listing = http_get(f'https://github.com/{REPO}.git/info/refs?service=git-upload-pack')
+        match = re.search(rb'([0-9a-f]{40}) refs/heads/' + re.escape(BRANCH.encode()) + rb'\b', listing)
+        if match:
+            return match.group(1).decode()
+    except Exception as error:                                 # noqa: BLE001
+        log(f'git ref listing gave no version: {error!r}')
+    return None
 
 
 def download_zip(target: Path) -> None:
     if SOURCE_ZIP:
         shutil.copyfile(SOURCE_ZIP, target)
         return
-    request = urllib.request.Request(f'https://codeload.github.com/{REPO}/zip/refs/heads/{BRANCH}', headers=USER_AGENT)
-    with urllib.request.urlopen(request, timeout=60) as response, open(target, 'wb') as out:
-        shutil.copyfileobj(response, out)
+    target.write_bytes(http_get(f'https://codeload.github.com/{REPO}/zip/refs/heads/{BRANCH}', timeout=90))
 
 
 def _portable(relative: str) -> bool:
@@ -268,15 +299,18 @@ def prepare() -> subprocess.Popen:
     STATUS.set('check', 'active', 'Asking GitHub for the newest version')
     remote = latest_sha()
     need_download = not (APP / 'app.py').exists() or (remote is not None and remote != state.get('sha'))
-    if not (APP / 'app.py').exists() and remote is None and not SOURCE_ZIP:
-        raise RuntimeError('GeckoPlotter could not be downloaded. Check the internet connection and start it again.')
     STATUS.set('check', 'done')
 
     if need_download:
         STATUS.set('download', 'active', 'Downloading the newest code')
         with tempfile.TemporaryDirectory() as folder:
             archive = Path(folder) / 'gecko.zip'
-            download_zip(archive)
+            try:
+                download_zip(archive)
+            except Exception as error:                         # noqa: BLE001
+                log(f'download failed: {error!r}')
+                raise RuntimeError('GeckoPlotter could not be downloaded from GitHub (internet, proxy or firewall?). '
+                                   f'Reason: {error}') from error
             STATUS.note('Unpacking')
             replace_app(archive)
         state['sha'] = remote or state.get('sha', 'unknown')
@@ -341,10 +375,7 @@ def fetch_icons() -> None:
         if target.exists() and not fresh:
             continue
         try:
-            request = urllib.request.Request(
-                f'https://raw.githubusercontent.com/{REPO}/{BRANCH}/deploy/launcher/icon/{name}', headers=USER_AGENT)
-            with urllib.request.urlopen(request, timeout=20) as response:
-                target.write_bytes(response.read())
+            target.write_bytes(http_get(f'https://raw.githubusercontent.com/{REPO}/{BRANCH}/deploy/launcher/icon/{name}', timeout=20))
         except Exception as error:                             # noqa: BLE001 - a shortcut without icon still works
             log(f'could not fetch {name}: {error}')
             return
@@ -435,6 +466,11 @@ def main() -> int:
     print('GeckoPlotter is starting. Your browser opens in a moment.', flush=True)
     print(f'(If it does not, open {splash} yourself.)', flush=True)
     print('Keep this window open while you work. Close it to stop GeckoPlotter.\n', flush=True)
+    if not (HOME / 'icon.png').exists() and not os.environ.get('GECKO_SOURCE_ZIP'):
+        try:
+            (HOME / 'icon.png').write_bytes(http_get(f'https://raw.githubusercontent.com/{REPO}/{BRANCH}/deploy/launcher/icon/icon.png', timeout=6))
+        except Exception:                                      # noqa: BLE001 - the page works without it
+            pass
     if not os.environ.get('GECKO_NO_BROWSER'):
         webbrowser.open(splash)
     try:

@@ -59,6 +59,7 @@ def test_packages_are_reinstalled_only_when_the_requirements_change(launcher):
 def test_without_internet_the_latest_version_is_unknown_not_an_error(launcher, monkeypatch):
     monkeypatch.setattr(launcher, 'SOURCE_ZIP', None)
     monkeypatch.setattr(launcher.urllib.request, 'urlopen', lambda *a, **k: (_ for _ in ()).throw(OSError('offline')))
+    monkeypatch.setattr(launcher.shutil, 'which', lambda name: None)
     assert launcher.latest_sha() is None
 
 
@@ -106,3 +107,34 @@ def test_the_linux_shortcut_is_a_menu_entry(launcher, tmp_path, monkeypatch):
     launcher.create_shortcuts()
     entry = (tmp_path / 'share' / 'applications' / 'geckoplotter.desktop').read_text()
     assert 'Name=GeckoPlotter' in entry and 'start-linux.sh' in entry and 'icon.png' in entry
+
+
+def test_the_version_comes_from_the_git_refs_when_the_github_api_refuses(launcher, monkeypatch):
+    monkeypatch.setattr(launcher, 'SOURCE_ZIP', None)
+    sha = 'ab' * 20
+    listing = f'001e# service=git-upload-pack\n0000{sha} HEAD\x00caps\n{sha} refs/heads/main\n{"cd" * 20} refs/heads/other\n'.encode()
+
+    def fake(url, timeout=25, accept=None):
+        if 'api.github.com' in url:
+            raise OSError('403 rate limit')
+        return listing
+
+    monkeypatch.setattr(launcher, 'http_get', fake)
+    assert launcher.latest_sha() == sha
+
+
+def test_a_first_start_still_downloads_when_the_version_cannot_be_read(launcher, monkeypatch):
+    monkeypatch.setattr(launcher, 'latest_sha', lambda: None)
+    process = launcher.prepare()
+    try:
+        assert (launcher.APP / 'app.py').exists() and launcher.STATUS.url
+    finally:
+        process.terminate()
+        process.wait(timeout=10)
+
+
+def test_curl_is_the_second_try_when_python_cannot_connect(launcher, monkeypatch):
+    monkeypatch.setattr(launcher.urllib.request, 'urlopen', lambda *a, **k: (_ for _ in ()).throw(OSError('cert')))
+    monkeypatch.setattr(launcher.shutil, 'which', lambda name: '/usr/bin/curl')
+    monkeypatch.setattr(launcher.subprocess, 'run', lambda cmd, **k: type('R', (), {'returncode': 0, 'stdout': b'ok', 'stderr': b''})())
+    assert launcher.http_get('https://example.org/x') == b'ok'
