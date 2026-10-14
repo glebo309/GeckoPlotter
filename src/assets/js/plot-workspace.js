@@ -78,7 +78,8 @@
             if (pub) pub.style.display = 'none';
         }
         var current = plots.get(id);
-        if (current) {
+        // A canvas not drawn yet (a tab drawn from the upload) is announced by preview() once Plotly has drawn it.
+        if (current && current.gd._fullLayout) {
             resize(current.gd);
             if (mirror && (changed || current.needsMirror) && current.figure) {
                 current.needsMirror = false;
