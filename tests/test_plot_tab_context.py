@@ -68,7 +68,7 @@ def test_tab_selection_refreshes_data_overview_for_that_file(monkeypatch):
     file_id,_=functions['restore_file_on_tab_switch']('chrom',{},'blue',{},tabs)
     table,data,metadata=functions['sync_table_to_active_file'](file_id,'data-overview')
     assert table==['Time (min)']
-    assert json.loads(data)['columns']==['Time (min)']
+    assert [c for c in data['columns'] if c!='_row_id']==['Time (min)']
 
 
 def test_cleared_selection_cannot_leave_previous_data_table_visible(monkeypatch):

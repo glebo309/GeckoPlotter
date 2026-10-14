@@ -34,7 +34,7 @@ def test_tree_click_defers_large_table_output_to_single_active_file_owner(monkey
     table,data,metadata=functions['sync_table_to_active_file']('target','data-overview')
     assert calls==[['_row_id','Time','Signal']]
     assert table=='editor' and metadata=='metadata'
-    assert json.loads(data)['columns']==['_row_id','Time','Signal']
+    assert data['columns']==['_row_id','Time','Signal']
     assert memories['target']['x']['data']['column_id']=='Time'
 
 
@@ -46,7 +46,7 @@ def test_single_table_owner_keeps_multiwell_visibility_and_selected_well(monkeyp
     dm.visibility_state={'target|B':False}
     for fid,expected in [('target',['_row_id','Time','A']),('target|B',['_row_id','Time','B'])]:
         table,data,_=functions['sync_table_to_active_file'](fid,'data-overview')
-        assert json.loads(data)['columns']==expected
+        assert data['columns']==expected
 
     assert memories['target|B']['y1']['series'][0]['column_id'] == 'B'
 

@@ -51,6 +51,8 @@ tabs = next(n for n in nodes if getattr(n,'id',None)=='analysis-tabs')
 nav = tabs.children[0]
 print(json.dumps({
     'keepMounted':tabs.keepMounted,
+    'selected':tabs.value,
+    'active_tab_store':next(n for n in nodes if getattr(n,'id',None)=='active-tab').data,
     'ids':[n.id for n in nodes if isinstance(getattr(n,'id',None),str)],
     'tabs':[{'value':n.value,'label':n.children,'style':getattr(n,'style',{})}
             for n in walk(nav) if type(n).__name__=='TabsTab'],
@@ -67,6 +69,11 @@ print(json.dumps({
 '''
     result = subprocess.run([sys.executable,'-B','-c',script],capture_output=True,text=True,check=True)
     return json.loads(result.stdout)
+
+
+def test_results_pane_opens_on_peaks_so_the_data_table_is_built_only_when_asked(analysis_navigation):
+    assert analysis_navigation['selected'] == 'peak-analysis'
+    assert analysis_navigation['active_tab_store'] == 'peak-analysis'
 
 
 def test_results_pane_holds_the_tables_and_the_views_panel_holds_the_signal_views(analysis_navigation):

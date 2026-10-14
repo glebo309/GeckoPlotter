@@ -60,7 +60,7 @@ def register_context_callbacks(app, data_manager):
         next_state = {
             **current_state,
             'view_mode': view_mode or 'raw',
-            'active_tab': active_tab or 'data-overview',
+            'active_tab': active_tab or 'peak-analysis',
             'toolbox_tab': toolbox_tab or 'plot-tools',
             'dev_settings': dev_settings or {'show': False},
         }

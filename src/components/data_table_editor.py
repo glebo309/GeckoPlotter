@@ -18,18 +18,24 @@ from components.table_styles import (
 log = logging.getLogger(__name__)
 
 def create_data_table_editor(df=None, table_id='pub-table', default_selected_columns=None,
-                             sheet_names=None, active_sheet=None):
+                             sheet_names=None, active_sheet=None, source=None):
     """Create an editable data table with cell selection capabilities.
+
+    The rows stay on the server (services/table_store.py): the table is created empty and the Data tab asks for one
+    page at a time while it is shown.
 
     Args:
         default_selected_columns: list of column IDs to pre-select (header highlight).
+        source: the table_store reference of ``df``; made here when not given.
     """
-    
+    from services import table_store
+
     if df is None:
         # Empty state — includes a hidden empty DataTable so callbacks
         # referencing 'pub-table' never hit a nonexistent component.
         return html.Div([
             dcc.Store(id='active-sheet-name', data=None),
+            dcc.Store(id='pub-table-source', data=None),
             html.Div(
                 [
                     DashIconify(icon='tabler:table', width=36, height=36, style={'color': '#bbb'}),
@@ -49,12 +55,9 @@ def create_data_table_editor(df=None, table_id='pub-table', default_selected_col
     # Add row identifier if not present
     if '_row_id' not in df.columns:
         df.insert(0, '_row_id', range(len(df)))
-    
-    # DEBUG: Check data shape before creating table
-    log.debug(f"create_data_table_editor: df.shape = {df.shape}")
-    log.debug(f"Columns: {list(df.columns)}")
-    log.debug(f"First row: {df.iloc[0].to_dict() if len(df) > 0 else 'empty'}")
-    
+    if source is None:
+        source = table_store.remember(df)
+
     # Prepare data for table — mark columns as selectable/deletable/renamable
     # (except _row_id which is internal). This is critical for column header
     # click-to-select to work with column_selectable='single'.
@@ -69,7 +72,6 @@ def create_data_table_editor(df=None, table_id='pub-table', default_selected_col
         }
         for col in df.columns
     ]
-    data_dict = df.to_dict('records')
 
     # Filter default_selected_columns to only include valid column IDs
     sel_cols = []
@@ -114,17 +116,21 @@ def create_data_table_editor(df=None, table_id='pub-table', default_selected_col
     # Return just the table - buttons are now in the toolbox (axis_mapper.py)
     return html.Div(sheet_tabs + [
         active_sheet_store,
+        dcc.Store(id='pub-table-source', data=source),
         dash_table.DataTable(
             id=table_id,
             columns=columns,
-            data=data_dict,
+            data=[],
             editable=True,
             cell_selectable=True,
             column_selectable='single',
             row_deletable=True,
-            sort_action='native',
-            page_size=50,
-            page_action='native',
+            sort_action='custom',
+            sort_by=[],
+            page_size=table_store.PAGE_SIZE,
+            page_current=0,
+            page_count=max(1, -(-len(df) // table_store.PAGE_SIZE)),
+            page_action='custom',
             selected_columns=sel_cols if sel_cols else [],
             style_table=TABLE_STYLE_TABLE,
             style_cell=TABLE_STYLE_CELL,

@@ -289,11 +289,11 @@ def register_ms_context_menu_callbacks(app: dash.Dash, data_manager) -> None:
                 try:
                     from callbacks.viz_callbacks import prepare_table_data
                     from components.data_table_editor import create_data_table_editor
+                    from services import table_store
                     table_data = prepare_table_data(file_data, file_id=bundle_id)
+                    pub_data = table_store.remember(table_data)
                     table_editor = create_data_table_editor(
-                        table_data, table_id='pub-table')
-                    pub_data = (table_data.to_json(orient='split')
-                                if table_data is not None else None)
+                        table_data, table_id='pub-table', source=pub_data)
                 except Exception:
                     log.exception("Error building table editor")
 

@@ -78,7 +78,8 @@ def _visibility_button(file_id, data_manager=None):
 def build_active_file_views(data_manager, file_id):
     """Metadata table, table editor and publication data of one file, as shown right after an import or restore.
 
-    Returns ``(metadata_children, table_editor, pub_data_json)``; the first is ``dash.no_update`` when the file
+    Returns ``(metadata_children, table_editor, pub_data)``, pub_data being the table_store reference of the table;
+    the first is ``dash.no_update`` when the file
     has no data.
     """
     auto_table, table_editor, pub_data = dash.no_update, None, None
@@ -100,14 +101,16 @@ def build_active_file_views(data_manager, file_id):
     from callbacks.viz_callbacks import prepare_table_data
     from components.data_table_editor import create_data_table_editor
 
+    from services import table_store
+
     table_data = prepare_table_data(file_data, file_id=file_id)
     sheet_names = file_data.get('metadata', {}).get('sheet_names')
     active_sheet = file_data.get('metadata', {}).get('active_sheet')
+    pub_data = table_store.remember(table_data)
     table_editor = create_data_table_editor(
         table_data, table_id='pub-table',
-        sheet_names=sheet_names, active_sheet=active_sheet,
+        sheet_names=sheet_names, active_sheet=active_sheet, source=pub_data,
     )
-    pub_data = table_data.to_json(orient='split') if table_data is not None else None
     return auto_table, table_editor, pub_data
 
 

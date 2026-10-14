@@ -25,6 +25,7 @@ from components.axis_mapper import get_empty_selections, selector_button_style, 
 from components.data_table_editor import transpose_dataframe, create_data_table_editor
 from components.publication_plot import create_publication_plot
 from services.plot_settings_service import PlotSettings, PlotSettingsService
+from services import table_store
 
 
 def canon_selector(obj):
@@ -182,14 +183,15 @@ def register_publication_callbacks(app: dash.Dash, data_manager) -> None:
         [State('peak-shared-selections', 'data'),
          State('cross-shared-selections', 'data'),
          State('peak-table-store', 'data'),
-         State('cross-sample-table-store', 'data')],
+         State('cross-sample-table-store', 'data'),
+         State('pub-table-source', 'data')],
         prevent_initial_call=True
     )
     def load_selections_for_context(active_file, file_ui_state, active_tab,
-                                     peak_shared_sel, cross_shared_sel, peak_json, cross_json):
+                                     peak_shared_sel, cross_shared_sel, peak_json, cross_json, table_source=None):
         """Route the correct selections into pub-selections based on active tab.
 
-        - data-overview / metadata: load per-file selections
+        - data-overview / metadata: load per-file selections (and, on a tab switch, the file's table)
         - peak-analysis / across-samples: load tab-specific shared selections + matching data
         """
         ctx = callback_context
@@ -250,7 +252,9 @@ def register_publication_callbacks(app: dash.Dash, data_manager) -> None:
         y1_series = [s.get('column_id') for s in file_selections.get('y1', {}).get('series', []) if s.get('column_id')]
         log.debug(f"📋 FILE LOAD → per-file selections ({active_file[:8]}): X={x_col}, Y1={y1_series}")
 
-        return file_selections, dash.no_update
+        # Back from a shared tab, pub-data-store still holds that tab's table.
+        data = table_source if 'active-tab' in trigger_id and table_source else dash.no_update
+        return file_selections, data
     
     # Update table highlighting when selections or active selector change.
     # IMPORTANT: This is the ONLY callback that writes to pub-table.style_data_conditional.
@@ -260,22 +264,27 @@ def register_publication_callbacks(app: dash.Dash, data_manager) -> None:
     @app.callback(
         Output('pub-table', 'style_data_conditional', allow_duplicate=True),
         [Input('pub-selections', 'data'),
-         Input('active-selector', 'data')],
+         Input('active-selector', 'data'),
+         Input('pub-table', 'data')],
         [State('pub-data-store', 'data'),
-         State('active-file', 'data')],
+         State('active-file', 'data'),
+         State('pub-table', 'style_data_conditional')],
         prevent_initial_call=True
     )
-    def update_table_highlighting(selections, active_selector, data_json, active_file):
-        """Update table cell highlighting based on current selections and active selector."""
+    def update_table_highlighting(selections, active_selector, page_rows, data_json, active_file, current=None):
+        styles = _table_highlighting(selections, active_selector, page_rows, data_json, active_file)
+        # An edited cell keeps its focus: rewriting the same rules would reset the table's selection.
+        return dash.no_update if styles == current else styles
+
+    def _table_highlighting(selections, active_selector, page_rows, data_json, active_file):
+        """Update table cell highlighting based on current selections and active selector.
+
+        Only rows on the shown page get a rule: a whole-column selection holds every row id of the table.
+        """
         if not selections or not data_json:
             return [{'if': {'column_id': '_row_id'}, 'display': 'none'}]
 
-        import pandas as pd
-
-        try:
-            df = pd.read_json(io.StringIO(data_json), orient='split')
-        except Exception:
-            return [{'if': {'column_id': '_row_id'}, 'display': 'none'}]
+        shown = {row.get('_row_id') for row in (page_rows or []) if isinstance(row, dict)}
 
         sel_file = selections.get('file_id', 'MISSING') if isinstance(selections, dict) else 'NOT_DICT'
         if active_file and isinstance(selections, dict) and sel_file != active_file:
@@ -296,6 +305,8 @@ def register_publication_callbacks(app: dash.Dash, data_manager) -> None:
             if not row_ids or not column_id:
                 return
             for rid in row_ids:
+                if rid not in shown:
+                    continue
                 condition = {
                     'if': {'filter_query': f'{{_row_id}} = {rid}', 'column_id': column_id},
                     'backgroundColor': bg_color,
@@ -686,60 +697,61 @@ def register_publication_callbacks(app: dash.Dash, data_manager) -> None:
                 selected_cells, selected_columns, active_cell)
     
     # Table row addition
+    # Rows and columns are added to the full table on the server, never to the page the browser shows.
     @app.callback(
-        [Output('pub-table', 'data', allow_duplicate=True),
-         Output('pub-data-store', 'data', allow_duplicate=True)],
+        [Output('pub-table-source', 'data', allow_duplicate=True),
+         Output('pub-data-store', 'data', allow_duplicate=True),
+         Output('pub-table', 'page_current', allow_duplicate=True)],
         Input('add-row', 'n_clicks'),
-        State('pub-table', 'data'),
+        [State('pub-table-source', 'data'),
+         State('pub-table', 'page_size')],
         prevent_initial_call=True
     )
-    def add_new_row(n_clicks, table_data):
-        if not table_data:
-            return dash.no_update, dash.no_update
-        
-        df = pd.DataFrame(table_data)
-        
+    def add_new_row(n_clicks, source, page_size):
+        df = table_store.frame(source)
+        if df is None or len(df.columns) == 0:
+            return dash.no_update, dash.no_update, dash.no_update
+
         # Create new empty row with next _row_id
-        new_row_id = df['_row_id'].max() + 1 if len(df) > 0 else 0
+        new_row_id = int(df['_row_id'].max()) + 1 if len(df) > 0 else 0
         new_row = {'_row_id': new_row_id}
-        
+
         # Add empty values for all other columns
         for col in df.columns:
             if col != '_row_id':
                 new_row[col] = ''
-        
-        # Append new row
+
         df = pd.concat([df, pd.DataFrame([new_row])], ignore_index=True)
-        
-        return df.to_dict('records'), df.to_json(orient='split')
-    
+        ref = table_store.remember(df)
+        last_page = (len(df) - 1) // (page_size or table_store.PAGE_SIZE)
+        return ref, ref, last_page
+
     # Table column addition
     @app.callback(
         [Output('table-editor-container', 'children', allow_duplicate=True),
          Output('pub-data-store', 'data', allow_duplicate=True)],
         Input('add-column', 'n_clicks'),
-        State('pub-table', 'data'),
+        State('pub-table-source', 'data'),
         prevent_initial_call=True
     )
-    def add_new_column(n_clicks, table_data):
-        if not table_data:
+    def add_new_column(n_clicks, source):
+        df = table_store.frame(source)
+        if df is None or len(df.columns) == 0:
             return dash.no_update, dash.no_update
-        
-        df = pd.DataFrame(table_data)
-        
+
         # Find next available column name
         col_num = 1
         while f'New_Column_{col_num}' in df.columns:
             col_num += 1
-        
+
         new_col_name = f'New_Column_{col_num}'
         df[new_col_name] = ''
-        
-        # Create updated table using the component
-        table_editor = create_data_table_editor(df, table_id='pub-table')
-        
-        return table_editor, df.to_json(orient='split')
-    
+
+        ref = table_store.remember(df)
+        table_editor = create_data_table_editor(df, table_id='pub-table', source=ref)
+
+        return table_editor, ref
+
     # Transpose data
     @app.callback(
         [Output('pub-data-store', 'data', allow_duplicate=True),
@@ -751,17 +763,60 @@ def register_publication_callbacks(app: dash.Dash, data_manager) -> None:
         prevent_initial_call=True
     )
     def transpose_data(n_clicks, data_json, y1_count):
-        if not data_json:
+        df = table_store.frame(data_json)
+        if df is None:
             return dash.no_update
-        
-        df = pd.read_json(io.StringIO(data_json), orient='split')
+
         df_transposed = transpose_dataframe(df)
-        
+        ref = table_store.remember(df_transposed)
+
         # Create new table
-        table_editor = create_data_table_editor(df_transposed, table_id='pub-table')
-        
+        table_editor = create_data_table_editor(df_transposed, table_id='pub-table', source=ref)
+
         # Clear selections after transpose
-        return df_transposed.to_json(orient='split'), table_editor, get_empty_selections(y1_count)
+        return ref, table_editor, get_empty_selections(y1_count)
+
+    # The Data table holds one page. It is filled only while the Data tab is shown; paging and sorting ask the
+    # server for the rows, and edits on the page (cells, deleted rows or columns) are applied to the full table.
+    @app.callback(
+        [Output('pub-table', 'data'),
+         Output('pub-table', 'page_count'),
+         Output('pub-table', 'page_current'),
+         Output('pub-table-source', 'data', allow_duplicate=True),
+         Output('pub-data-store', 'data', allow_duplicate=True)],
+        [Input('pub-table-source', 'data'),
+         Input('analysis-tabs', 'value'),
+         Input('pub-table', 'page_current'),
+         Input('pub-table', 'sort_by'),
+         Input('pub-table', 'data_timestamp'),
+         Input('pub-table', 'columns')],
+        [State('pub-table', 'data'),
+         State('pub-table', 'data_previous'),
+         State('pub-table', 'page_size'),
+         State('active-tab', 'data')],
+        prevent_initial_call='initial_duplicate'
+    )
+    def serve_table_page(source, shown_tab, page_current, sort_by, edited_at, columns,
+                         rows, previous, page_size, active_tab):
+        no = dash.no_update
+        triggers = {t['prop_id'] for t in callback_context.triggered} if callback_context.triggered else set()
+        edited = None
+        if source and 'pub-table.data_timestamp' in triggers:
+            edited = table_store.apply_page_edits(source, rows, previous)
+        if source and 'pub-table.columns' in triggers and columns is not None:
+            edited = table_store.drop_columns(edited or source, [c.get('id') for c in columns]) or edited
+        if edited:
+            store = edited if active_tab not in ('peak-analysis', 'across-samples') else no
+            if len(rows or []) >= len(previous or []):
+                return no, no, no, edited, store            # the page already shows the edit
+            page_rows, count, current = table_store.page(edited, page_current, page_size, sort_by)
+            return page_rows, count, (current if current != page_current else no), edited, store
+        if shown_tab != 'data-overview':
+            return no, no, no, no, no
+        if not source:
+            return [], 1, (0 if page_current else no), no, no
+        page_rows, count, current = table_store.page(source, page_current, page_size, sort_by)
+        return page_rows, count, (current if current != page_current else no), no, no
     
     # Save mapping
     @app.callback(
@@ -821,20 +876,19 @@ def register_publication_callbacks(app: dash.Dash, data_manager) -> None:
          Input('pub-table', 'selected_columns'),
          Input('pub-table', 'active_cell'),
          Input('y2-enable', 'checked'),
-         Input('clear-all', 'n_clicks'),
-         Input('pub-table', 'derived_virtual_data'),
-         Input('pub-table', 'data')],
-        [State('active-selector', 'data'),
+         Input('clear-all', 'n_clicks')],
+        [State('pub-table', 'data'),
+         State('pub-table', 'sort_by'),
+         State('pub-table-source', 'data'),
+         State('active-selector', 'data'),
          State('pub-selections', 'data'),
-         State('pub-data-store', 'data'),
          State('y1-series-count', 'data'),
          State('active-file', 'data'),
          State('active-tab', 'data')],
         prevent_initial_call=True
     )
     def update_selections(selected_cells, selected_columns, active_cell, y2_enabled, clear_clicks,
-                          virtual_data, table_data, active_selector, selections, data_json_unused, y1_count, active_file, active_tab):
-        import pandas as pd
+                          page_rows, sort_by, source, active_selector, selections, y1_count, active_file, active_tab):
         ctx = callback_context
         trigger_id = ctx.triggered[0]['prop_id'] if ctx.triggered else ''
 
@@ -846,23 +900,11 @@ def register_publication_callbacks(app: dash.Dash, data_manager) -> None:
         if active_tab in ('peak-analysis', 'across-samples'):
             return dash.no_update, dash.no_update
 
-        # ── Guard: when the table content changes because a different file was
-        # selected (trigger is pub-table.data or derived_virtual_data) and the
-        # user is NOT actively clicking cells, do NOT touch pub-selections.
-        # This prevents a race where a stale selections dict overwrites the
-        # freshly-loaded per-file selections from load_selections_for_file().
-        is_table_data_trigger = ('pub-table.data' in trigger_id or 'derived_virtual_data' in trigger_id)
+        # Edits reach pub-data-store through serve_table_page; this callback only maps cells to axes. Cell
+        # positions are rows of the shown page (page_rows), whole columns come from the full table (source).
         is_selection_trigger = ('selected_cells' in trigger_id or 'selected_columns' in trigger_id or 'active_cell' in trigger_id)
         is_clear = 'clear-all' in trigger_id
         is_y2 = 'y2-enable' in trigger_id
-
-        if is_table_data_trigger and not is_selection_trigger and not is_clear and not is_y2:
-            # Table data changed (file switch / edit) — only update the data store,
-            # leave selections untouched.
-            if table_data:
-                df = pd.DataFrame(table_data)
-                return dash.no_update, df.to_json(orient='split')
-            return dash.no_update, dash.no_update
 
         # ── Guard: bounce from table re-render.
         # After update_table_highlighting writes style_data_conditional the
@@ -884,17 +926,13 @@ def register_publication_callbacks(app: dash.Dash, data_manager) -> None:
             new_sel = get_empty_selections(y1_count)
             if active_file:
                 new_sel['file_id'] = active_file
-            if table_data:
-                df = pd.DataFrame(table_data)
-                return new_sel, df.to_json(orient='split')
-            return new_sel, None
+            return new_sel, source or None
 
-        if not table_data:
+        if not source:
             return selections, None
 
-        df_original = pd.DataFrame(table_data)
-        df_sorted = pd.DataFrame(virtual_data) if virtual_data else df_original.copy()
-        data_json = df_original.to_json(orient='split')
+        data_json = source
+        page = pd.DataFrame(page_rows or [])
 
         if isinstance(selections, dict) and active_file:
             selections.setdefault('file_id', active_file)
@@ -920,13 +958,12 @@ def register_publication_callbacks(app: dash.Dash, data_manager) -> None:
                 # Whole column selection - select only non-empty cells
                 if 'selected_columns' in trigger_id and selected_columns:
                     col_id = selected_columns[0]
-                    if col_id != '_row_id':
-                        non_empty_rows = []
-                        for _, row in df_sorted.iterrows():
-                            val = row[col_id]
-                            if pd.notna(val) and str(val).strip() != '':
-                                non_empty_rows.append(int(row['_row_id']))
-                        target['row_ids'] = non_empty_rows
+                    full = table_store.frame(source)
+                    if col_id != '_row_id' and full is not None and col_id in full.columns:
+                        full = table_store.sorted_frame(full, sort_by)
+                        values = full[col_id]
+                        filled = values.notna() & (values.astype(str).str.strip() != '')
+                        target['row_ids'] = [int(rid) for rid in full.loc[filled, '_row_id']]
                         target['column_id'] = col_id
 
                 # Individual cells (with shift-select support)
@@ -944,8 +981,8 @@ def register_publication_callbacks(app: dash.Dash, data_manager) -> None:
                         for cell in selected_cells:
                             if cell.get('column_id') == col_id:
                                 row_idx = cell.get('row')
-                                if row_idx is not None and 0 <= row_idx < len(df_sorted):
-                                    new_row_ids.add(int(df_sorted.iloc[row_idx]['_row_id']))
+                                if row_idx is not None and 0 <= row_idx < len(page) and '_row_id' in page:
+                                    new_row_ids.add(int(page.iloc[row_idx]['_row_id']))
 
                         existing = set(target['row_ids'])
                         if new_row_ids and new_row_ids.issubset(existing):
@@ -958,8 +995,8 @@ def register_publication_callbacks(app: dash.Dash, data_manager) -> None:
                     row_idx = active_cell.get('row')
                     col_id = active_cell.get('column_id')
                     if row_idx is not None and col_id and col_id != '_row_id':
-                        if 0 <= row_idx < len(df_sorted):
-                            row_id = int(df_sorted.iloc[row_idx]['_row_id'])
+                        if 0 <= row_idx < len(page) and '_row_id' in page:
+                            row_id = int(page.iloc[row_idx]['_row_id'])
                             if target.get('column_id') and col_id != target['column_id']:
                                 target['column_id'] = col_id
                                 target['row_ids'] = [row_id]
@@ -1068,7 +1105,13 @@ def register_publication_callbacks(app: dash.Dash, data_manager) -> None:
                 fig.update_layout(plot_bgcolor='white', paper_bgcolor='white', autosize=True)
                 return fig, time.time(), None
 
-            df = pd.read_json(io.StringIO(data_json), orient='split')
+            df = table_store.frame(data_json)
+            if df is None:
+                fig = go.Figure()
+                fig.add_annotation(text="Select data to plot", xref="paper", yref="paper",
+                                   x=0.5, y=0.5, showarrow=False, font=dict(size=14, color='#999'))
+                fig.update_layout(plot_bgcolor='white', paper_bgcolor='white', autosize=True)
+                return fig, time.time(), None
             if '_row_id' not in df.columns:
                 df.insert(0, '_row_id', range(len(df)))
 

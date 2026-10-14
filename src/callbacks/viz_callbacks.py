@@ -19,6 +19,7 @@ import plotly.graph_objects as go
 from services.plot_manager import PlotManager
 from services.data_store import DataStore as DataManager, BundleType
 from services.plot_smoothing import smooth_plotly_traces
+from services import table_store
 from services.metadata_display import group_metadata, measurement_summary
 from components.data_table_editor import create_data_table_editor
 from components.publication_plot import create_publication_plot
@@ -965,7 +966,9 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
             return dash.no_update, dash.no_update, dash.no_update, dash.no_update
 
         s = {**DEFAULT_PLOT_SETTINGS, **(settings or {})}
-        df = pd.read_json(io.StringIO(data_json), orient='split')
+        df = table_store.frame(data_json)
+        if df is None:
+            return dash.no_update, dash.no_update, dash.no_update, dash.no_update
         if '_row_id' not in df.columns:
             df.insert(0, '_row_id', range(len(df)))
 
@@ -1000,7 +1003,7 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
         entry = {
             'figure': fig.to_dict() if hasattr(fig, 'to_dict') else fig,
             'selections': selections,
-            'data_json': data_json,
+            'data_json': table_store.as_json(data_json),     # saved with the project: the data, not a reference
             'source_tab': source_tab,
         }
         if source_tab == 'across-samples' and peak_group_idx is not None:
@@ -1175,13 +1178,14 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
         initialise_file_selections(active_file, file_data, table_data)
         sheet_names = file_data.get('metadata', {}).get('sheet_names')
         active_sheet = file_data.get('metadata', {}).get('active_sheet')
+        source = table_store.remember(table_data)
         table_editor = create_data_table_editor(
             table_data, table_id='pub-table',
-            sheet_names=sheet_names, active_sheet=active_sheet,
+            sheet_names=sheet_names, active_sheet=active_sheet, source=source,
         )
         pub_data = dash.no_update
         if not on_shared_tab:
-            pub_data = table_data.to_json(orient='split') if table_data is not None else None
+            pub_data = source
 
         bundle = data_manager.get_bundle_by_id(active_file)
         if bundle:
@@ -1253,11 +1257,11 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
 
         table_data = prepare_table_data(file_data, file_id=active_file)
         sheet_names = file_data.get('metadata', {}).get('sheet_names')
+        pub_data = table_store.remember(table_data)
         table_editor = create_data_table_editor(
             table_data, table_id='pub-table',
-            sheet_names=sheet_names, active_sheet=clicked_sheet,
+            sheet_names=sheet_names, active_sheet=clicked_sheet, source=pub_data,
         )
-        pub_data = table_data.to_json(orient='split') if table_data is not None else None
         data_table = create_data_table(file_data)
 
         return (render_counter or 0) + 1, table_editor, pub_data, data_table
@@ -1335,8 +1339,9 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
                 import io as _io
                 s = {**DEFAULT_PLOT_SETTINGS, **(plot_settings or {})}
                 sel = entry['selections']
-                dj = entry['data_json']
-                df = pd.read_json(_io.StringIO(dj), orient='split')
+                df = table_store.frame(entry['data_json'])
+                if df is None:
+                    return plot_manager.create_empty_plot("Plot data not found"), no_zoom
                 if '_row_id' not in df.columns:
                     df.insert(0, '_row_id', range(len(df)))
 

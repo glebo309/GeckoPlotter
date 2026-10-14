@@ -284,7 +284,7 @@ class DataManager:
         return {
             'file_id': file_id,
             'view_mode': 'raw',
-            'active_tab': 'data-overview',
+            'active_tab': 'peak-analysis',
             'toolbox_tab': 'plot-tools',
             'plot_settings': {},
             'dev_settings': {'show': False},

@@ -163,7 +163,7 @@ _layout_body = html.Div(
         dcc.Store(id='loaded-files', data=[]),
         dcc.Store(id='active-file', data=None),
         dcc.Store(id='file-ui-state', data={}),
-        dcc.Store(id='active-tab', data='data-overview'),
+        dcc.Store(id='active-tab', data='peak-analysis'),
         dcc.Store(id='view-mode', data='raw'),
         dcc.Store(id='active-plot-context', data=None),
         dcc.Store(id='current-plot-settings', data={}),
@@ -1001,7 +1001,7 @@ _layout_body = html.Div(
                                                 # callbacks referencing pub-table/peak-table/etc. work off-tab.
                                                 dmc.Tabs(
                                                     id='analysis-tabs',
-                                                    value='data-overview',
+                                                    value='peak-analysis',
                                                     keepMounted=True,
                                                     className='tab-header',
                                                     style={'display': 'flex', 'flexDirection': 'column',
@@ -1032,6 +1032,7 @@ _layout_body = html.Div(
                                                             # Empty pub-table and sheet store must exist at startup
                                                             # so callbacks referencing them don't crash.
                                                             dcc.Store(id='active-sheet-name', data=None),
+                                                            dcc.Store(id='pub-table-source', data=None),
                                                             html.Div([
                                                                 dash_table.DataTable(
                                                                     id='pub-table',
@@ -1039,9 +1040,9 @@ _layout_body = html.Div(
                                                                     data=[],
                                                                     cell_selectable=True,
                                                                     column_selectable='single',
-                                                                    sort_action='native',
+                                                                    sort_action='custom',
                                                                     page_size=50,
-                                                                    page_action='native',
+                                                                    page_action='custom',
                                                                     style_table={'display': 'none'},
                                                                 ),
                                                                 html.Div(
@@ -2046,7 +2047,7 @@ def keep_signal_views_in_the_side_panel(tab_value):
     """The Results pane only has table tabs. A restored session or an old shortcut that asks for a signal view
     (Metadata, PDA, MS scan, EIC, Peak mass) opens it in the side panel instead."""
     if tab_value in SIDE_VIEWS:
-        return 'data-overview', tab_value
+        return 'peak-analysis', tab_value
     return dash.no_update, dash.no_update
 
 
@@ -2058,7 +2059,7 @@ def keep_signal_views_in_the_side_panel(tab_value):
 )
 def store_to_analysis_tab(active_tab, tab_value):
     """Reflect external active-tab changes (context restore, panel memory) into the UI."""
-    target = active_tab or 'data-overview'
+    target = active_tab or 'peak-analysis'
     if target != tab_value:
         return target
     return dash.no_update
@@ -2152,7 +2153,7 @@ def restore_panel_on_tab_switch(plot_tab, memory, current_panel, figures):
 
     Custom plot tabs always switch to their source panel (e.g. across-samples).
     Raw plot tabs restore the user's last panel choice, defaulting to
-    data-overview on first visit.
+    Peaks on first visit.
     """
     if not plot_tab:
         return dash.no_update
@@ -2162,7 +2163,7 @@ def restore_panel_on_tab_switch(plot_tab, memory, current_panel, figures):
             return target
         return dash.no_update
     memory = memory or {}
-    target = memory.get(plot_tab, 'data-overview')
+    target = memory.get(plot_tab, 'peak-analysis')
     if target and target != current_panel:
         return target
     return dash.no_update

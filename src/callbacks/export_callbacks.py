@@ -115,7 +115,8 @@ def register_export_callbacks(app: dash.Dash, data_manager) -> None:
         df = None
         if data_json:
             try:
-                df = pd.read_json(io.StringIO(data_json), orient='split')
+                from services import table_store
+                df = table_store.frame(data_json)
             except Exception:
                 pass
 

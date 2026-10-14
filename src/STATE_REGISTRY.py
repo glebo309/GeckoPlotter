@@ -118,7 +118,7 @@ STORE_REGISTRY: Dict[str, StoreEntry] = {
     ),
     StoreID.ACTIVE_TAB: StoreEntry(
         domain=StateDomain.PER_FILE,
-        default="data-overview",
+        default="peak-analysis",
         description="Current content tab (data-overview | peak-analysis | across-samples | metadata | calibration).",
         persisted_per_file=True,
     ),
