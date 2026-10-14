@@ -74,6 +74,9 @@ def register_pda_callbacks(app, data_manager):
     def show_pda_tab(active_file, loaded_files, analysis_tab):
         available = resolve_pda_source(data_manager, active_file) is not None
         style = {'flexShrink': 0, 'whiteSpace': 'nowrap', 'display': '' if available else 'none'}
+        # Opening Shimadzu data with a PDA matrix shows the PDA view straight away (an MS view chosen is kept).
+        if available and analysis_tab not in ('pda', 'ms-scan', 'ms-eic', 'ms-peak-mass'):
+            return style, 'pda'
         return style, 'metadata' if not available and analysis_tab == 'pda' else dash.no_update
 
     @app.callback(

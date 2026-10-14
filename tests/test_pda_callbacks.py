@@ -242,3 +242,11 @@ def test_extract_pda_views_raises_value_error_for_non_finite_wavelength(value):
     _, pda = resolve_pda_source(setup(), 'source')
     with pytest.raises(ValueError):
         extract_pda_views(pda, value)
+
+
+def test_opening_pda_data_shows_the_pda_view_unless_an_ms_view_was_chosen(monkeypatch):
+    _, fns = callbacks(monkeypatch, 'active-file.data')
+    style, selected = fns['show_pda_tab']('sibling', [], 'metadata')
+    assert style['display'] == '' and selected == 'pda'
+    assert fns['show_pda_tab']('sibling', [], 'pda')[1] is dash.no_update
+    assert fns['show_pda_tab']('sibling', [], 'ms-scan')[1] is dash.no_update
