@@ -383,3 +383,28 @@ def test_switching_a_channel_on_keeps_a_hidden_sample_hidden_until_it_is_shown()
     assert store.visibility_state['a263'] is True       # visible samples get the channel at once
     set_sample_visibility(store, 'b', True)
     assert store.visibility_state['b263'] is True       # and b shows it when it comes back
+
+
+def test_plot_switches_show_the_tabs_own_channels_and_toggle_them_in_every_run():
+    from callbacks.file_tree_callbacks import register_file_tree_callbacks
+    from callbacks.viz_callbacks import _get_overlay_group, _tab_id_from_group
+    store = DataStore()
+    for name, nm in (('lys', 280), ('blank', 214)):
+        items = [signal(name + 'pos', role=ComponentRole.MS_POSITIVE, category=SourceCategory.LCMS_MS),
+                 signal(name + 'uv', nm, ComponentRole.VWD_A, SourceCategory.LCMS_UV),
+                 signal(name + 'uv250', 250, ComponentRole.VWD_B, SourceCategory.LCMS_UV)]
+        store.add_bundle(Bundle(name, name, BundleType.LCMS, component_list=items))
+    class App:
+        functions = {}
+        def callback(self, *args, **kwargs):
+            def wrap(fn): self.functions[fn.__name__] = fn; return fn
+            return wrap
+    app = App(); register_file_tree_callbacks(app, store)
+    entry = store.get_data_by_id('lys')
+    tab = _tab_id_from_group(_get_overlay_group(entry['metadata'], entry, 'lys', store))
+    controls = app.functions['update_plot_channel_controls']([], tab, 'raw')
+    labels = [getattr(n, 'data-channel-label') for n in controls.children]
+    assert labels == ['+TIC', '250 nm', '280 nm']                  # no 214 nm: that run is not in this tab
+    from services.channel_visibility import group_bundle_ids, toggle_channel
+    toggle_channel(store, group_bundle_ids(store, tab), 'uv:250')
+    assert store.visibility_state['lysuv250'] == store.visibility_state['blankuv250']

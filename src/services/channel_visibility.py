@@ -75,15 +75,16 @@ def visible_component_id(store, bundle, active_file=None):
     return visible[0] if visible else (bundle.primary.component_id if bundle.primary else None)
 
 
-def group_bundle_ids(store, group_id):
-    """LC-MS channel controls span runs while their plot groups remain separate."""
+def group_bundle_ids(store, group_id, span=True):
+    """LC-MS channel controls span runs while their plot groups remain separate: a channel ticked in one run's tab is
+    ticked in every run that has it. ``span=False``: only the samples of this group (what the tab shows)."""
     from callbacks.viz_callbacks import _get_overlay_group, _tab_id_from_group
     selected = []
     for bundle in store.iter_bundles():
         entry = store.get_data_by_id(bundle.bundle_id)
         if entry and _tab_id_from_group(_get_overlay_group(entry['metadata'], entry, bundle.bundle_id, store)) == group_id:
             selected.append(bundle.bundle_id)
-    if any(_value(store.get_bundle(b).bundle_type) == 'lcms' for b in selected):
+    if span and any(_value(store.get_bundle(b).bundle_type) == 'lcms' for b in selected):
         return [b.bundle_id for b in store.iter_bundles() if _value(b.bundle_type) == 'lcms']
     return selected
 
