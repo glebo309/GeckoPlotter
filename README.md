@@ -1,201 +1,184 @@
-# GeckoPlotter
+<p align="center">
+  <img src="src/assets/logo.svg" width="76" alt="GeckoPlotter logo">
+</p>
 
-A browser-based scientific data workstation for chromatography, spectroscopy, and kinetics data. Upload files from any instrument, overlay and compare traces, pick and integrate peaks, and export publication-ready figures.
+<h1 align="center">GeckoPlotter</h1>
 
-Built with [Dash](https://dash.plotly.com/) + [Plotly](https://plotly.com/python/) + [Dash Mantine Components](https://www.dash-mantine-components.com/).
+<p align="center"><strong>Explore instrument data, integrate peaks, and build figures you can keep editing.</strong></p>
 
-![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)
+<p align="center">
+  <a href="#get-started">Get started</a> ·
+  <a href="#try-the-examples">Try the examples</a> ·
+  <a href="#supported-formats">Supported formats</a> ·
+  <a href="docs/AGENT.md">Agent interface</a> ·
+  <a href="#from-anyplot-to-geckoplotter">Project history</a>
+</p>
 
-## Quick Start
+![GeckoPlotter workspace showing three overlaid synthetic reaction-progress traces, named peaks, integration controls, and the peak table](docs/images/chromatogram-workspace.png)
 
-```bash
-pip install -r requirements.txt
-python app.py
-```
+*Compare samples in one workspace, inspect peak areas, and adjust the analysis directly on the plot. The screenshots use the downloadable synthetic examples below.*
 
-Open http://127.0.0.1:8052 and drag files onto the drop zone.
+GeckoPlotter is a scientific data workstation that runs on your computer and opens in your browser. It brings HPLC, LC-MS, PDA, UV-Vis, and kinetics data into a shared workspace, from the original instrument files through integration, calibration, and figure export. Save the whole analysis as a `.gecko` project, or prepare a FAIR-data package containing the sources, results, processing history, and figures.
 
-### Install for the group (one click)
+Built by [Glenn Bojanov](https://github.com/glebo309) for day-to-day laboratory work. This is the third generation of the project, rebuilt with Dash and Plotly after [AnyPlot](https://github.com/glebo309/anyplot-archive) and [GeckoPlotter for Streamlit](https://github.com/glebo309/geckoplotter-streamlit). Development is active.
 
-Download [GeckoPlotter-Launcher.zip](https://github.com/glebo309/GeckoPlotter/raw/main/deploy/launcher/GeckoPlotter-Launcher.zip),
-unzip it, and double-click the start file for your system (`start-windows.bat`, `start-mac.command` or `start-linux.sh`). The first start installs a private Python and the packages (about 600 MB, a few minutes); every later start takes
-seconds and pulls the newest version from this repository's `main` branch by itself. Everything runs on that person's own
-computer, so it is as fast as their laptop. Nothing is installed system-wide and no admin rights are needed. Details and
-the first-run warnings (Windows SmartScreen, macOS "Open") are in `deploy/launcher/README.txt`; if the Start scripts change,
-rebuild the zip with `deploy/launcher/make-zip.sh`.
+## Work with your data
 
-### Run one shared copy on a server
+- **Compare runs.** Overlay traces or give them separate panes. Group related files, switch detector channels, link time axes, and control visibility from the file tree or legend.
+- **Integrate and identify peaks.** Detect automatically, draw a baseline, adjust an integration, rename a compound, or deconvolve overlapping peaks. Compare matching peaks across samples and fit calibration curves.
+- **Explore PDA and LC-MS.** Move through the time/wavelength matrix, preview a chromatogram at another wavelength, inspect UV spectra, extract ion chromatograms, and read mass spectra at a time point or over a peak.
+- **Make the figure.** Edit axes, colours, line styles, legends, and labels. Create a separate publication copy and export SVG, PDF, PNG, or TIFF at the chosen physical size and resolution.
+- **Continue tomorrow.** Save and reopen `.gecko` projects with sources, integrations, calibrations, and display settings. Autosave offers recovery; reusable recipes carry integration settings, named retention windows, and calibrations into another batch.
+- **Keep the analysis with the result.** Export original files, open tables, peak results, metadata, processing history, figures, and a readable report together in a FAIR-data ZIP.
 
-Everyone who opens a running copy gets a workspace of their own (a cookie in their browser): their files, peaks and
-autosaves are separate, and refreshing one page never touches another person's work. Idle workspaces are dropped from
-memory after 8 hours (the autosave stays on disk), and at most 12 are kept at once.
+### Inspect the full PDA measurement
 
-All calculations (reading `.lcd` files, integration, plots) run on the computer that hosts the app, the browser only
-draws. A shared copy is therefore as fast as the host: for heavy Shimadzu data it is quicker to run your own copy.
+![GeckoPlotter PDA explorer with a time-versus-wavelength heatmap, the spectrum at the selected retention time, and a live chromatogram preview](docs/images/pda-explorer.png)
+
+*Select a point in the heatmap to inspect its spectrum and chromatogram. Add a wavelength as a channel when you want to keep working with it.*
+
+Shimadzu LabSolutions `.lcd` files open directly with their PDA matrix, recorded channels, sample metadata, instrument status traces, and embedded method. Sectioned ASCII exports are supported too. Separate `.lcm` method files attach to matching samples, so method details stay with the analysis. See the [LCD reader notes](docs/LCD_FORMAT_NOTES.md) for the verified scope.
+
+## Get started
+
+### Download the launcher
+
+**[Download GeckoPlotter Launcher](https://github.com/glebo309/GeckoPlotter/raw/main/deploy/launcher/GeckoPlotter-Launcher.zip)**
+
+Unzip it, then open the start file for your system:
+
+| System | Start file |
+| --- | --- |
+| Windows | `start-windows.bat` |
+| macOS | `start-mac.command` |
+| Linux | `bash start-linux.sh` |
+
+The first start downloads a private Python environment and dependencies, about 600 MB. Later starts check for updates and open the app in your browser. No system-wide Python installation or administrator rights are needed. The launcher creates a GeckoPlotter shortcut for subsequent starts.
+
+See [launcher instructions](deploy/launcher/README.txt) for first-run opening prompts and log locations.
+
+### Run from source
 
 ```bash
 git clone https://github.com/glebo309/GeckoPlotter.git
 cd GeckoPlotter
-python3 -m venv .venv && source .venv/bin/activate
+python3 -m venv .venv
+source .venv/bin/activate
 pip install -r requirements.txt
 python app.py
 ```
 
-The repository is private: collaborators need to be added on GitHub first. Settings: `GECKO_PORT` (default 8052),
-`GECKO_HOST` (`0.0.0.0` makes it reachable from the local network), `GECKO_SLOW_MS` (log callbacks slower than this,
-default 500), `GECKO_DEBUG=1` (development only: slower in the browser, exposes the debugger).
-On Windows, `deploy/windows/run-gecko.bat` keeps it running and updated.
+On Windows, activate the environment with `.venv\Scripts\activate` instead. Open **http://127.0.0.1:8052** and drop your files into the workspace.
 
-## Supported Formats
+Static figure export uses Kaleido and requires a compatible Chrome installation.
 
-| Format | Instrument / Source | Extension |
-|--------|-------------------|-----------|
-| Chromeleon chromatogram | Thermo Chromeleon HPLC | `.txt` |
-| LC-MS (TIC + mass spectra) | Agilent/generic netCDF | `.cdf` |
-| LC-MS VWD (UV detector) | Agilent VWD netCDF | `.cdf` |
-| UV-Vis plate reader | SpectraMax, Tecan, Synergy H1 | `.csv` |
-| Cary kinetics | Agilent Cary 300/3500 | `.csv` |
-| Excel workbooks | Any | `.xlsx`, `.xls` |
-| Generic CSV | Any X/Y tabular data | `.csv` |
+### Try the examples
 
-Files are auto-detected by a three-stage ingestion pipeline (magic bytes, preset matching, heuristic fallback). Multi-file bundles (e.g. a Chromeleon sample with `.txt` + `.cdf` from the same injection) are grouped automatically.
+Start with the [example guide](docs/examples/README.md). All included data are synthetic and can be shared freely.
 
-## Features
+1. Open [reaction-progress.gecko](docs/examples/reaction-progress.gecko) for three named samples with integrated peaks, ready to inspect. Or import the [three CSV files](docs/examples/) to try the analysis yourself.
+2. Import [synthetic_pda.txt](docs/examples/synthetic_pda.txt), then open **PDA** in the right panel. Move through the heatmap, inspect the spectrum, and add a wavelength channel.
+3. Use **Publication** to make a figure copy, or **Export** to save a figure or FAIR-data package. Save your workspace as a `.gecko` project to reopen it later.
 
-### Data Viewing
-- **Multi-tab plot workspace** with auto-grouping by data type
-- **Overlay** or **subplot** layout modes with adjustable spacing
-- **File tree** with drag-and-drop reorder, group sorting, and visibility toggles
-- **Data table editor** with cell/column selection, transpose, and row/column add
+## Supported formats
 
-### Peak Analysis
-- **Automatic peak detection** (scipy) and **manual peak drawing**
-- **Right-click context menu** on peaks: delete, rename, deconvolve, cross-file integrate
-- **EMG peak deconvolution** via lmfit (one-click from context menu)
-- **Across Samples** tab for cross-file peak comparison
-- **Undo/redo** (50 levels) with Ctrl+Z / Ctrl+Shift+Z
+Support follows the contents and export layout, not just the filename extension. The table describes the implemented readers; a new instrument variant may need an adapter.
 
-### LC-MS
-- **TIC and EIC extraction** with target ion input
-- **Mass spectrum viewer** with scan cursor scrubber
-- **Scan line overlay** constrained to the MS Viewer tab
+| Format | Instrument / source | Extension | What is read |
+| --- | --- | --- | --- |
+| LabSolutions raw PDA data | Shimadzu LC/PDA | `.lcd` | PDA matrix, recorded wavelength channels, sample metadata, status traces, and embedded method |
+| LabSolutions sectioned ASCII | Shimadzu LC/PDA | `.txt`, `.asc` | Chromatograms, PDA matrix when present, sample metadata, exported peak tables, and status traces |
+| LabSolutions instrument method | Shimadzu | `.lcm` | Method metadata attached to matching samples, including gradient, flow, and oven settings |
+| Chromeleon chromatogram | Thermo Chromeleon HPLC | `.txt` | Chromatogram and supported exported metadata/peaks |
+| LC-MS netCDF | Agilent / compatible ANDI-MS exports | `.cdf` | TIC and scan-level mass spectra where present |
+| VWD netCDF | Agilent UV detector exports | `.cdf` | UV chromatogram and detector metadata |
+| OpenLAB trace CSV | Agilent `.dx_…` TIC / VWD exports | `.csv` | Exported TIC or UV trace; CSV traces alone do not contain full mass spectra |
+| Wavelength-by-well CSV | Plate-reader spectral exports | `.csv` | Wavelength axis and well spectra |
+| Cary kinetics | Agilent Cary 300/3500 exports | `.csv` | Time-series absorbance and supported metadata |
+| Excel workbook | Tabular data | `.xlsx`, `.xls` | Usable sheets with inferred X/Y columns; legacy `.xls` needs an installed pandas-compatible reader such as `xlrd` |
+| Delimited text | Generic X/Y data | `.csv`, `.txt`, `.tsv` | Tabular data through the generic detector |
+| GeckoPlotter project | Saved workspace | `.gecko` | Source data, analysis, calibration, and workspace state |
+| GeckoPlotter FAIR-data package | Exported research package | `.zip` | Reopens the included project when present |
+| Analysis recipe | Saved GeckoPlotter recipe | `.geckorecipe` | Integration settings, compound windows, and calibration models |
 
-### Plot Settings
-- **Axis labels** (editable, clearable, shared across subplots)
-- **Color palettes**: Okabe-Ito (colorblind-safe), Plotly, D3, Pastel, Crameri scientific (Batlow, Hawaii, Roma)
-- **Typography**: font family, sizes for title/ticks/labels
-- **Grid, frame, tick marks** with direction and minor tick control
-- **Legend** show/hide for all subplots, position presets
+Shimadzu `.lcb` batch files are not currently supported. The `.lcd` reader does not yet import LabSolutions' own processed peak tables or its LC-MS data. See [adding instrument formats](docs/ADDING_FORMATS.md) for the adapter contract and validation workflow.
 
-### Publication Export
-- **Send any plot** to a Publication tab (snapshot-based, one per click)
-- **Export formats**: PNG, SVG, TIFF (LZW, configurable DPI)
-- **Presentation preset**: 16:9 slide mock with title and bullet placeholders
-- **Subplot grid** with configurable rows/columns and zoom sync
+## Figures and research packages
 
-### Keyboard Shortcuts
+![Publication figure made from the synthetic reaction-progress example](docs/images/reaction-progress-figure.svg)
 
-| Key | Action |
-|-----|--------|
-| Delete / Backspace / X | Remove selected peak |
-| Ctrl+Z / Cmd+Z | Undo |
-| Ctrl+Shift+Z / Cmd+Shift+Z | Redo |
-| Escape | Deselect peak, exit draw/edit mode |
-| Left / Right arrows | Cycle through peaks |
-| S | Toggle overlay/subplot layout |
+*The figure and the editable workspace come from the same analysis.*
 
-## Architecture
+Figure export supports **SVG, PDF, PNG, and TIFF**, with physical dimensions and resolution controls. You can export the current view or work on a publication copy with its own styling.
 
-```
-app.py                  Dash layout + top-level callbacks
-src/
-  callbacks/            Event handling (19 modules, one per feature domain)
-  components/           UI component factories (axis mapper, data table, publication mock)
-  services/             Business logic and data models
-    readers/            File format readers (CSV, Chromeleon, netCDF)
-  ingestion/            Three-stage format detection pipeline
-    presets/            Instrument-specific format presets
-  assets/               CSS and client-side JavaScript
-tests/                  pytest suite (142 tests)
-```
+**Export → FAIR-data package** collects the analysis into one ZIP:
 
-### Design Principles
+- Original uploaded files and untouched parsed data.
+- Current tables and the exact source values used in the displayed figure.
+- Peak results, calibration models, metadata, and timestamped processing history.
+- Selected figure formats, checksums, a README, and an HTML report.
+- A reopenable `.gecko` project when it can be included, plus optional figure-regeneration code.
 
-**Format-agnostic pipeline.** Every file goes through the same three stages: detect (extension + magic bytes), match preset (Chromeleon, Cary, plate reader, LCMS, Excel), or fall back to a conservative generic heuristic. All paths output a `StandardizedResult` with typed column roles and plot hints. No downstream code touches raw file formats.
+Repository details let you add authors, identifiers, methods, funding, and licensing. Export prepares a local package; it does not deposit it in a repository or certify compliance. [Research export details](docs/RESEARCH_EXPORT.md)
 
-**Single render owner.** The `master_render` callback in `viz_callbacks.py` is the sole writer of `main-plot.figure`. All other callbacks communicate via `dcc.Store` data; only `master_render` reads the stores and produces the figure. This eliminates race conditions between plot-modifying callbacks.
+## Use from an agent or Python
 
-**Bundle-first data model.** `DataStore` groups related files into bundles (e.g. a Chromeleon `.txt` chromatogram with its `.cdf` mass spectrum). The UI shows bundles as single items; internally each component file has its own UUID. The `active-file` store always holds a real file UUID, never a bundle ID.
+The local **MCP interface** lets an agent open data, inspect samples, integrate peaks, extract ion chromatograms, read mass spectra, make a figure, and save a project. The result opens in GeckoPlotter for visual review and manual editing.
 
-**Per-file UI state.** Switching files restores the full UI context (zoom, selected tab, peak selection, panel layout) via `context_callbacks.py`. State is saved on switch-away and restored on switch-to, so each file feels like its own workspace.
+The agent works in its own workspace and hands the analysis over through a saved project. It does not control an already-open browser workspace. The same operations are available through the Python `Workspace` API for scripts and notebooks. [Setup, tools, and current limits](docs/AGENT.md)
 
-**Settings pipeline.** Plot settings flow through four callbacks: resolve context, hydrate controls from saved state, merge user edits into a normalized dict, persist to the data manager. `PlotSettingsService.apply_to_figure()` is the single entry point for styling any Plotly figure.
+## Everyday controls
 
-### Adding a New File Format
+| Action | Control |
+| --- | --- |
+| Zoom into a region | Drag on the plot |
+| Reset the view | Double-click |
+| Pan | Ctrl/Cmd-drag |
+| Integrate a peak | Shift-drag, or enable Integrate |
+| Edit an integration or figure element | Right-click for its menu |
+| Undo / redo | Ctrl/Cmd+Z / Ctrl/Cmd+Shift+Z |
+| Save / open a project | Ctrl/Cmd+S / Ctrl/Cmd+O |
+| Deselect or leave an editing mode | Escape |
 
-Follow [Adding instrument formats](docs/ADDING_FORMATS.md) for the current adapter contract, validation workflow, and Shimadzu ASCII example. Coding agents can use the local `$geckoplotter-format` skill, which points to that guide.
+## Run a shared copy
 
-A preset implements `sniff(path, head_bytes, head_lines)` and `parse(path)`, and is registered in `src/ingestion/presets/__init__.py`. The pipeline builds `StandardizedResult` from the parsed fields. New data dimensions may also need shared data capabilities and visible controls; verify upload, analysis, and export together.
+A running server gives each browser its own workspace, including files, peaks, and autosaves. Data parsing and calculations run on the host computer. For heavy data, running your own local copy avoids sharing the server's resources.
+
+| Setting | Purpose |
+| --- | --- |
+| `GECKO_PORT` | HTTP port, default `8052` |
+| `GECKO_HOST` | Bind address, default `127.0.0.1`; use `0.0.0.0` for local-network access |
+| `GECKO_SLOW_MS` | Log slow callbacks, default `500` ms |
+| `GECKO_DEBUG=1` | Enable the development debugger |
+
+Idle in-memory workspaces expire after eight hours; autosaves stay on disk. The registry keeps at most 12 in-memory workspaces. Deployment notes: [Windows](deploy/windows/README.md), [Linux](deploy/linux/README.md).
+
+## From AnyPlot to GeckoPlotter
+
+This project has grown through three generations:
+
+| Generation | Project | Milestone |
+| --- | --- | --- |
+| 1 | **[AnyPlot](https://github.com/glebo309/anyplot-archive)** | The first major milestone: a desktop HPLC viewer built with tkinter and Matplotlib, with overlays, peak integration, annotations, and figure export. |
+| 2 | **[GeckoPlotter for Streamlit](https://github.com/glebo309/geckoplotter-streamlit)** | The browser-based predecessor, expanding into LC-MS, calibration, and scientific analysis. |
+| 3 | **GeckoPlotter, this repository** | A Dash/Plotly workstation with linked detector views, editable analysis, persistent projects, publication figures, research packages, and an agent interface. |
+
+Both predecessors are archived. Older documentation and local folders may call the Dash application “V2”; counting AnyPlot, it is the third generation. The application is now substantially broader than the original chromatogram viewer.
 
 ## Development
 
 ```bash
-# Run tests
 pytest tests/ -q
-
-# Verify app imports cleanly (catches callback registration errors)
+node --test tests/js/*.test.cjs
 python -c "import app"
-
-# Run with debug mode
-python app.py
 ```
 
-### Dependencies
+The active application is `app.py`. Code lives in `src/`, with callbacks, UI components, shared services, and instrument-specific ingestion presets. Archived implementations are under `archive/`.
 
-| Package | Purpose |
-|---------|---------|
-| dash 3.0.4 | Web framework |
-| plotly 6.1+ | Interactive plots |
-| dash-mantine-components 2.3.0 | UI components |
-| pandas 2.0+ | Data handling |
-| numpy, scipy | Peak detection, smoothing, integration |
-| cdflib 1.3.1 | netCDF file reading (LC-MS) |
-| kaleido 1.0+ | Static figure export |
-| Pillow 10.0+ | TIFF export with DPI metadata |
-| lmfit | EMG peak deconvolution |
+Read the latest review in [ROADMAP.md](ROADMAP.md) for current work. The older sections are historical. Useful implementation references:
 
-## Roadmap
-
-### In Progress
-- [ ] Figure style presets (Prism, Nature, ACS, Angewandte, Presentation, Dark)
-- [ ] Focus mode (collapse panels when entering Publication tab)
-- [ ] Right-click context menus on figure elements (axes, title, body)
-- [ ] Click-to-edit axis labels and title on the figure
-
-### Planned
-- [ ] **Calibration UI** -- service exists, needs UI rebuild (multi-point table, weighted regression, LOD/LOQ)
-- [ ] **HMS data analysis** -- port from Streamlit version
-- [ ] **Session save/load** -- full project persistence
-- [ ] **Report generation** -- Jinja2 HTML templates, PDF via weasyprint, FAIR data export
-
-### Done (recent)
-- [x] Shared axis labels with centered Y annotation
-- [x] Subplot spacing slider
-- [x] Legend toggle for all subplots
-- [x] Publication snapshot workflow (send any plot to a new Publication tab)
-- [x] Persistence opt-in (no stale file_state.json on reload)
-- [x] Peak color stability for imported peaks
-- [x] Spectrum/plate reader CSV classification fix
-- [x] LC-MS scan cursor constrained to MS Viewer
-- [x] Crameri scientific color palettes
-- [x] DMC UI modernization
-- [x] Right-click peak context menu
-- [x] EMG peak deconvolution
-- [x] Format-agnostic ingestion pipeline
-- [x] Multi-tab plot workspace with bidirectional sync
-- [x] Undo/redo (50 levels)
-
-### Not Planned
-- System Suitability Testing (SST metrics)
-- Peak purity assessment (requires DAD/PDA data)
-- Live Data Selector plot updates (the "Create Plot" workflow is intentional)
+- [Instrument format adapters](docs/ADDING_FORMATS.md)
+- [Projects and session format](docs/SESSION_FORMAT.md)
+- [Reusable analysis recipes](docs/RECIPES.md)
+- [Research package contents](docs/RESEARCH_EXPORT.md)
+- [MCP and Python interface](docs/AGENT.md)
