@@ -24,3 +24,6 @@ dash-iconify>=0.1.2
 lmfit>=1.3  # peak deconvolution and tail fits
 netCDF4>=1.7  # LC-MS .cdf files
 openpyxl>=3.1  # .xlsx import and export
+
+# Agent interface (gecko_mcp.py): Claude and other MCP clients drive GeckoPlotter
+mcp>=2.3,<3

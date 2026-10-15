@@ -22,10 +22,7 @@ if not log.handlers:
     log.setLevel(logging.DEBUG)
 
 
-def sensitivity_threshold(value):
-    """Map a left-to-right sensitivity fader to a minimum height fraction."""
-    sensitivity = 50 if value is None else min(100, max(0, float(value)))
-    return max(.001, (100-sensitivity)/100)
+from services.detection import sensitivity_threshold  # noqa: E402,F401  (imported from here by older code)
 
 
 def register_integration_callbacks(app: dash.Dash, data_manager) -> None:
@@ -104,41 +101,9 @@ def register_integration_callbacks(app: dash.Dash, data_manager) -> None:
             log.debug("No plottable X/Y data for integration")
             return dash.no_update, "Select a signal with numeric X/Y data to detect peaks.", dash.no_update
 
-        smooth_window = (plot_settings or {}).get('smooth_window', 0)
-        effective_window = max(3, smooth_window) if smooth_window > 0 else 11
-
-        data_manager.integration_service.update_settings(
-            active_file,
-            smooth_window=effective_window,
-            smooth_poly_order=3,
-            baseline_method='snip',
-            baseline_iterations=40,
-            baseline_poly_order=5,
-            peak_threshold=sensitivity_threshold(sensitivity),
-            slope_threshold=0.001,
-            extension_factor=1.1,
-            min_peak_width=3,
-        )
-
-        processed = data_manager.integration_service.process_signal(
-            active_file, time_arr, signal_arr,
-        )
-
-        settings = data_manager.integration_service.get_settings(active_file)
-        data_manager.peak_service.save_undo()                   # Cmd/Ctrl-Z brings the previous peaks back
-        peaks = data_manager.peak_service.detect_peaks(
-            file_id=active_file,
-            signal=processed.corrected,
-            time_axis=processed.time,
-            threshold=settings.peak_threshold,
-            slope_threshold=settings.slope_threshold,
-            extension_factor=settings.extension_factor,
-            display_signal=processed.raw,
-            integration_baseline=baseline_mode or 'linear',
-        )
-
-        data_manager.peak_service.group_peaks_across_samples(
-            file_overlay_map=data_manager.build_file_overlay_map())
+        from services.detection import detect
+        peaks = detect(data_manager, active_file, time_arr, signal_arr, sensitivity,
+                       smooth_window=(plot_settings or {}).get('smooth_window', 0), baseline_mode=baseline_mode)
         log.debug(f"Detected {len(peaks)} peaks for {active_file}")
         from services.ms_polarity import entry_polarity
         polarity = entry_polarity(data_manager.get_data_by_id(active_file) or {})

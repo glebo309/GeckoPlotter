@@ -189,15 +189,28 @@ def register_upload_callbacks(app: dash.Dash, data_manager) -> None:
                 log.exception("Could not read the project file %s", project[1])
                 return (dash.no_update,) * 9
 
-        # LabSolutions method/data files (.lcm, .lcd) are not plotted: their instrument method is read and shown
-        # in the Metadata of the samples that used it.
+        # LabSolutions method files (.lcm) are not plotted: their instrument method is read and shown in the Metadata
+        # of the samples that used it. Everything else is parsed and grouped by services/workspace_loader, the same
+        # path an agent uses.
         from services.shimadzu_method import is_method_upload
-        method_uploads = [(c, f) for c, f in zip(contents_list, filenames) if is_method_upload(f)]
-        if method_uploads:
-            contents_list = [c for c, f in zip(contents_list, filenames) if not is_method_upload(f)]
-            filenames = [f for f in filenames if not is_method_upload(f)]
-            _register_methods(data_manager, method_uploads)
-            if not contents_list:
+        only_methods = all(is_method_upload(f) for f in filenames)
+
+        try:
+            from services.upload_stage import UploadError, read_contents, release
+            from services.workspace_loader import load_files
+            from services.data_store import BundleType
+
+            files = []
+            for contents, fname in zip(contents_list, filenames):
+                try:
+                    files.append((fname, read_contents(contents)))
+                except (ValueError, IndexError, UploadError) as e:
+                    log.error(f"Error reading {fname}: {e}")
+            for staged in contents_list:
+                release(staged)                 # the bytes now live in the workspace; do not hold them twice
+            loaded = load_files(data_manager, files)
+
+            if only_methods:
                 # Redraw: a gradient overlay that had no method to draw from can be drawn now.
                 redraw = (render_counter or 0) + 1
                 if active_file:
@@ -208,78 +221,14 @@ def register_upload_callbacks(app: dash.Dash, data_manager) -> None:
                         log.exception("Could not refresh the metadata after reading a method file")
                 return (dash.no_update,) * 6 + (redraw,) + (dash.no_update,) * 2
 
-        try:
-            import base64
-            import tempfile
-            from ingestion import ingest_file
-            from services.bundling_service import assign_bundles
-            from services.data_store import BundleType
-
-            parsed_files = []
-            failed_names = set()
-
-            for contents, fname in zip(contents_list, filenames):
-                try:
-                    from services.upload_stage import read_contents
-                    raw_bytes = read_contents(contents)
-
-                    tmp = tempfile.NamedTemporaryFile(delete=False, suffix=f"_{fname}")
-                    try:
-                        tmp.write(raw_bytes)
-                        tmp.close()
-                        sr = ingest_file(tmp.name, fname)
-                    finally:
-                        # Parsers read the whole file during ingestion and the original bytes stay in memory,
-                        # so the copy is not needed afterwards (it used to leak one full copy per upload).
-                        tmp.close()
-                        try:
-                            os.unlink(tmp.name)
-                        except OSError:
-                            pass
-                    if sr is None:
-                        log.warning(f"Pipeline could not parse {fname}")
-                        failed_names.add(fname)
-                        continue
-
-                    parsed_files.append((fname, raw_bytes, sr))
-                except Exception as e:
-                    log.error(f"Error parsing {fname}: {e}")
-                    failed_names.add(fname)
-
-            from services.upload_stage import release
-            for staged in contents_list:
-                release(staged)                 # the bytes now live in the workspace; do not hold them twice
-
-            if not parsed_files:
+            new_bundles = loaded.bundles
+            if not new_bundles:
                 return (dash.no_update,) * 9
 
-            new_bundles = assign_bundles(parsed_files)
-            # An .lcd carries the method it was run with: register it so the gradient overlay and the FAIR methods
-            # text work for it, exactly as for a dropped .lcm.
-            for lcd_name, lcd_bytes, _result in parsed_files:
-                if lcd_name.lower().endswith('.lcd'):
-                    _register_method_bytes(data_manager, lcd_bytes, lcd_name)
-
-            last_bundle_id = None
-            auto_layout_mode = dash.no_update
-            for bundle in new_bundles:
-                data_manager.add_bundle(bundle)
-                last_bundle_id = bundle.bundle_id
-                log.debug(f"Created bundle '{bundle.name}' ({bundle.bundle_type.value}) "
-                          f"with {len(bundle.component_list)} components")
-
-                if bundle.has_integration_data():
-                    _auto_import_peaks(data_manager, bundle)
-
-                if bundle.bundle_type == BundleType.LCMS and len(bundle.component_list) > 1:
-                    auto_layout_mode = 'stacked'
-
-            from services.detector_wavelengths import apply_remembered
-            apply_remembered(data_manager)                 # UV channels exported without their wavelength (VWD CSV)
-            from services.shimadzu_method import apply_methods
-            apply_methods(data_manager)
-            from services.channel_visibility import initialize_imported_channels, visible_component_id
-            initialize_imported_channels(data_manager, new_bundles)
+            last_bundle_id = new_bundles[-1].bundle_id
+            auto_layout_mode = 'stacked' if any(
+                b.bundle_type == BundleType.LCMS and len(b.component_list) > 1 for b in new_bundles) else dash.no_update
+            from services.channel_visibility import visible_component_id
             loaded_files = data_manager.get_loaded_files_list()
 
             last_bundle = data_manager.get_bundle(last_bundle_id) if last_bundle_id else None
@@ -308,7 +257,7 @@ def register_upload_callbacks(app: dash.Dash, data_manager) -> None:
             if plot_tab:
                 _first_paint(data_manager, plot_tab, group, auto_active_file, loaded_files, file_order)
 
-            log.debug(f"Upload complete: {len(new_bundles)} bundles from {len(parsed_files)} files")
+            log.debug(f"Upload complete: {len(new_bundles)} bundles from {len(files)} files")
             return (loaded_files, tree_items, auto_active_file, auto_table,
                     table_editor, pub_data, (render_counter or 0) + 1, auto_layout_mode, dash.no_update)
 
@@ -366,69 +315,8 @@ def register_upload_callbacks(app: dash.Dash, data_manager) -> None:
                                   active_file)
 
 
-def _register_method_bytes(data_manager, raw: bytes, name: str) -> int:
-    """Read the method in one .lcm/.lcd and attach it to the samples that used it. Returns the samples matched."""
-    from services.shimadzu_method import MethodFormatError, read_method, register_method
-    try:
-        matched = register_method(data_manager, read_method(raw, name), raw)
-    except (MethodFormatError, ValueError) as exc:
-        log.warning("Could not read the method in %s: %s", name, exc)
-        return 0
-    except Exception:
-        log.exception("Could not read the method in %s", name)
-        return 0
-    if matched:
-        log.info("Method in %s attached to %d sample(s)", name, matched)
-    else:
-        log.warning("%s was read but no loaded sample uses it", name)
-    return matched
-
-
-def _register_methods(data_manager, uploads) -> int:
-    """Read each uploaded .lcm and attach its method to the matching samples. Returns how many files were read."""
-    import base64
-    read = 0
-    for contents, name in uploads:
-        try:
-            from services.upload_stage import UploadError, read_contents
-            raw = read_contents(contents)
-        except (ValueError, IndexError, UploadError):
-            log.warning("Could not read %s", name)
-            continue
-        _register_method_bytes(data_manager, raw, name)
-        from services.upload_stage import release
-        release(contents)
-        read += 1
-    return read
-
-
-def _auto_import_peaks(data_manager, bundle):
-    """Import peaks from a Chromeleon Integration.txt component."""
-    try:
-        from callbacks.tab_callbacks import parse_integration_results
-        text = bundle.get_integration_text()
-        if not text:
-            return
-
-        parsed = parse_integration_results(text)
-        if not parsed:
-            return
-
-        time_arr, signal_arr = data_manager.get_xy_arrays(bundle.bundle_id)
-        if time_arr is None:
-            return
-
-        data_manager.peak_service.import_instrument_peaks(
-            file_id=bundle.bundle_id,
-            parsed_results=parsed,
-            time_axis=time_arr,
-            signal=signal_arr,
-        )
-        data_manager.peak_service.group_peaks_across_samples(
-            file_overlay_map=data_manager.build_file_overlay_map())
-        log.debug(f"Auto-imported {len(parsed)} peaks for bundle '{bundle.name}'")
-    except Exception as e:
-        log.warning(f"Could not auto-import peaks for '{bundle.name}': {e}")
+from services.workspace_loader import register_method_bytes as _register_method_bytes  # noqa: E402,F401
+from services.workspace_loader import auto_import_peaks as _auto_import_peaks  # noqa: E402,F401
 
 
 def render_file_tree_with_bundles(records: List[dict], data_manager) -> List[html.Div]:
