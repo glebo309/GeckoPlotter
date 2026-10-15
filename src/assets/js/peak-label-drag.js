@@ -1,6 +1,7 @@
-// Drag a peak's name in the plot to where it reads best. Near its place above the peak it snaps back there; with
-// Cmd (Ctrl) held a line leads from the peak's top to the name. The position is kept with the peak (peak-label-move
-// -> context_menu_callbacks.move_label_from_plot -> Peak.label_offset / label_leader) and saved with the project.
+// Drag a peak's name in the plot to where it reads best. A name moved away from its peak is joined to the peak's top
+// by a thin line; near its place above the peak it snaps back there. Right-click a name for its menu: connecting line
+// on/off, reset position, rename. The position is kept with the peak (peak-label-move ->
+// context_menu_callbacks.move_label_from_plot -> Peak.label_offset / label_leader) and saved with the project.
 (function () {
     'use strict';
     var SNAP = 14, START = 3;                 // px: back to centre within SNAP; a drag starts after START
@@ -26,7 +27,8 @@
         var offset = [drag.base[0] + dx, drag.base[1] - dy];
         var snapped = Math.hypot(offset[0], offset[1]) < SNAP;
         if (snapped) offset = [0, 0];
-        var leader = !snapped && (event.metaKey || event.ctrlKey);
+        // A name leaving its place gets the connecting line; one already moved keeps its own setting (menu).
+        var leader = !snapped && (drag.wasHome || drag.hit.leader);
         drag.offset = offset; drag.snapped = snapped; drag.leader = leader;
         var r = drag.rect;                     // the label where it was drawn, moved by the pointer (or snapped home)
         var cx = snapped && drag.home ? drag.home.x : r.left + r.width / 2 + dx;
@@ -67,7 +69,8 @@
         if (!hit) return;
         drag = {gd: gd, hit: hit, element: hit.element, rect: hit.element.getBoundingClientRect(),
                 startX: event.clientX, startY: event.clientY, base: (hit.offset || [0, 0]).slice(),
-                home: hit.home, moved: false, offset: hit.offset, leader: hit.leader};
+                home: hit.home, moved: false, offset: hit.offset, leader: hit.leader,
+                wasHome: !(hit.offset && (hit.offset[0] || hit.offset[1]))};
         event.preventDefault();               // no zoom box or integration drag from under the name
         event.stopPropagation();
         event.stopImmediatePropagation();
@@ -98,11 +101,59 @@
     document.addEventListener('pointercancel', function () { finish(true); }, true);
     document.addEventListener('keydown', function (event) {
         if (drag && event.key === 'Escape') finish(true);
-        if (drag && drag.moved && (event.key === 'Meta' || event.key === 'Control')) {
-            place({clientX: drag.lastX || drag.startX, clientY: drag.lastY || drag.startY, metaKey: true, ctrlKey: true});
-        }
+        if (menu && event.key === 'Escape') closeMenu();
     }, true);
-    document.addEventListener('pointermove', function (event) {
-        if (drag) { drag.lastX = event.clientX; drag.lastY = event.clientY; }
+
+    // ---- right-click menu of a name ----------------------------------------------------------------------------
+    var menu = null;
+    function closeMenu() { if (menu) { menu.remove(); menu = null; } }
+    function send(hit, offset, leader) {
+        if (window.dash_clientside) window.dash_clientside.set_props('peak-label-move', {data: {
+            peak_id: hit.peakId, offset: offset, leader: !!leader, ts: Date.now()}});
+    }
+    function item(label, enabled, action, checked) {
+        var button = document.createElement('button');
+        button.type = 'button';
+        button.className = 'gecko-menu-item' + (checked ? ' checked' : '');
+        button.setAttribute('role', checked === undefined ? 'menuitem' : 'menuitemcheckbox');
+        if (checked !== undefined) button.setAttribute('aria-checked', String(!!checked));
+        button.textContent = label;
+        button.disabled = !enabled;
+        button.addEventListener('click', function () { closeMenu(); action(); });
+        return button;
+    }
+    function openMenu(gd, hit, event) {
+        closeMenu();
+        var moved = !!(hit.offset && (hit.offset[0] || hit.offset[1]));
+        menu = document.createElement('div');
+        menu.className = 'gecko-menu peak-label-menu';
+        menu.setAttribute('role', 'menu');
+        menu.appendChild(item('Connecting line', moved, function () { send(hit, hit.offset, !hit.leader); }, moved && hit.leader));
+        menu.appendChild(item('Reset position', moved, function () { send(hit, null, false); }));
+        var divider = document.createElement('div');
+        divider.className = 'gecko-menu-divider';
+        menu.appendChild(divider);
+        menu.appendChild(item('Rename…', true, function () { window.GeckoFigureLabels.begin(gd, hit); }));
+        if (!moved) {
+            var note = document.createElement('div');
+            note.className = 'peak-label-menu-note';
+            note.textContent = 'Drag the name to move it';
+            menu.insertBefore(note, menu.firstChild);
+        }
+        document.body.appendChild(menu);
+        menu.style.left = Math.min(event.clientX, window.innerWidth - menu.offsetWidth - 8) + 'px';
+        menu.style.top = Math.min(event.clientY, window.innerHeight - menu.offsetHeight - 8) + 'px';
+    }
+    document.addEventListener('contextmenu', function (event) {
+        var gd = event.target.closest && event.target.closest('.js-plotly-plot');
+        var hit = gd && window.GeckoFigureLabels && window.GeckoFigureLabels.peakLabelAt(gd, event);
+        if (!hit) return;
+        event.preventDefault();               // the name's own menu, not the plot's
+        event.stopPropagation();
+        event.stopImmediatePropagation();
+        openMenu(gd, hit, event);
+    }, true);
+    document.addEventListener('pointerdown', function (event) {
+        if (menu && !menu.contains(event.target)) closeMenu();
     }, true);
 })();

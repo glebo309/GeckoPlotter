@@ -124,3 +124,6 @@
 .peak-label-ghost { position: fixed; z-index: 5000; pointer-events: none; font: 10px "Open Sans", verdana, arial, sans-serif;
     color: #333; white-space: nowrap; padding: 0 1px; border-radius: 2px; cursor: grabbing; }
 .peak-label-ghost.snapped { color: #2c7a52; text-shadow: 0 0 6px rgba(90,168,119,.45); }
+.gecko-menu.peak-label-menu { position: fixed; z-index: 5001; }
+.peak-label-menu .gecko-menu-item.checked::after { content: "\2713"; float: right; margin-left: 16px; color: #2c7a52; }
+.peak-label-menu-note { padding: 6px 12px 4px; font-size: 11px; color: #777b80; }
