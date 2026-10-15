@@ -472,3 +472,13 @@ def test_a_live_preview_at_another_wavelength_turns_the_uv_switches_off_and_name
     assert row.children[-1].children == '426 nm · preview'
     row = app.functions['update_plot_channel_controls']([], tab, 'raw', [], {'wavelength_nm': 263})
     assert all(getattr(n, 'role', None) == 'checkbox' for n in row.children)     # the channel itself: no chip
+
+
+def test_a_renamed_channel_carries_its_name_in_every_run():
+    from services.channel_visibility import channel_controls, rename_channel
+    store = samples()
+    assert rename_channel(store, ['a', 'b'], 'uv:250', 'Fmoc channel')
+    labels = {c['key']: c['label'] for c in channel_controls(store, ['a', 'b'])}
+    assert labels['uv:250'] == 'Fmoc channel'
+    assert all(store.get_bundle(n).component_display_name(store.get_bundle(n).component_list[0]) == 'Fmoc channel'
+               for n in ('a', 'b'))

@@ -120,9 +120,9 @@ def register_file_tree_callbacks(app: dash.Dash, data_manager: DataManager) -> N
     @app.callback(
         Output('plot-channel-controls', 'children'),
         Input('file-tree', 'children'), Input('active-plot-tab', 'data'), Input('view-mode', 'data'),
-        Input('hidden-files', 'data'), Input('pda-preview', 'data'),
+        Input('hidden-files', 'data'), Input('pda-preview', 'data'), Input('loaded-files', 'data'),
     )
-    def update_plot_channel_controls(_tree, active_tab, view_mode, _hidden=None, preview=None):
+    def update_plot_channel_controls(_tree, active_tab, view_mode, _hidden=None, preview=None, _files=None):
         from services.channel_visibility import channel_controls, group_bundle_ids
         from callbacks.upload_callbacks import _render_channel_controls
         if not active_tab or view_mode != 'raw':
@@ -393,6 +393,26 @@ def register_file_tree_callbacks(app: dash.Dash, data_manager: DataManager) -> N
         control = json.loads(callback_context.triggered[0]['prop_id'].rsplit('.',1)[0])
         record = data_manager.file_removal_service.remove_channels(
             group_bundle_ids(data_manager, control['group']), control['channel'], active_file=active_file)
+        if record is None:
+            raise PreventUpdate
+        return removal_response(record, active_file, render_counter)
+
+    @app.callback(removal_outputs, Input('channel-action', 'data'),
+                  State('active-file', 'data'), State('render-trigger', 'data'), prevent_initial_call=True)
+    def channel_from_menu(action, active_file, render_counter):
+        """A channel switch's menu (channel-menu.js): Remove (undoable) or Rename, in every run of the tab."""
+        from services.channel_visibility import group_bundle_ids, rename_channel
+        kind = (action or {}).get('action')
+        members = group_bundle_ids(data_manager, (action or {}).get('group'))
+        if kind == 'rename' and str(action.get('name') or '').strip():
+            if not rename_channel(data_manager, members, action.get('channel'), str(action['name']).strip()):
+                raise PreventUpdate
+            return [data_manager.get_loaded_files_list(), dash.no_update, (render_counter or 0) + 1] + \
+                [dash.no_update] * (len(removal_outputs) - 3)
+        if kind != 'remove':
+            raise PreventUpdate
+        record = data_manager.file_removal_service.remove_channels(members, action.get('channel'),
+                                                                   active_file=active_file)
         if record is None:
             raise PreventUpdate
         return removal_response(record, active_file, render_counter)

@@ -8,6 +8,26 @@ def _value(value):
 
 
 def channel_identity(component):
+    identity = _channel_identity(component)
+    custom = (component.metadata or {}).get('channel_label')
+    return (identity[0], custom) if identity and custom else identity
+
+
+def rename_channel(store, bundle_ids, channel_key, name):
+    """Give a channel a name of its own in every run (switch, legend, peak tables). True when one was renamed."""
+    renamed = False
+    for bundle_id in bundle_ids:
+        bundle = store.get_bundle(bundle_id)
+        for component in (bundle.component_list if bundle else []):
+            identity = _channel_identity(component)
+            if identity and identity[0] == channel_key:
+                component.metadata['channel_label'] = name
+                component.metadata['display_name'] = name
+                renamed = True
+    return renamed
+
+
+def _channel_identity(component):
     role = _value(component.role)
     category = _value(component.source_category)
     meta = component.metadata or {}

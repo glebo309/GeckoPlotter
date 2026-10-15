@@ -184,6 +184,7 @@ _layout_body = html.Div(
         dcc.Store(id='tab-rename-event', data=None),  # {tab_id, new_label} from JS
         dcc.Store(id='dataset-name-edit'),
         dcc.Store(id='side-view-files', data=[]),   # loaded file ids when the side view was last chosen (workspace_callbacks)
+        dcc.Store(id='channel-action'),   # rename / remove a channel from its switch's menu (channel-menu.js)
         dcc.Store(id='peak-label-move'),  # a peak name dragged in the plot (peak-label-drag.js)
         dcc.Store(id='peak-name-edit'),   # a peak renamed by double-clicking its name in the plot (figure-label-edit.js)
         dcc.Store(id='legend-position-edit'),
