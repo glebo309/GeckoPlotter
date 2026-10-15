@@ -348,31 +348,32 @@ def _collect_visible_files(dm, active_file_id=None, loaded_files=None, target_gr
                 groups[group].append((name, fdata))
 
     result = dict(groups)
-    if file_order:
-        for gkey, file_list in result.items():
-            tab_id = _tab_id_from_group(gkey)
-            group_order = file_order.get(tab_id)
-            if not group_order:
-                file_list.sort(key=lambda x: x[0].lower())
-                continue
-            explicit = group_order.get('order')
-            if explicit:
-                id_map = {fid: idx for idx, fid in enumerate(explicit)}
-                def _sort_key(entry):
-                    _, fd = entry
-                    fid = fd.get('record', {}).get('id', '')
-                    for bid, bdata in dm.loaded_data.items():
-                        if bdata is fd:
-                            fid = bid
-                            break
-                    return id_map.get(fid, 999999)
-                file_list.sort(key=_sort_key)
-            else:
-                sort_dir = group_order.get('sort_dir', 'asc')
-                file_list.sort(key=lambda x: x[0].lower(), reverse=(sort_dir == 'desc'))
-    else:
-        for gkey, file_list in result.items():
-            file_list.sort(key=lambda x: x[0].lower())
+    # The subplots stack in the file tree's order (upload_callbacks._sort_group_items): the tree orders samples, the
+    # plot channels, so each channel is placed by the sample it belongs to.
+    from services.natural_sort import natural_key
+
+    def sample_of(fd):
+        fid = (fd.get('record') or {}).get('id', '')
+        for key, data in dm.loaded_data.items():
+            if data is fd:
+                fid = key
+                break
+        bundle = None
+        if fid and hasattr(dm, 'get_bundle'):
+            bundle = dm.get_bundle(fid) or (dm.get_bundle_for_component(fid)
+                                            if hasattr(dm, 'get_bundle_for_component') else None)
+        return (bundle.bundle_id, bundle.name) if bundle else (fid, '')
+
+    for gkey, file_list in result.items():
+        group_order = (file_order or {}).get(_tab_id_from_group(gkey)) or {}
+        explicit = group_order.get('order')
+        if explicit:
+            id_map = {fid: idx for idx, fid in enumerate(explicit)}
+            file_list.sort(key=lambda entry: (id_map.get(sample_of(entry[1])[0], 999999),
+                                              natural_key(sample_of(entry[1])[1] or entry[0])))
+        else:
+            file_list.sort(key=lambda entry: natural_key(sample_of(entry[1])[1] or entry[0]),
+                           reverse=group_order.get('sort_dir') == 'desc')
     return result
 
 

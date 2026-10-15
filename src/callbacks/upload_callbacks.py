@@ -326,8 +326,9 @@ def render_file_tree_with_bundles(records: List[dict], data_manager) -> List[htm
 
 def _sort_group_items(items, file_order_info):
     """Sort items within a group based on file-order store entry."""
+    from services.natural_sort import natural_key
     if not file_order_info:
-        items.sort(key=lambda it: (it.get('name') or '').lower())
+        items.sort(key=lambda it: natural_key(it.get('name')))
         return items
 
     explicit_order = file_order_info.get('order')
@@ -338,7 +339,7 @@ def _sort_group_items(items, file_order_info):
 
     sort_dir = file_order_info.get('sort_dir', 'asc')
     reverse = sort_dir == 'desc'
-    items.sort(key=lambda it: (it.get('name') or '').lower(), reverse=reverse)
+    items.sort(key=lambda it: natural_key(it.get('name')), reverse=reverse)
     return items
 
 
