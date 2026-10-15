@@ -195,6 +195,23 @@ Goal: make it feel like a pro figure-editing tool with contextual controls.
 - One-click Zenodo-ready ZIP with figures in paper format
 - See `CONTINUATION_PLAN.md` for full FAIR spec
 
+### Agent interface (MCP) and well-plate view (idea, 2026-10-15)
+- Goal: the agent and the user work on the same analysis. The agent integrates, extracts EICs and applies recipes;
+  the user corrects a baseline in the GUI and the agent reads the new area. Every step is saved in the `.gecko`.
+- Step 1: `gecko_api.py`, a JSON in/out layer over the services that names samples, not ids. Move the upload chain,
+  "integrate in all files" and figure composing out of the callbacks first.
+- Step 2: local stdio MCP server with these tools: open folder/project, list samples, detect/integrate, peak table, EIC
+  (m/z ± tol), mass spectrum at RT or over a peak, PDA spectrum, apply recipe, calibrate, export figure (PNG back to
+  the agent), save project. Test against ala-calibration and the LC-MS run, with the same areas as the GUI.
+- Step 3, later: live mode, where the agent edits the open workspace and the plot redraws.
+- Well-plate view: a 96/384 heatmap of a per-well value (conversion, product/substrate EIC ratio, area); clicking a
+  well opens its chromatogram/spectrum.
+- Landscape (research 2026-10-15): batch EIC per well exists commercially (Virscidian Analytical Studio, ACD
+  Katalyst D2D, Mnova Gears) and free on Windows (Skyline). Waters AI Link (MCP for waters_connect) was announced on
+  2026-10-13, Waters only. Small mzML-only MCP servers exist (labmcp-ms-data, MSMCP) with no GUI. No tool was found
+  that is open, multi-vendor, covers PDA and MS, has a GUI and is agent-callable, with editable figures. PDA agent
+  tooling and academic biocatalysis plates are the clearest gaps.
+
 ### Service Integration (Phase 3)
 - Make DataManager own all services (Peak, Integration, Calibration, etc.)
 - Replace legacy persistence with persistence service
