@@ -138,3 +138,5 @@
 button.about-status { font-family: inherit; cursor: default; background: none; }
 button.about-status.clickable { cursor: pointer; }
 button.about-status.clickable:hover { background: rgba(245,194,107,.16); }
+/* Ion counts behind a spectrum drawn in % (lcms_callbacks): small, top right of the spectrum */
+.spectrum-ions { text-align: right; font-size: 11px; color: #777b80; min-height: 15px; padding: 0 16px 0 0; font-variant-numeric: tabular-nums; }

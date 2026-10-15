@@ -82,6 +82,22 @@ def register_lcms_callbacks(app, data_manager):
         apex_idx = min(max(apex_idx, 0), n_scans - 1)
         return 0, n_scans - 1, apex_idx, _scan_label(lcms_svc, file_data, apex_idx), {'file_id': file_id}
 
+    # The absolute ion counts behind a spectrum drawn in % (top right, as the vendor software shows them): the base
+    # peak's counts and the spectrum's total ion count, read from the raw intensities the stick trace carries.
+    ion_counts = """function(figure) {
+        var trace = ((figure || {}).data || []).find(function (t) { return t.meta && t.meta.gecko_mass_spectrum; });
+        var values = ((trace || {}).customdata || []).filter(function (v, i) { return v != null && i % 3 === 1; });
+        if (!values.length) return '';
+        var max = Math.max.apply(null, values), sum = values.reduce(function (a, b) { return a + b; }, 0);
+        if (!(max > 0)) return '';
+        var fmt = function (v) { return v >= 1e4 ? v.toExponential(2).replace('e+', 'e') : v.toPrecision(3); };
+        return 'Base peak ' + fmt(max) + ' · TIC ' + fmt(sum) + ' counts' + (UNIT || '');
+    }"""
+    app.clientside_callback(ion_counts.replace('UNIT', "''"), Output('ms-spectrum-ions', 'children'),
+                            Input('ms-spectrum-graph', 'figure'))
+    app.clientside_callback(ion_counts.replace('UNIT', "'/scan (averaged)'"), Output('peak-mass-ions', 'children'),
+                            Input('peak-mass-graph', 'figure'))
+
     # ------------------------------------------------------------------
     # Polarity toggle: sync both toggles from active-file selection
     # ------------------------------------------------------------------

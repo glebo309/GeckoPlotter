@@ -1253,6 +1253,7 @@ _layout_body = html.Div(
                                                                        marks=None,
                                                                        tooltip={'placement': 'bottom', 'always_visible': False}),
                                                         ], style={'padding': '0 4px 4px 4px'}),
+                                                        html.Div(id='ms-spectrum-ions', className='spectrum-ions'),
                                                         dcc.Graph(id='ms-spectrum-graph',
                                                                   figure=go.Figure(layout=go.Layout(
                                                                       template='plotly_white',
@@ -1380,6 +1381,7 @@ _layout_body = html.Div(
                                                             clearable=True,
                                                             style={'marginBottom': '8px'},
                                                         ),
+                                                        html.Div(id='peak-mass-ions', className='spectrum-ions'),
                                                         dcc.Graph(id='peak-mass-graph',
                                                                   figure=go.Figure(layout=go.Layout(
                                                                       template='plotly_white',
