@@ -134,6 +134,24 @@ def cleanup_peak_traces(fig):
                                    if not str(a.name or '').startswith('peak-label:'))
 
 
+def _add_label_room(fig, x, top, signal_arr, add_kw):
+    """An invisible point above a peak's name, so the automatic y-range keeps the name inside the plot (Plotly sizes
+    the axis to the data, not to text drawn above it). A range set by hand is not affected."""
+    import numpy as np
+    import plotly.graph_objects as go
+    try:
+        values = np.asarray(signal_arr, dtype=float)
+        span = float(np.nanmax(values) - np.nanmin(values)) if values.size else 0.0
+    except (TypeError, ValueError):
+        span = 0.0
+    if not np.isfinite(span) or span <= 0 or top is None or not np.isfinite(float(top)):
+        return
+    # Stacked subplots are short: a name needs a larger share of their height than in one tall overlaid plot.
+    room = 0.25 if add_kw.get('row') else 0.10
+    fig.add_trace(go.Scatter(x=[x], y=[float(top) + room * span], mode='lines', line=dict(width=0),
+                             hoverinfo='skip', showlegend=False, meta='peak_overlay', name='label-room'), **add_kw)
+
+
 def _add_moved_label(fig, peak, text, top, add_kw):
     """A name label dragged away from its peak (peak.label_offset, screen pixels): an annotation anchored at the
     peak's top, shifted by the offset, with a thin leader line from the peak when peak.label_leader."""
@@ -195,6 +213,7 @@ def add_peak_traces(fig, all_peaks, time_arr, signal_arr, selected_peak_id=None,
             elif has_custom_label:
                 # Above the highest point of the peak (the filled outline follows the signal), never on it.
                 label_y = max((v for v in peak.poly_y if v is not None), default=peak.height)
+                _add_label_room(fig, peak.rt, label_y, signal_arr, add_kw)
                 fig.add_trace(go.Scatter(
                     x=[peak.rt],
                     y=[label_y],
@@ -215,6 +234,7 @@ def add_peak_traces(fig, all_peaks, time_arr, signal_arr, selected_peak_id=None,
             _add_moved_label(fig, peak, peak_text, _y_curve(time_arr, signal_arr, peak.rt), add_kw)
         elif has_custom_label:
             marker_y = _y_curve(time_arr, signal_arr, peak.rt)
+            _add_label_room(fig, peak.rt, marker_y, signal_arr, add_kw)
             fig.add_trace(go.Scatter(
                 x=[peak.rt],
                 y=[marker_y],
