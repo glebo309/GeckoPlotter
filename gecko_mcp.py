@@ -48,10 +48,12 @@ def _run(call, *args, **kwargs):
 
 
 @server.tool()
-def open_data(path: str) -> dict:
+def open_data(path: str, everything: bool = False) -> dict:
     """Open a data file, a run folder, a folder of run folders (one sample per run, named after its folder) or a
-    GeckoPlotter project (.gecko, or a FAIR package .zip; this replaces the workspace)."""
-    return _run(workspace.open, path)
+    GeckoPlotter project (.gecko, or a FAIR package .zip; this replaces the workspace). From Agilent export folders
+    only the full-scan spectra (*_spectra.cdf) and UV channels (*.dx_VWD*.CSV) are read; everything=True reads the
+    small duplicate .cdf/.CSV exports too."""
+    return _run(workspace.open, path, everything)
 
 
 @server.tool()

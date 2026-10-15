@@ -30,9 +30,16 @@ class GeckoError(ValueError):
     """A request that cannot be done as asked; the message says why and what would work."""
 
 
-def _files_in(folder: Path) -> List[Path]:
-    return sorted(p for p in folder.iterdir()
-                  if p.is_file() and not p.name.startswith('.') and p.suffix.lower() not in SKIPPED_FILES)
+def _files_in(folder: Path, everything: bool = False) -> List[Path]:
+    """The files of a run folder worth reading. An Agilent export folder holds the run several times over: full-scan
+    spectra (``*_spectra.cdf``, megabytes), the UV channels (``*.dx_VWD1A/B.CSV``) and small duplicates (``<sample>
+    _00N.cdf``, TIC/EIC ``.CSV``) that only clutter the channels. Only the first two are read unless ``everything``."""
+    files = sorted(p for p in folder.iterdir()
+                   if p.is_file() and not p.name.startswith('.') and p.suffix.lower() not in SKIPPED_FILES)
+    if everything or not any(p.name.lower().endswith('_spectra.cdf') for p in files):
+        return files
+    return [p for p in files if p.name.lower().endswith('_spectra.cdf') or '.dx_vwd' in p.name.lower()
+            or p.suffix.lower() in ('.lcm', '.lcd')]
 
 
 def _run_names(folders: Sequence[Path]) -> List[str]:
@@ -77,9 +84,10 @@ class Workspace:
 
     # -- opening and saving ---------------------------------------------------------------------------------------
 
-    def open(self, path: str) -> dict:
+    def open(self, path: str, everything: bool = False) -> dict:
         """Open a file, a run folder, a folder of run folders (one sample per run, named by the folder) or a project
-        (.gecko / FAIR package .zip, which replaces the workspace)."""
+        (.gecko / FAIR package .zip, which replaces the workspace). From Agilent export folders only the full-scan
+        spectra and the UV channels are read, unless ``everything``."""
         from services.workspace_loader import load_files
         path = Path(path).expanduser()
         if not path.exists():
@@ -93,14 +101,14 @@ class Workspace:
         if path.is_file():
             runs = [(None, [path])]
         else:
-            subfolders = sorted(p for p in path.iterdir() if p.is_dir() and _files_in(p))
+            subfolders = sorted(p for p in path.iterdir() if p.is_dir() and _files_in(p, everything))
             if subfolders:
-                runs = list(zip(_run_names(subfolders), [_files_in(f) for f in subfolders]))
-                loose = _files_in(path)
+                runs = list(zip(_run_names(subfolders), [_files_in(f, everything) for f in subfolders]))
+                loose = _files_in(path, everything)
                 if loose:
                     runs.append((None, loose))
             else:
-                runs = [(None, _files_in(path))]
+                runs = [(None, _files_in(path, everything))]
         added, failed = [], []
         for name, files in runs:
             result = load_files(self.store, [(f.name, f.read_bytes()) for f in files])
