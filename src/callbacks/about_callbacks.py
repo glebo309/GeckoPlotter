@@ -49,6 +49,34 @@ def register_about_callbacks(app):
         return f'Newer version: {latest[:7]}', 'about-status newer', about.update_status(latest)
 
     @app.callback(
+        Output('about-claude-status', 'children'),
+        Input('about-modal', 'opened'),
+        prevent_initial_call=True,
+    )
+    def claude_status(opened):
+        if not opened:
+            raise dash.exceptions.PreventUpdate
+        from services import claude_connect
+        found = claude_connect.status()
+        apps = [name for name, key in (('Claude Desktop', 'desktop'), ('Claude Code', 'code')) if found[key]]
+        if not apps:
+            return 'No Claude app found on this computer (claude.ai/download).'
+        if found['desktop'] == 'connected':
+            return 'Connected to Claude Desktop. ' + ('Claude Code found too.' if found['code'] else '')
+        return 'Found: ' + ' and '.join(apps) + '. Connect so Claude can open your data, integrate and export.'
+
+    @app.callback(
+        Output('about-claude-status', 'children', allow_duplicate=True),
+        Input('about-claude-connect', 'n_clicks'),
+        prevent_initial_call=True,
+    )
+    def connect_claude(clicks):
+        if not clicks:
+            raise dash.exceptions.PreventUpdate
+        from services import claude_connect
+        return [html.Div(message) for message in claude_connect.connect()]
+
+    @app.callback(
         Output('about-modal', 'opened', allow_duplicate=True),
         Input('about-close', 'n_clicks'),
         prevent_initial_call=True,

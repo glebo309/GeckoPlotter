@@ -10,6 +10,10 @@ It runs on the user's computer over stdio; no data leaves the machine.
 
 ## Register it (once)
 
+Easiest: in GeckoPlotter click the logo (About) and **Connect to Claude**. It adds GeckoPlotter to Claude Desktop and
+Claude Code on this computer (only its own entry; Claude Desktop's settings are backed up first). Restart Claude to use
+it. By hand:
+
 With the launcher install (macOS):
 
 ```

@@ -131,3 +131,7 @@
 .channel-preview-chip { display: inline-flex; align-items: center; gap: 5px; margin-left: 6px; padding: 2px 8px; border-radius: 999px;
     font-size: 12px; color: #2c5240; background: #e8f3ec; border: 1px dashed #5aa877; white-space: nowrap; }
 .channel-preview-chip::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: #5aa877; }
+.about-claude { display: flex; align-items: center; gap: 12px; justify-content: space-between; margin-top: 12px; padding: 10px 12px;
+    border: 1px solid #1d2a23; border-radius: 8px; background: #101814; }
+.about-claude-title { font-size: 12.5px; font-weight: 600; color: #d5e3da; }
+.about-claude-status { font-size: 12px; color: #8aa395; margin-top: 2px; line-height: 1.45; }
