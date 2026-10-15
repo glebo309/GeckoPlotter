@@ -93,7 +93,9 @@ def connect_code() -> str:
     if not cli:
         return 'Claude Code is not installed.'
     command = server_command()
-    subprocess.run([cli, 'mcp', 'remove', '--scope', 'user', NAME], capture_output=True, timeout=60)
+    for scope in ('local', 'user'):                     # an older entry added by hand (local is the default scope)
+        subprocess.run([cli, 'mcp', 'remove', '--scope', scope, NAME], capture_output=True, timeout=60,
+                       cwd=str(Path.home()))
     done = subprocess.run([cli, 'mcp', 'add', '--scope', 'user', NAME, '--', *command],
                           capture_output=True, text=True, timeout=60)
     if done.returncode != 0:
