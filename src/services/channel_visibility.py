@@ -160,6 +160,14 @@ def combine_enabled(store, bundle_ids, group_id):
     return getattr(store, '_channel_combine_modes', {}).get(channel_scope_key(store, bundle_ids, group_id), False)
 
 
+def _lowest_uv(keys):
+    """The UV channel to show first: the lowest wavelength ('uv:214' before 'uv:254'), else the first UV channel."""
+    measured = [key for key in keys if key.startswith('uv:')]
+    if measured:
+        return min(measured, key=lambda key: float(key[3:]))
+    return next((key for key in keys if not key.startswith('ms:')), None)
+
+
 def initialize_imported_channels(store, new_bundles):
     """Choose one channel in new samples, following an existing group's choice."""
     from callbacks.viz_callbacks import _get_overlay_group, _tab_id_from_group
@@ -175,15 +183,18 @@ def initialize_imported_channels(store, new_bundles):
         if not available:
             continue
         requested = [c['key'] for c in old if c['state'] != 'false']
+        identities = [channel_identity(c) for c in bundle.component_list]
+        keys = [identity[0] for identity in identities if identity]
+        uv = _lowest_uv(keys)
         if not old:
-            # Acquisition order supplies the default UV channel. For LC-MS,
-            # prefer positive TIC when present, otherwise the available TIC.
-            identities = [channel_identity(c) for c in bundle.component_list]
-            keys = [identity[0] for identity in identities if identity]
-            uv = next((key for key in keys if not key.startswith('ms:')), None)
+            # One UV channel, the lowest wavelength (else the first recorded); for LC-MS also the positive TIC
+            # when present, otherwise the available TIC.
             tic = 'ms:positive' if 'ms:positive' in keys else next((key for key in keys if key.startswith('ms:')), None)
             requested = ([key for key in (uv, tic) if key] if _value(bundle.bundle_type) == 'lcms'
-                         else keys[:1])
+                         else [uv] if uv else keys[:1])
+        elif uv and not any(key in requested for key in keys if not key.startswith('ms:')) \
+                and any(not key.startswith('ms:') for key in requested):
+            requested = requested + [uv]       # other wavelengths than the samples before: its own lowest one
         for component in bundle.component_list:
             identity = channel_identity(component)
             if identity:

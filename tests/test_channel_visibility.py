@@ -432,3 +432,23 @@ def test_plot_switches_leave_out_the_channels_of_hidden_runs_in_the_tab():
     set_sample_visibility(store, 'blank', True)
     controls = app.functions['update_plot_channel_controls']([], 'tab-folder_time_min_sequence', 'raw')
     assert [getattr(n, 'data-channel-label') for n in controls.children] == ['+TIC', '214 nm', '220 nm']
+
+
+def test_new_samples_show_one_uv_channel_the_lowest_wavelength():
+    from services.channel_visibility import initialize_imported_channels
+    store = DataStore()
+    pda = Bundle('ala', 'ala', BundleType.CHROMATOGRAM, component_list=[signal('ala263', 263), signal('ala250', 250)])
+    store.add_bundle(pda)
+    initialize_imported_channels(store, [pda])
+    assert store.visibility_state['ala250'] and not store.visibility_state['ala263']
+    runs = []
+    for name, wavelengths in (('blank', (254, 214)), ('lys', (280, 250))):
+        items = [signal(name + 'pos', role=ComponentRole.MS_POSITIVE, category=SourceCategory.LCMS_MS),
+                 signal(name + 'neg', role=ComponentRole.MS_NEGATIVE, category=SourceCategory.LCMS_MS)]
+        items += [signal(f'{name}{nm}', nm, ComponentRole.VWD_A, SourceCategory.LCMS_UV) for nm in wavelengths]
+        bundle = Bundle(name, name, BundleType.LCMS, component_list=items)
+        store.add_bundle(bundle)
+        initialize_imported_channels(store, [bundle])
+        runs.append(bundle)
+    shown = {c.component_id for b in runs for c in b.component_list if store.visibility_state.get(c.component_id, True)}
+    assert shown == {'blankpos', 'blank214', 'lyspos', 'lys250'}     # the second run's own lowest wavelength
