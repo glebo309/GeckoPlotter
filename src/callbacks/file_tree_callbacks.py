@@ -127,9 +127,11 @@ def register_file_tree_callbacks(app: dash.Dash, data_manager: DataManager) -> N
         from callbacks.upload_callbacks import _render_channel_controls
         if not active_tab or view_mode != 'raw':
             return []
-        # The switches of this tab's own runs (another run's wavelengths would be switches that draw nothing here);
-        # ticking one still applies to every run that has the channel (toggle_group_channel).
-        controls = channel_controls(data_manager, group_bundle_ids(data_manager, active_tab, span=False))
+        # The switches of the runs this tab shows (another run's wavelengths, or a hidden run's, would be switches
+        # that draw nothing here); ticking one still applies to every run that has the channel (toggle_group_channel).
+        own = group_bundle_ids(data_manager, active_tab, span=False)
+        shown = [b for b in own if data_manager.visibility_state.get(b, True)]
+        controls = channel_controls(data_manager, shown or own)
         if not controls:
             return []
         return _render_channel_controls(controls, active_tab)

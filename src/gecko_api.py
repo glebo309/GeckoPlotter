@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 from pathlib import Path
 from typing import Iterable, List, Optional, Sequence
 
@@ -118,14 +119,40 @@ class Workspace:
                     runs.append((None, loose))
             else:
                 runs = [(None, _files_in(path))]
-        added, failed = [], []
+        added, failed, bundles = [], [], []
         for name, files in runs:
             result = load_files(self.store, [(f.name, f.read_bytes()) for f in files], skip_duplicate_exports=not everything)
             failed += result.failed
             if name:
                 self._name_run(result.bundles, name)
             added += [b.name for b in result.bundles]
+            bundles += result.bundles
+        if len(runs) > 1:
+            label = re.sub(r'^[\d.\-]+[_ ]+', '', path.name) or path.name     # '2026-...-..._HalB scope' -> 'HalB scope'
+            self._group_folder(bundles, label)
         return {'added': added, 'not_readable': failed, 'samples': len(self.samples())}
+
+    def _group_folder(self, bundles, folder: str) -> None:
+        """Runs opened together from one folder are one group in the file tree and one plot tab named after the
+        folder (as if dragged into one group); only the first run is shown, the others are a click on their eye away."""
+        from callbacks.viz_callbacks import _get_overlay_group
+        from services.channel_visibility import set_sample_visibility
+        runs = [b for b in bundles if b.bundle_type.value in ('lcms', 'chromatogram')]
+        if len(runs) < 2:
+            return
+        # Shown first: a sample of its own folder, not one of several blanks/standards sharing a folder.
+        shared = getattr(self, '_shared_folder_runs', set())
+        runs.sort(key=lambda b: b.bundle_id in shared)
+        entry = self.store.get_data_by_id(runs[0].bundle_id) or {}
+        natural = _get_overlay_group(entry.get('metadata', {}), entry, file_id=runs[0].bundle_id, dm=self.store,
+                                     ignore_override=True)
+        key = ('folder', natural[1], folder)
+        if not hasattr(self.store, 'group_overrides'):
+            self.store.group_overrides = {}
+        for i, bundle in enumerate(runs):
+            self.store.group_overrides[bundle.bundle_id] = key
+            if i:
+                set_sample_visibility(self.store, bundle.bundle_id, False)
 
     def save(self, path: str, project_name: Optional[str] = None) -> str:
         """Save the workspace as a project (.gecko) that opens in GeckoPlotter with all peaks, names and calibrations."""
@@ -141,8 +168,9 @@ class Workspace:
     def _name_run(self, bundles, name: str) -> None:
         """Name the samples of one run folder after it: the run itself ``4``, its exported traces ``4 · +EIC(...)``.
         A folder holding several runs (blanks, standards) numbers them by their time: ``S 14-45-04``."""
-        import re
         main = [b for b in bundles if b.bundle_type.value in ('lcms', 'chromatogram')]
+        if len(main) > 1:
+            self._shared_folder_runs = getattr(self, '_shared_folder_runs', set()) | {b.bundle_id for b in main}
         for bundle in main:
             stamp = re.search(r'\d{2}-\d{2}-\d{2}(?=\+|$)', bundle.name) if len(main) > 1 else None
             self.store.rename_dataset(bundle.bundle_id, f'{name} {stamp.group(0)}' if stamp else name)

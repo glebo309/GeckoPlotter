@@ -435,6 +435,8 @@ def _tab_id_from_group(group_key):
 def _tab_label_from_group(group_key, dm=None):
     """Create a human-readable label for a tab from its overlay group key."""
     cat, x_axis, *_rest = group_key
+    if cat == 'folder' and len(group_key) >= 3:            # runs opened together from one folder (gecko_api)
+        return str(group_key[2])
     if dm is not None and cat == 'lcms_ms' and len(group_key) == 4:
         bundle = dm.get_bundle(group_key[3])
         if bundle:

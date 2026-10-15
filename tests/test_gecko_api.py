@@ -146,3 +146,16 @@ def test_duplicate_agilent_exports_are_left_out_when_the_spectra_are_there():
     assert [n for n, _ in kept] == ['run_MS1 +TIC SCAN ESI_spectra.cdf', 'run.dx_VWD1A.CSV', 'method.lcm']
     assert [n for n, _ in duplicates] == ['4.cdf', '4_004.cdf', 'run.dx_MS1 +EIC(633.7-634.7) ESI.CSV']
     assert split_duplicate_exports(files[1:]) == (files[1:], [])          # no spectra: everything is the data
+
+
+def test_a_folder_of_runs_is_one_group_and_tab_named_after_it_with_one_run_shown(sequence):
+    from callbacks.viz_callbacks import _get_overlay_group, _tab_id_from_group, _tab_label_from_group
+    ws = Workspace()
+    ws.open(str(sequence))
+    runs = [b for b in ws._bundles() if b.bundle_type.value == 'lcms']
+    keys = set()
+    for bundle in runs:
+        entry = ws.store.get_data_by_id(bundle.bundle_id)
+        keys.add(_get_overlay_group(entry['metadata'], entry, file_id=bundle.bundle_id, dm=ws.store))
+    assert len(keys) == 1 and _tab_label_from_group(keys.pop(), ws.store) == 'HalB'
+    assert sorted(ws.store.visibility_state.get(b.bundle_id, True) for b in runs) == [False, True]

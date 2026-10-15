@@ -408,3 +408,27 @@ def test_plot_switches_show_the_tabs_own_channels_and_toggle_them_in_every_run()
     from services.channel_visibility import group_bundle_ids, toggle_channel
     toggle_channel(store, group_bundle_ids(store, tab), 'uv:250')
     assert store.visibility_state['lysuv250'] == store.visibility_state['blankuv250']
+
+
+def test_plot_switches_leave_out_the_channels_of_hidden_runs_in_the_tab():
+    from callbacks.file_tree_callbacks import register_file_tree_callbacks
+    from services.channel_visibility import set_sample_visibility
+    store = DataStore()
+    store.group_overrides = {}
+    for name, nm in (('run', 220), ('blank', 214)):
+        items = [signal(name + 'pos', role=ComponentRole.MS_POSITIVE, category=SourceCategory.LCMS_MS),
+                 signal(name + 'uv', nm, ComponentRole.VWD_A, SourceCategory.LCMS_UV)]
+        store.add_bundle(Bundle(name, name, BundleType.LCMS, component_list=items))
+        store.group_overrides[name] = ('folder', 'Time (min)', 'Sequence')
+    set_sample_visibility(store, 'blank', False)
+    class App:
+        functions = {}
+        def callback(self, *args, **kwargs):
+            def wrap(fn): self.functions[fn.__name__] = fn; return fn
+            return wrap
+    app = App(); register_file_tree_callbacks(app, store)
+    controls = app.functions['update_plot_channel_controls']([], 'tab-folder_time_min_sequence', 'raw')
+    assert [getattr(n, 'data-channel-label') for n in controls.children] == ['+TIC', '220 nm']
+    set_sample_visibility(store, 'blank', True)
+    controls = app.functions['update_plot_channel_controls']([], 'tab-folder_time_min_sequence', 'raw')
+    assert [getattr(n, 'data-channel-label') for n in controls.children] == ['+TIC', '214 nm', '220 nm']
