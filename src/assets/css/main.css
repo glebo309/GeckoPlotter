@@ -1020,7 +1020,31 @@ button[id*="collapse-btn"]:active {
     gap: 1px;
     align-items: center;
     padding: 0 6px;
+    flex: 0 1 auto;
+    min-width: 0;
+    overflow-x: auto;
+    scrollbar-width: none;
+    align-self: stretch;
 }
+.plot-tab-bar::-webkit-scrollbar { display: none; }
+.plot-tab-bar.overflow-left { -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 28px); mask-image: linear-gradient(90deg, transparent 0, #000 28px); }
+.plot-tab-bar.overflow-right { -webkit-mask-image: linear-gradient(90deg, #000 calc(100% - 28px), transparent 100%); mask-image: linear-gradient(90deg, #000 calc(100% - 28px), transparent 100%); }
+.plot-tab-bar.overflow-left.overflow-right { -webkit-mask-image: linear-gradient(90deg, transparent 0, #000 28px, #000 calc(100% - 28px), transparent 100%); mask-image: linear-gradient(90deg, transparent 0, #000 28px, #000 calc(100% - 28px), transparent 100%); }
+.plot-tab-bar .plot-tab-btn { flex: 0 0 auto; align-self: flex-end; }
+.plot-tab-more { flex: 0 0 auto; margin-left: 4px; padding: 3px 8px; border: 1px solid rgba(255,255,255,.18); border-radius: 6px;
+    background: rgba(255,255,255,.06); color: rgba(255,255,255,.75); font-size: 11px; font-weight: 600; cursor: pointer; white-space: nowrap; }
+.plot-tab-more:hover, .plot-tab-more[aria-expanded="true"] { background: rgba(255,255,255,.16); color: #fff; }
+.plot-tab-list { position: fixed; z-index: 4200; width: 280px; max-height: min(70vh, 520px); display: flex; flex-direction: column;
+    background: #fff; border: 1px solid #d8dadc; border-radius: 8px; box-shadow: 0 12px 32px rgba(0,0,0,.18); overflow: hidden; font-size: 12.5px; }
+.plot-tab-list input { margin: 8px; padding: 6px 8px; border: 1px solid #d8dadc; border-radius: 6px; font-size: 12.5px; outline: none; }
+.plot-tab-list input:focus { border-color: #5aa877; }
+.plot-tab-list .items { overflow-y: auto; padding: 0 4px 6px; }
+.plot-tab-list button { display: flex; width: 100%; text-align: left; padding: 6px 8px; border: 0; border-radius: 5px; background: none;
+    font: inherit; color: #1d1d1f; cursor: pointer; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.plot-tab-list button:hover, .plot-tab-list button.focus { background: #eef4f0; }
+.plot-tab-list button.current { font-weight: 600; }
+.plot-tab-list button.current::after { content: "\2713"; margin-left: auto; padding-left: 8px; color: #2c7a52; }
+.plot-tab-list .none { padding: 8px 12px; color: #777b80; }
 
 .plot-tab-btn {
     padding: 5px 14px;

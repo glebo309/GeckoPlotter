@@ -392,8 +392,15 @@ def render_file_tree_with_bundles_selected(records: List[dict], data_manager, ac
         sorted_items = _sort_group_items(group_info['items'], group_order)
 
         collapsed = data_manager.collapse_state.get(tid) == 'collapsed'
-        tree_items.append(_render_group_header(
-            group_info['label'], tid, is_active_group, sort_dir=sort_dir, collapsed=collapsed))
+        # A group holding one sample of the same name (each LC-MS run is a group of its own) is that sample's row
+        # alone: a header repeating the name above it doubled every run in the tree.
+        single = len(sorted_items) == 1 and display_name(str(sorted_items[0].get('name') or '')).strip().lower() \
+            == str(group_info['label']).strip().lower()
+        if single:
+            collapsed = False
+        else:
+            tree_items.append(_render_group_header(
+                group_info['label'], tid, is_active_group, sort_dir=sort_dir, collapsed=collapsed))
 
         group_container_children = []
         for item in sorted_items:
@@ -418,7 +425,7 @@ def render_file_tree_with_bundles_selected(records: List[dict], data_manager, ac
 
         tree_items.append(html.Div(
             group_container_children,
-            className='file-group-container',
+            className='file-group-container file-group-single' if single else 'file-group-container',
             id={'type': 'file-group', 'index': tid},
             style={'display': 'none' if collapsed else 'block'},
         ))

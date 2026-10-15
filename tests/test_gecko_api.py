@@ -127,3 +127,22 @@ def test_the_mcp_server_offers_the_tools():
     names = {tool.name for tool in asyncio.run(gecko_mcp.server.list_tools())}
     assert {'open_data', 'list_samples', 'detect_peaks', 'integrate', 'peak_table', 'extract_ion_chromatogram',
             'mass_spectrum', 'figure', 'save_project'} <= names
+
+
+def test_an_integration_window_on_the_flanks_takes_the_whole_peak(sequence):
+    ws = Workspace()
+    ws.open(str(sequence))
+    whole = ws.integrate(7.9, 8.9, samples='CONTROL 4', channel='+TIC', snap_to_valleys=False)[0]
+    flanks = ws.integrate(8.35, 8.45, samples='4', channel='+TIC')[0]
+    assert flanks['rt_start'] < 8.3 and flanks['rt_end'] > 8.5
+    assert flanks['area'] == pytest.approx(2 * whole['area'], rel=0.03)      # sample 4 holds twice the amount
+
+
+def test_duplicate_agilent_exports_are_left_out_when_the_spectra_are_there():
+    from services.workspace_loader import split_duplicate_exports
+    files = [(n, b'') for n in ('run_MS1 +TIC SCAN ESI_spectra.cdf', 'run.dx_VWD1A.CSV', '4.cdf', '4_004.cdf',
+                                'run.dx_MS1 +EIC(633.7-634.7) ESI.CSV', 'method.lcm')]
+    kept, duplicates = split_duplicate_exports(files)
+    assert [n for n, _ in kept] == ['run_MS1 +TIC SCAN ESI_spectra.cdf', 'run.dx_VWD1A.CSV', 'method.lcm']
+    assert [n for n, _ in duplicates] == ['4.cdf', '4_004.cdf', 'run.dx_MS1 +EIC(633.7-634.7) ESI.CSV']
+    assert split_duplicate_exports(files[1:]) == (files[1:], [])          # no spectra: everything is the data

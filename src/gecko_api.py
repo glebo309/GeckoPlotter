@@ -30,16 +30,9 @@ class GeckoError(ValueError):
     """A request that cannot be done as asked; the message says why and what would work."""
 
 
-def _files_in(folder: Path, everything: bool = False) -> List[Path]:
-    """The files of a run folder worth reading. An Agilent export folder holds the run several times over: full-scan
-    spectra (``*_spectra.cdf``, megabytes), the UV channels (``*.dx_VWD1A/B.CSV``) and small duplicates (``<sample>
-    _00N.cdf``, TIC/EIC ``.CSV``) that only clutter the channels. Only the first two are read unless ``everything``."""
-    files = sorted(p for p in folder.iterdir()
-                   if p.is_file() and not p.name.startswith('.') and p.suffix.lower() not in SKIPPED_FILES)
-    if everything or not any(p.name.lower().endswith('_spectra.cdf') for p in files):
-        return files
-    return [p for p in files if p.name.lower().endswith('_spectra.cdf') or '.dx_vwd' in p.name.lower()
-            or p.suffix.lower() in ('.lcm', '.lcd')]
+def _files_in(folder: Path) -> List[Path]:
+    return sorted(p for p in folder.iterdir()
+                  if p.is_file() and not p.name.startswith('.') and p.suffix.lower() not in SKIPPED_FILES)
 
 
 def _run_names(folders: Sequence[Path]) -> List[str]:
@@ -51,6 +44,22 @@ def _run_names(folders: Sequence[Path]) -> List[str]:
     cut = max(prefix.rfind(c) for c in ' -_+') + 1 if prefix else 0
     stripped = [n[cut:].strip(' -_') for n in names]
     return stripped if all(stripped) and len(set(stripped)) == len(stripped) else names
+
+
+def _valleys(x, y, rt_start: float, rt_end: float, reach: float = 0.5):
+    """``rt_start`` and ``rt_end`` moved outwards down the slope to the nearest minimum of the (lightly smoothed)
+    signal, each by at most ``reach`` min: the valleys a chemist would draw the baseline between."""
+    order = np.argsort(x)
+    x, y = x[order], y[order]
+    smooth = np.convolve(y, np.ones(3) / 3, mode='same')
+    smooth[0], smooth[-1] = y[0], y[-1]
+
+    def walk(t, step):
+        i = int(np.clip(np.searchsorted(x, t), 0, len(x) - 1))
+        while 0 <= i + step < len(x) and abs(x[i + step] - t) <= reach and smooth[i + step] <= smooth[i]:
+            i += step
+        return float(x[i])
+    return walk(rt_start, -1), walk(rt_end, +1)
 
 
 def _ions(mz, intensity, top: int, merge: float = 0.6) -> List[dict]:
@@ -101,17 +110,17 @@ class Workspace:
         if path.is_file():
             runs = [(None, [path])]
         else:
-            subfolders = sorted(p for p in path.iterdir() if p.is_dir() and _files_in(p, everything))
+            subfolders = sorted(p for p in path.iterdir() if p.is_dir() and _files_in(p))
             if subfolders:
-                runs = list(zip(_run_names(subfolders), [_files_in(f, everything) for f in subfolders]))
-                loose = _files_in(path, everything)
+                runs = list(zip(_run_names(subfolders), [_files_in(f) for f in subfolders]))
+                loose = _files_in(path)
                 if loose:
                     runs.append((None, loose))
             else:
-                runs = [(None, _files_in(path, everything))]
+                runs = [(None, _files_in(path))]
         added, failed = [], []
         for name, files in runs:
-            result = load_files(self.store, [(f.name, f.read_bytes()) for f in files])
+            result = load_files(self.store, [(f.name, f.read_bytes()) for f in files], skip_duplicate_exports=not everything)
             failed += result.failed
             if name:
                 self._name_run(result.bundles, name)
@@ -252,9 +261,11 @@ class Workspace:
             rows += self._peak_rows(bundle, component)
         return rows
 
-    def integrate(self, rt_start: float, rt_end: float, samples=None, channel=None, name: Optional[str] = None) -> List[dict]:
-        """Integrate between two times with a straight baseline from the signal at ``rt_start`` to the signal at
-        ``rt_end`` (as a baseline drawn in the plot from curve to curve). Returns the new peaks."""
+    def integrate(self, rt_start: float, rt_end: float, samples=None, channel=None, name: Optional[str] = None,
+                  snap_to_valleys: bool = True) -> List[dict]:
+        """Integrate a peak with a straight baseline drawn on the curve, as in the plot. Each end walks down the slope
+        to the nearest valley (at most 0.5 min), so a window that starts on the peak's flank still takes the whole
+        peak; ``snap_to_valleys=False`` keeps the given times. Returns the new peaks."""
         from callbacks.baseline_callbacks import _area_with_constraints
         if rt_end <= rt_start:
             raise GeckoError('rt_end must be after rt_start.')
@@ -262,7 +273,8 @@ class Workspace:
         for bundle in self._samples(samples):
             component = self._channel(bundle, channel)
             x, y = self._xy(component.component_id)
-            ends = [(float(t), float(np.interp(t, x, y))) for t in (rt_start, rt_end)]
+            times = _valleys(x, y, rt_start, rt_end) if snap_to_valleys else (rt_start, rt_end)
+            ends = [(float(t), float(np.interp(t, x, y))) for t in times]
             result, q1, q2 = _area_with_constraints(x, y, *ends)
             if not result:
                 out.append({'sample': bundle.name, 'channel': bundle.component_display_name(component),

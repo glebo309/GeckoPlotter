@@ -277,6 +277,9 @@ _layout_body = html.Div(
                             className='plot-tab-bar',
                             children=[],
                         ),
+                        # All plot tabs as a searchable list when they do not fit (assets/js/tab-overflow.js)
+                        html.Button(id='plot-tab-more', className='plot-tab-more', n_clicks=0, hidden=True,
+                                    title='All plot tabs', **{'aria-haspopup': 'listbox', 'aria-expanded': 'false'}),
                         html.Button('Raw Data', id='raw-mode-btn', style={'display': 'none'}, n_clicks=0),
                         html.Button('Analysis Plot', id='analysis-mode-btn', style={'display': 'none'}, n_clicks=0),
                         # Hidden Dev View button (kept for callback compatibility)

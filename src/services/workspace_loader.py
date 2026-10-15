@@ -19,6 +19,64 @@ class LoadResult:
     bundles: list = field(default_factory=list)       # new bundles, in the order they were added
     failed: List[str] = field(default_factory=list)   # file names no reader could parse
     methods: int = 0                                  # LabSolutions method files (.lcm) read
+    skipped: List[str] = field(default_factory=list)  # duplicate Agilent exports left out
+
+
+def split_duplicate_exports(files):
+    """Agilent's export of an LC-MS run holds it several times over: full-scan spectra (``*_spectra.cdf``), the UV
+    channels (``*.dx_VWD1A/B.CSV``), and small copies of every trace (``<sample>_00N.cdf``, ``*.dx_MS1 ±TIC/EIC
+    .CSV``) that only cluttered the channels (TIC/EIC copies labelled as UV). With spectra present, those copies are
+    returned apart. Returns (kept, duplicates)."""
+    names = [name.lower() for name, _ in files]
+    if not any(name.endswith('_spectra.cdf') for name in names):
+        return list(files), []
+    kept, duplicates = [], []
+    for (name, raw), low in zip(files, names):
+        copy = (low.endswith('.cdf') and not low.endswith('_spectra.cdf')) or \
+            (low.endswith('.csv') and '.dx_ms' in low)
+        (duplicates if copy else kept).append((name, raw))
+    return kept, duplicates
+
+
+def _export_wavelengths(duplicates) -> dict:
+    """{(run, detector): nm} from the small VWD .cdf copies (``VWD1A,Wavelength=220 nm``): the only place an Agilent
+    export records the wavelength, which its VWD .CSV lacks."""
+    import re
+    from ingestion import ingest_file
+    found = {}
+    for name, raw in duplicates:
+        if not name.lower().endswith('.cdf') or len(raw) > 2_000_000:
+            continue
+        tmp = tempfile.NamedTemporaryFile(delete=False, suffix=f'_{name}')
+        try:
+            tmp.write(raw)
+            tmp.close()
+            meta = (ingest_file(tmp.name, name).metadata or {})
+        except Exception:                               # noqa: BLE001  a copy we leave out anyway
+            continue
+        finally:
+            tmp.close()
+            try:
+                os.unlink(tmp.name)
+            except OSError:
+                pass
+        match = re.match(r'\s*(VWD\w*)\s*,\s*Wavelength\s*=\s*([\d.]+)', str(meta.get('detector_name') or ''), re.I)
+        run = str(meta.get('experiment_title') or '').strip()
+        if match and run:
+            found[(run[:-3] if run.lower().endswith('.dx') else run, match.group(1).upper())] = float(match.group(2))
+    return found
+
+
+def _apply_export_wavelengths(bundles, wavelengths) -> None:
+    from services.bundling_service import extract_lcms_base_name
+    for bundle in bundles:
+        for component in bundle.component_list:
+            meta = component.metadata if isinstance(component.metadata, dict) else {}
+            detector = str(meta.get('detector_name') or '').upper()
+            nm = wavelengths.get((extract_lcms_base_name(component.original_filename), detector))
+            if nm and meta.get('is_uv_data') and not meta.get('wavelength_nm') and not meta.get('wavelength'):
+                meta['wavelength'] = meta['wavelength_nm'] = nm
+                meta['wavelength_source'] = 'export'
 
 
 def register_method_bytes(store, raw: bytes, name: str) -> int:
@@ -57,7 +115,7 @@ def auto_import_peaks(store, bundle) -> None:
         log.warning("Could not auto-import peaks for '%s': %s", bundle.name, exc)
 
 
-def load_files(store, files: Iterable[Tuple[str, bytes]]) -> LoadResult:
+def load_files(store, files: Iterable[Tuple[str, bytes]], skip_duplicate_exports: bool = True) -> LoadResult:
     """Parse ``(file name, bytes)`` pairs, group them into samples and add them to ``store``.
 
     Method files (.lcm) are attached to the loaded samples that used them instead of being plotted. Every new UV
@@ -70,6 +128,11 @@ def load_files(store, files: Iterable[Tuple[str, bytes]]) -> LoadResult:
 
     result = LoadResult()
     files = list(files)
+    wavelengths = {}
+    if skip_duplicate_exports:
+        files, duplicates = split_duplicate_exports(files)
+        result.skipped = [name for name, _ in duplicates]
+        wavelengths = _export_wavelengths(duplicates)
     for name, raw in files:
         if is_method_upload(name):
             register_method_bytes(store, raw, name)
@@ -105,6 +168,7 @@ def load_files(store, files: Iterable[Tuple[str, bytes]]) -> LoadResult:
     for name, raw, _standardized in parsed:            # an .lcd carries the method it was run with
         if name.lower().endswith('.lcd'):
             register_method_bytes(store, raw, name)
+    _apply_export_wavelengths(result.bundles, wavelengths)
     for bundle in result.bundles:
         store.add_bundle(bundle)
         if bundle.has_integration_data():

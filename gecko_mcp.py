@@ -73,11 +73,12 @@ def detect_peaks(samples: list[str] | None = None, channel: str | None = None, s
 
 @server.tool()
 def integrate(rt_start: float, rt_end: float, samples: list[str] | None = None, channel: str | None = None,
-              name: str | None = None) -> list:
-    """Integrate between two retention times (min) with a straight baseline from the signal at rt_start to the
-    signal at rt_end, in each given sample. name: compound name for the peak (spreads to the same peak in all
-    samples)."""
-    return _run(workspace.integrate, rt_start, rt_end, samples, channel, name)
+              name: str | None = None, snap_to_valleys: bool = True) -> list:
+    """Integrate a peak in each given sample with a straight baseline on the curve. Each end walks down the slope to
+    the nearest valley (at most 0.5 min), so a rough window around the peak takes the whole peak; snap_to_valleys=
+    False uses the exact times. name: compound name (spreads to the same peak in all samples). Check the result with
+    figure() when neighbouring peaks are close."""
+    return _run(workspace.integrate, rt_start, rt_end, samples, channel, name, snap_to_valleys)
 
 
 @server.tool()
