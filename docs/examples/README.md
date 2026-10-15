@@ -29,6 +29,22 @@ Open **PDA** in the right panel. Select a retention time and wavelength in the h
 
 The fixture uses the reader's verified LabSolutions 5.141 ASCII convention: encoded wavelength values are hundredths of nm, and encoded absorbance is converted to mAU by the reader. It is a demonstration fixture, not an export from a physical instrument.
 
+## LC-MS mixture
+
+Open **[lcms-mixture.gecko](lcms-mixture.gecko)** for a workspace containing three named, integrated TIC peaks. Or import **[synthetic_lcms_pos.cdf](synthetic_lcms_pos.cdf)** to start from the source data.
+
+The synthetic positive-mode ANDI-MS netCDF contains 361 scans from 0 to 12 minutes. Each scan has 22 centroid mass/intensity pairs. Three components elute near 2.45, 5.8, and 8.35 minutes with different mass spectra; these are demonstration signals with no chemical identity assigned.
+
+1. In **Peaks**, select **Component B** and open **Peak mass** in the right panel. Its spectrum is averaged over the selected integration window.
+2. Use **MS scan** to inspect a single scan at a retention time.
+3. Open **EIC**, enter target m/z `269.12` and tolerance `0.2`, then click **Extract**. The extracted trace peaks near 5.8 minutes.
+
+## Publication preview and FAIR-data export
+
+From the reaction-progress project, choose **Publication** and **Single-column (84 mm)**. The figure appears inside a paper layout and remains editable through the figure inspector. Full-width and presentation presets show other intended contexts.
+
+Open **Export** to try **FAIR-data package**. The ZIP collects the original sources, results, figure, metadata, processing history, and report. This is a local export, with repository details available to complete before sharing or deposition.
+
 ## Screenshots
 
 The README screenshots show the actual application on a separate local server, using only the files in this folder. The reaction-progress SVG is exported from the displayed figure. The ready-to-use project is saved through the application's Save control.
