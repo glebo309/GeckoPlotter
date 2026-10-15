@@ -54,6 +54,7 @@ from services.plot_settings_service import DEFAULT_PALETTE, palette_options
 from callbacks.research_export_callbacks import register_research_export_callbacks, register_provenance_capture
 from components.paper_mock import create_paper_mock
 from callbacks.publication_preview_callbacks import register_publication_preview_callbacks
+from components.about_window import create_about_window
 from components.session_controls import create_session_header_controls, create_session_banner, create_session_status, create_session_support
 
 # App setup
@@ -250,6 +251,7 @@ _layout_body = html.Div(
         html.Div(id='selected-shapes-sync-output', style={'display': 'none'}),
         html.Div(id='dummy-output', style={'display': 'none'}),  # For clientside callbacks
         create_session_support(),  # project (.gecko) stores, download target, dialogs
+        create_about_window(),  # opened by clicking the logo
 
         html.Div(
             id='main-container',
@@ -259,7 +261,10 @@ _layout_body = html.Div(
                     className='app-header',
                     children=[
                         html.Div(
+                            id='app-logo',
                             className='app-logo',
+                            n_clicks=0,
+                            title='About GeckoPlotter: version and folders',
                             children=[
                                 html.Span('🦎', style={'fontSize': '18px'}),
                                 html.Span('GeckoPlotter'),
@@ -1922,6 +1927,8 @@ from callbacks.axis_inspector_callbacks import register_axis_inspector_callbacks
 register_axis_inspector_callbacks(app)
 from callbacks.workspace_callbacks import register_workspace_callbacks
 register_workspace_callbacks(app, data_manager)
+from callbacks.about_callbacks import register_about_callbacks
+register_about_callbacks(app)
 from callbacks.ms_polarity_callbacks import register_ms_polarity_callbacks
 register_ms_polarity_callbacks(app, data_manager)
 from callbacks.session_callbacks import register_session_callbacks
