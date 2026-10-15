@@ -167,9 +167,10 @@ def register_export_callbacks(app: dash.Dash, data_manager) -> None:
         [Output('exp-data-download', 'data', allow_duplicate=True),
          Output('status-text', 'children', allow_duplicate=True)],
         Input('exp-results-btn', 'n_clicks'),
+        State('plot-tabs', 'data'),
         prevent_initial_call=True,
     )
-    def export_results_workbook(n_clicks):
+    def export_results_workbook(n_clicks, tabs=None):
         """Every result of the workspace in one Excel workbook (services/results_workbook)."""
         if not n_clicks:
             return dash.no_update, dash.no_update
@@ -178,7 +179,8 @@ def register_export_callbacks(app: dash.Dash, data_manager) -> None:
         from datetime import date
         from services.results_workbook import build_results_workbook
         name = (getattr(data_manager, 'session_meta', {}) or {}).get('project_name') or 'GeckoPlotter results'
-        content = build_results_workbook(data_manager, name)
+        labels = {t.get('id'): t.get('label') for t in (tabs or []) if t.get('type', 'raw') == 'raw'}
+        content = build_results_workbook(data_manager, name, tab_labels=labels)
         filename = f"{name} {date.today().isoformat()}.xlsx".replace('/', '-')
         return (dict(content=base64.b64encode(content).decode(), filename=filename, base64=True),
                 f'Exported {filename}')

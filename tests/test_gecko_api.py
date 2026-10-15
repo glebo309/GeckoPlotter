@@ -212,15 +212,19 @@ def test_agent_changes_are_in_the_history_with_the_agent_and_the_project_says_so
     assert 'no MCP agent' in agent_note(Workspace().store)
 
 
-def test_the_results_workbook_has_a_summary_per_compound_and_sample_and_every_peak(sequence, tmp_path):
+def test_the_results_workbook_has_a_sheet_per_tab_with_areas_peaks_and_traces(sequence, tmp_path):
     from openpyxl import load_workbook
     ws = Workspace()
     ws.open(str(sequence))
     ws.integrate(8.2, 8.6, samples=['4', 'CONTROL 4'], channel='+TIC', name='m634 compound')
     book = load_workbook(ws.export_results(str(tmp_path / 'results')))
-    assert book.sheetnames[:2] == ['Summary', 'Peaks'] and 'About' in book.sheetnames
-    summary = list(book['Summary'].iter_rows(min_row=3, values_only=True))
-    assert summary[0][:4] == ('Compound', 'Channel', '4', 'CONTROL 4')
-    assert summary[1][0] == 'm634 compound' and summary[1][2] == pytest.approx(2 * summary[1][3], rel=0.05)
-    peaks = list(book['Peaks'].iter_rows(values_only=True))
-    assert len(peaks) == 3 and peaks[0][:3] == ('Sample', 'Channel', 'Peak')
+    assert book.sheetnames == ['Overview', 'HalB', 'HalB data', 'Samples', 'History']
+    rows = list(book['HalB'].iter_rows(values_only=True))
+    header = next(r for r in rows if r and r[0] == 'Compound')
+    areas = rows[rows.index(header) + 1]
+    assert header[:5] == ('Compound', 'Channel', 'RT (min)', '4', 'CONTROL 4')
+    assert areas[0] == 'm634 compound' and areas[3] == pytest.approx(2 * areas[4], rel=0.05)
+    peaks = [r for r in rows[rows.index(header) + 2:] if r and r[0] in ('4', 'CONTROL 4')]
+    assert len(peaks) == 2
+    data = list(book['HalB data'].iter_rows(min_row=4, max_row=6, values_only=True))
+    assert data[0][0].startswith('4 · ') and data[1][:2] == ('Time (min)', 'Signal') and data[2][0] is not None

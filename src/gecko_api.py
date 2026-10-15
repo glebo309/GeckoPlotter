@@ -535,7 +535,8 @@ class Workspace:
         return {'sample': bundle.name, 'spectrum': what, 'polarity': polarity, 'peaks': _ions(mz, inten, top)}
 
     def export_results(self, path: str) -> str:
-        """Every result in one Excel workbook (Summary, Concentrations, Peaks, Calibration, Samples, History, About)."""
+        """The whole project as one Excel workbook: an overview, one sheet per plot tab (peak areas per compound and
+        sample, every peak) with its traces, calibration, samples and history."""
         from services.results_workbook import build_results_workbook
         path = Path(path).expanduser()
         if path.suffix.lower() != '.xlsx':
