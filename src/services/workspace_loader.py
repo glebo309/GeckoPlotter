@@ -26,13 +26,19 @@ def split_duplicate_exports(files):
     """Agilent's export of an LC-MS run holds it several times over: full-scan spectra (``*_spectra.cdf``), the UV
     channels (``*.dx_VWD1A/B.CSV``), and small copies of every trace (``<sample>_00N.cdf``, ``*.dx_MS1 ±TIC/EIC
     .CSV``) that only cluttered the channels (TIC/EIC copies labelled as UV). With spectra present, those copies are
-    returned apart. Returns (kept, duplicates)."""
+    returned apart. A UV .cdf (``*_VWD1A.cdf``) is kept when no .CSV of that detector came with it: then it is the only
+    copy of that channel. Returns (kept, duplicates)."""
+    import re
     names = [name.lower() for name, _ in files]
     if not any(name.endswith('_spectra.cdf') for name in names):
         return list(files), []
+    uv = re.compile(r'(vwd|dad|mwd)\d*[a-z]?')
+    csv_detectors = {m.group(0) for low in names if low.endswith('.csv') for m in [uv.search(low)] if m}
     kept, duplicates = [], []
     for (name, raw), low in zip(files, names):
-        copy = (low.endswith('.cdf') and not low.endswith('_spectra.cdf')) or \
+        detector = uv.search(low)
+        copy = (low.endswith('.cdf') and not low.endswith('_spectra.cdf')
+                and not (detector and detector.group(0) not in csv_detectors)) or \
             (low.endswith('.csv') and '.dx_ms' in low)
         (duplicates if copy else kept).append((name, raw))
     return kept, duplicates

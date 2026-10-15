@@ -154,6 +154,15 @@ def test_duplicate_agilent_exports_are_left_out_when_the_spectra_are_there():
     assert split_duplicate_exports(files[1:]) == (files[1:], [])          # no spectra: everything is the data
 
 
+def test_a_uv_cdf_is_kept_when_it_is_the_only_copy_of_that_detector():
+    from services.workspace_loader import split_duplicate_exports
+    files = [(n, b'') for n in ('run_MS1 +TIC SCAN ESI_spectra.cdf', 'run_MS1 +TIC SCAN ESI.cdf', 'run_VWD1A.cdf',
+                                'run_VWD1B.cdf', 'run.dx_VWD1B.CSV')]
+    kept, duplicates = split_duplicate_exports(files)
+    assert [n for n, _ in kept] == ['run_MS1 +TIC SCAN ESI_spectra.cdf', 'run_VWD1A.cdf', 'run.dx_VWD1B.CSV']
+    assert [n for n, _ in duplicates] == ['run_MS1 +TIC SCAN ESI.cdf', 'run_VWD1B.cdf']
+
+
 def test_a_folder_of_runs_is_one_group_and_tab_named_after_it_with_one_run_shown(sequence):
     from callbacks.viz_callbacks import _get_overlay_group, _tab_id_from_group, _tab_label_from_group
     ws = Workspace()
