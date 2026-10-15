@@ -1,5 +1,7 @@
 # GeckoPlotter for agents (MCP)
 
+**Under construction.** This is an early local integration. Tool coverage and the agent-to-GUI review workflow are still being developed.
+
 `gecko_mcp.py` lets Claude (Claude Code, Claude Desktop) or another MCP client work with GeckoPlotter: open runs,
 integrate, extract ion chromatograms, read mass spectra, draw figures and save a project. The project opens in the app
 with every peak in place, so the user checks and corrects the agent's integration by hand.

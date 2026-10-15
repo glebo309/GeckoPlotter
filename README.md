@@ -10,7 +10,8 @@
   <a href="#get-started">Get started</a> ·
   <a href="#try-the-examples">Try the examples</a> ·
   <a href="#supported-formats">Supported formats</a> ·
-  <a href="docs/AGENT.md">Agent interface</a> ·
+  <a href="#export-a-fair-data-package">FAIR-data export</a> ·
+  <a href="docs/AGENT.md">Agent interface (in development)</a> ·
   <a href="#from-anyplot-to-geckoplotter">Project history</a>
 </p>
 
@@ -38,6 +39,18 @@ Built by [Glenn Bojanov](https://github.com/glebo309) for day-to-day laboratory 
 *Select a point in the heatmap to inspect its spectrum and chromatogram. Add a wavelength as a channel when you want to keep working with it.*
 
 Shimadzu LabSolutions `.lcd` files open directly with their PDA matrix, recorded channels, sample metadata, instrument status traces, and embedded method. Sectioned ASCII exports are supported too. Separate `.lcm` method files attach to matching samples, so method details stay with the analysis. See the [LCD reader notes](docs/LCD_FORMAT_NOTES.md) for the verified scope.
+
+### Connect a chromatographic peak to its mass spectrum
+
+![GeckoPlotter showing the integrated Component B peak in the TIC, the peak table, and the mass spectrum averaged over the peak](docs/images/lcms-peak-spectrum.png)
+
+*Select a peak to inspect its averaged mass spectrum alongside the chromatogram and integration results. The MS scan view also lets you inspect individual acquisition scans.*
+
+![GeckoPlotter extracting the m/z 269.12 ion chromatogram with a 0.2 m/z tolerance alongside the original TIC](docs/images/lcms-eic.png)
+
+*Extract a target ion to see where it elutes. This synthetic example uses m/z 269.12 with a ±0.2 m/z window; it is a demonstration signal with no compound assignment.*
+
+Open the [LC-MS example project](docs/examples/lcms-mixture.gecko), or import its [scan-resolved netCDF source](docs/examples/synthetic_lcms_pos.cdf), to try peak spectra, scan selection, and EIC extraction yourself.
 
 ## Get started
 
@@ -78,7 +91,8 @@ Start with the [example guide](docs/examples/README.md). All included data are s
 
 1. Open [reaction-progress.gecko](docs/examples/reaction-progress.gecko) for three named samples with integrated peaks, ready to inspect. Or import the [three CSV files](docs/examples/) to try the analysis yourself.
 2. Import [synthetic_pda.txt](docs/examples/synthetic_pda.txt), then open **PDA** in the right panel. Move through the heatmap, inspect the spectrum, and add a wavelength channel.
-3. Use **Publication** to make a figure copy, or **Export** to save a figure or FAIR-data package. Save your workspace as a `.gecko` project to reopen it later.
+3. Open [lcms-mixture.gecko](docs/examples/lcms-mixture.gecko), select **Component B**, and choose **Peak mass**. In **EIC**, extract m/z `269.12` with tolerance `0.2`.
+4. Use **Publication** to make a figure copy, or **Export** to save a figure or FAIR-data package. Save your workspace as a `.gecko` project to reopen it later.
 
 ## Supported formats
 
@@ -103,13 +117,21 @@ Support follows the contents and export layout, not just the filename extension.
 
 Shimadzu `.lcb` batch files are not currently supported. The `.lcd` reader does not yet import LabSolutions' own processed peak tables or its LC-MS data. See [adding instrument formats](docs/ADDING_FORMATS.md) for the adapter contract and validation workflow.
 
-## Figures and research packages
+## Preview an editable figure in context
 
-![Publication figure made from the synthetic reaction-progress example](docs/images/reaction-progress-figure.svg)
+![GeckoPlotter single-column publication preview showing the editable figure inside a two-column paper layout, with figure styling controls beside it](docs/images/publication-single-column.png)
 
-*The figure and the editable workspace come from the same analysis.*
+*The 84 mm single-column preview places your figure in a paper layout while the figure remains editable. Adjust axes, labels, colours, and line widths in the inspector and see the result in context.*
 
-Figure export supports **SVG, PDF, PNG, and TIFF**, with physical dimensions and resolution controls. You can export the current view or work on a publication copy with its own styling.
+Use **Publication** to create a separate figure copy, then choose **Single-column (84 mm)**, **Full-width (174 mm)**, or **Presentation (16:9)** to judge its size and readability for the intended use. The page supplies placeholder text and a caption to show the surrounding layout. The plot remains connected to the figure editor inside that preview.
+
+Export **SVG, PDF, PNG, or TIFF** with physical dimensions and resolution controls. You can also export the current view directly. [View the exported example figure](docs/images/reaction-progress-figure.svg).
+
+## Export a FAIR-data package
+
+![GeckoPlotter FAIR-data export panel with dataset metadata, selectable figure formats, and the Download FAIR-data ZIP control beside the source figure](docs/images/fair-data-export.png)
+
+*Keep the original data, analysis, figure, and report together. Enter the dataset details, choose figure formats, and download the package locally.*
 
 **Export → FAIR-data package** collects the analysis into one ZIP:
 
@@ -121,9 +143,11 @@ Figure export supports **SVG, PDF, PNG, and TIFF**, with physical dimensions and
 
 Repository details let you add authors, identifiers, methods, funding, and licensing. Export prepares a local package; it does not deposit it in a repository or certify compliance. [Research export details](docs/RESEARCH_EXPORT.md)
 
-## Use from an agent or Python
+## Agentic workflows and MCP: under construction
 
-The local **MCP interface** lets an agent open data, inspect samples, integrate peaks, extract ion chromatograms, read mass spectra, make a figure, and save a project. The result opens in GeckoPlotter for visual review and manual editing.
+**The MCP integration and agentic workflow are under active construction.** An early local interface exists; tool coverage and the review/handoff workflow are still being developed.
+
+The current **MCP interface** lets an agent open data, inspect samples, integrate peaks, extract ion chromatograms, read mass spectra, make a figure, and save a project. The result opens in GeckoPlotter for visual review and manual editing.
 
 The agent works in its own workspace and hands the analysis over through a saved project. It does not control an already-open browser workspace. The same operations are available through the Python `Workspace` API for scripts and notebooks. [Setup, tools, and current limits](docs/AGENT.md)
 
@@ -161,7 +185,7 @@ This project has grown through three generations:
 | --- | --- | --- |
 | 1 | **[AnyPlot](https://github.com/glebo309/anyplot-archive)** | The first major milestone: a desktop HPLC viewer built with tkinter and Matplotlib, with overlays, peak integration, annotations, and figure export. |
 | 2 | **[GeckoPlotter for Streamlit](https://github.com/glebo309/geckoplotter-streamlit)** | The browser-based predecessor, expanding into LC-MS, calibration, and scientific analysis. |
-| 3 | **GeckoPlotter, this repository** | A Dash/Plotly workstation with linked detector views, editable analysis, persistent projects, publication figures, research packages, and an agent interface. |
+| 3 | **GeckoPlotter, this repository** | A Dash/Plotly workstation with linked detector views, editable analysis, persistent projects, publication figures, research packages, and an agent interface under construction. |
 
 Both predecessors are archived. Older documentation and local folders may call the Dash application “V2”; counting AnyPlot, it is the third generation. The application is now substantially broader than the original chromatogram viewer.
 
