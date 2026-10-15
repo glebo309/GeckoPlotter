@@ -131,7 +131,8 @@ def test_the_mcp_server_offers_the_tools():
     import asyncio
     names = {tool.name for tool in asyncio.run(gecko_mcp.server.list_tools())}
     assert {'open_data', 'list_samples', 'detect_peaks', 'integrate', 'peak_table', 'extract_ion_chromatogram',
-            'mass_spectrum', 'figure', 'save_project'} <= names
+            'mass_spectrum', 'figure', 'save_project', 'export_results', 'calibrate', 'list_calibrations',
+            'remove_calibration', 'identify_agent'} <= names
 
 
 def test_an_integration_window_on_the_flanks_takes_the_whole_peak(sequence):

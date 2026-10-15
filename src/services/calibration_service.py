@@ -99,6 +99,10 @@ class CalibrationService:
         self._models[model.model_id] = model
         return model
 
+    def remove_model(self, model_id: str) -> bool:
+        """Delete a calibration; True when it existed."""
+        return self._models.pop(model_id, None) is not None
+
     def replace_model(self, model: CalibrationModel) -> CalibrationModel:
         """Atomically commit an editor model, keeping its ID and copying data.
 

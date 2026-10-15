@@ -169,6 +169,7 @@ class Workspace:
     def save(self, path: str, project_name: Optional[str] = None) -> str:
         """Save the workspace as a project (.gecko) that opens in GeckoPlotter with all peaks, names and calibrations."""
         from services import session_service
+        self._refresh_concentrations()
         path = Path(path).expanduser()
         if path.suffix.lower() != '.gecko':
             path = path.with_suffix('.gecko')
@@ -372,6 +373,7 @@ class Workspace:
 
     def peaks(self, samples=None) -> List[dict]:
         """The peak table of every channel that has peaks."""
+        self._refresh_concentrations()
         rows = []
         for bundle in self._samples(samples):
             for component in bundle.component_list:
@@ -393,6 +395,141 @@ class Workspace:
                 if p.peak_id == peak or (p.name or '').lower() == key or (p.label or '').lower() == key:
                     return component, p
         raise GeckoError(f'{bundle.name} has no peak "{peak}".')
+
+    # -- calibration ----------------------------------------------------------------------------------------------
+
+    def _refresh_concentrations(self) -> None:
+        from services.calibration_workflow import apply_calibrations
+        apply_calibrations(self.store)
+
+    def calibrate(self, peak: str, standards: dict, units: str = 'mM', fit: str = 'linear',
+                  through_zero: bool = False, channel=None, rt_tolerance: float = 0.2,
+                  name: Optional[str] = None) -> dict:
+        """Fit a calibration of ``peak`` from standard samples ({sample: concentration}) as the app's calibration editor
+        does, and quantify that peak in every other sample (matched by retention time ± ``rt_tolerance`` on the same
+        channel). Recalibrating under the same name replaces the curve. Returns the fit, the standards back-calculated,
+        the concentrations and warnings to read."""
+        from services.calibration_workflow import add_peak_rows, apply_calibrations, fit_calibration_form, \
+            peak_candidates
+        if fit not in ('linear', 'quadratic', 'power'):
+            raise GeckoError('fit must be linear, quadratic or power.')
+        warnings, ids, concentrations, group = [], [], {}, None
+        for sample_name, concentration in (standards or {}).items():
+            bundle = self._sample(sample_name)
+            components = [self._channel(bundle, channel)] if channel is not None else bundle.component_list
+            found = None
+            for component in components:
+                for p in self.store.peak_service.get_peaks(component.component_id) or []:
+                    if peak in (p.name, p.label, p.peak_id) and (group is None or p.group_id == group or found is None):
+                        found = (component, p)
+                        if group is None or p.group_id == group:
+                            break
+                if found:
+                    break
+            if not found:
+                warnings.append(f'{bundle.name} has no peak "{peak}": left out of the calibration.')
+                continue
+            group = group or found[1].group_id
+            key = f'{found[0].component_id}:{found[1].peak_id}'
+            ids.append(key)
+            concentrations[key] = float(concentration)
+        if len(ids) < 2:
+            raise GeckoError(f'Need at least two standards with the peak "{peak}"; found {len(ids)}.')
+        try:
+            rows = add_peak_rows([], ids, peak_candidates(self.store), 'area')
+        except ValueError as exc:
+            raise GeckoError(f'{exc} Give channel= to choose one.') from None
+        for row in rows:
+            row['concentration'] = concentrations[row['id']]
+        label = (name or peak).strip()
+        service = self.store.calibration_service
+        existing = next((m.model_id for m in service.get_all_models().values() if m.analyte_name == label), None)
+        position = sum(r['position'] for r in rows) / len(rows)
+        for other in service.get_all_models().values():
+            if other.model_id != existing and other.signal_key == rows[0]['signal_key'] and \
+                    other.match_position is not None and abs(other.match_position - position) <= rt_tolerance + \
+                    (other.match_tolerance or 0):
+                raise GeckoError(f'The calibration "{other.analyte_name}" already covers this peak on this channel; '
+                                 'remove it first (remove_calibration).')
+        try:
+            model = fit_calibration_form(service, existing, rows, range(len(rows)), name=label, units=units,
+                                         fit_type=fit, force_zero=through_zero, response_type='area',
+                                         position=position, tolerance=rt_tolerance, auto_apply=True)
+        except ValueError as exc:
+            raise GeckoError(str(exc)) from None
+        results = apply_calibrations(self.store)
+        coefficients = list(model.coefficients or [])
+        names = {'linear': ('slope', 'intercept'), 'quadratic': ('a', 'b', 'c'), 'power': ('a', 'b')}[fit]
+        if model.r_squared is not None and model.r_squared < 0.99:
+            warnings.append(f'R² is {model.r_squared:.4f}: check the standards.')
+        standard_rows = []
+        for point in model.standards:
+            back = None
+            try:
+                back = service.predict_concentration(model.model_id, point.area)
+            except (ValueError, TypeError, ArithmeticError):
+                pass
+            error = 100 * (back - point.concentration) / point.concentration if back is not None and \
+                point.concentration else None
+            if error is not None and abs(error) > 15:
+                warnings.append(f'{point.sample_name} back-calculates {error:+.0f} % off.')
+            standard_rows.append({'sample': point.sample_name.split(' / ')[0], 'concentration': point.concentration,
+                                  'area': point.area, 'back_calculated': back,
+                                  'error_percent': round(error, 2) if error is not None else None,
+                                  'used': point.included})
+        standard_ids = set(ids)
+        candidates = {c['id']: c for c in peak_candidates(self.store)}
+        quantified = []
+        for key, result in results.items():
+            if result.get('model_id') != model.model_id or key in standard_ids:
+                continue
+            c = candidates[key]
+            quantified.append({'sample': c['sample'], 'peak': c['peak_name'], 'rt': c['position'],
+                               'area': c['response'], 'concentration': result['concentration'],
+                               'status': result['status']})
+            if result['status'] != 'Calibrated':
+                warnings.append(f"{c['sample']}: {result['status']}.")
+        matched = {q['sample'] for q in quantified} | {r['sample_name'].split(' / ')[0] for r in rows}
+        for c in candidates.values():
+            if c['peak_name'] == label or c['peak_name'] == peak:
+                same = True
+            else:
+                same = any(x.peak_id == c['peak_id'] and group and x.group_id == group
+                           for x in self.store.peak_service.get_peaks(c['file_id']))
+            if same and c['sample'] not in matched:
+                warnings.append(f"{c['sample']}: its {c['peak_name']} at {c['position']:.2f} min is outside the "
+                                f"window {position - rt_tolerance:.2f}-{position + rt_tolerance:.2f} min; "
+                                'a larger rt_tolerance would include it.')
+        concs = [r['concentration'] for r in rows]
+        self._record(f'Calibrated {label}: {fit}{" through zero" if through_zero else ""}, {len(rows)} standards '
+                     f'{min(concs):g}-{max(concs):g} {units}, R² {model.r_squared or 0:.4f}')
+        return {'calibration': label, 'fit': fit, 'through_zero': through_zero, 'units': units,
+                'coefficients': dict(zip(names, coefficients)), 'r_squared': model.r_squared,
+                'rt_window': [round(position - rt_tolerance, 3), round(position + rt_tolerance, 3)],
+                'standards': standard_rows, 'concentrations': quantified, 'warnings': warnings}
+
+    def list_calibrations(self) -> List[dict]:
+        out = []
+        for model in self.store.calibration_service.get_all_models().values():
+            used = [p.concentration for p in model.standards if p.included]
+            out.append({'calibration': model.analyte_name, 'fit': model.fit_type, 'units': model.units,
+                        'r_squared': model.r_squared, 'standards': len(used),
+                        'range': [min(used), max(used)] if used else None,
+                        'rt_window': [model.match_position - model.match_tolerance,
+                                      model.match_position + model.match_tolerance]
+                        if model.match_position is not None else None})
+        return out
+
+    def remove_calibration(self, name: str) -> List[dict]:
+        service = self.store.calibration_service
+        model = next((m for m in service.get_all_models().values() if name in (m.analyte_name, m.model_id)), None)
+        if model is None:
+            raise GeckoError(f'No calibration "{name}". Calibrations: ' +
+                             ', '.join(m.analyte_name for m in service.get_all_models().values()))
+        service.remove_model(model.model_id)
+        self._refresh_concentrations()
+        self._record(f'Removed calibration {model.analyte_name}')
+        return self.list_calibrations()
 
     # -- PDA (3D UV) ----------------------------------------------------------------------------------------------
 
@@ -538,6 +675,7 @@ class Workspace:
         """The whole project as one Excel workbook: an overview, one sheet per plot tab (peak areas per compound and
         sample, every peak) with its traces, calibration, samples and history."""
         from services.results_workbook import build_results_workbook
+        self._refresh_concentrations()
         path = Path(path).expanduser()
         if path.suffix.lower() != '.xlsx':
             path = path.with_suffix('.xlsx')

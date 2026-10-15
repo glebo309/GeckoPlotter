@@ -21,74 +21,7 @@ def _number(value, label):
     return number
 
 
-def add_peak_rows(rows, selected_ids, candidates, response_type):
-    """Append selected measured peaks without losing entered concentrations."""
-    result = copy.deepcopy(rows or [])
-    existing = {r.get('id') for r in result}
-    signals = {(r['signal_key'], r.get('x_units', '')) for r in result if r.get('signal_key')}
-    by_id = {r['id']: r for r in candidates}
-    for key in selected_ids or []:
-        if key in existing:
-            continue
-        if key not in by_id:
-            raise ValueError('A selected peak is no longer available. Refresh the peak selection.')
-        peak = by_id[key]
-        signals.add((peak['signal_key'], peak['x_units']))
-        if len(signals) > 1:
-            raise ValueError('Use peaks from the same signal and X units for one calibration.')
-        result.append(dict(id=key, sample_name=f"{peak['sample']} / {peak['peak_name']}",
-            concentration=None, area=peak['height'] if response_type == 'height' else peak['response'],
-            position=peak['position'], signal_key=peak['signal_key'], x_units=peak['x_units'],
-            response_units=peak.get('height_units', '') if response_type == 'height' else peak['response_units'],
-            measured_area=peak['response'], measured_height=peak['height'],
-            area_units=peak['response_units'], height_units=peak.get('height_units', '')))
-        existing.add(key)
-    return result
-
-
-def fit_calibration_form(service, model_id, rows, included_rows, *, name, units,
-                         fit_type, force_zero, response_type, position, tolerance, auto_apply):
-    """Validate and fit a copy; failed edits never partially replace a model."""
-    if not str(name or '').strip():
-        raise ValueError('Give the calibration an analyte name.')
-    tolerance = _number(tolerance, 'Matching tolerance')
-    if tolerance <= 0:
-        raise ValueError('Matching tolerance must be greater than zero.')
-    position = None if position in (None, '') else _number(position, 'Peak position')
-    signals = {(r['signal_key'], r.get('x_units', ''), r.get('response_units', ''))
-               for r in rows if r.get('signal_key')}
-    if len(signals) > 1:
-        raise ValueError('Use standards from the same signal and units.')
-    trial = copy.deepcopy(service)
-    model = trial.get_model(model_id) if model_id else None
-    if model is None:
-        model = trial.create_model(str(name).strip(), '')
-    if signals:
-        model.signal_key, model.x_units, model.response_units = next(iter(signals))
-    model.analyte_name, model.units = str(name).strip(), str(units or '').strip()
-    model.fit_type, model.force_zero = fit_type or 'linear', bool(force_zero)
-    model.response_type = response_type or 'area'
-    model.match_position, model.match_tolerance = position, tolerance
-    model.auto_apply = bool(auto_apply and model.signal_key and position is not None)
-    selected = set(included_rows or [])
-    points = []
-    for index, row in enumerate(rows):
-        included = index in selected
-        if not included and row.get('concentration') in (None, ''):
-            continue
-        concentration = _number(row.get('concentration'), f"Concentration in row {index + 1}")
-        response = _number(row.get('area'), f"Response in row {index + 1}")
-        if concentration < 0:
-            raise ValueError('Standard concentrations cannot be negative.')
-        measured_position = row.get('position')
-        if included and position is not None and measured_position is not None:
-            if abs(float(measured_position) - position) > tolerance:
-                raise ValueError(f'Peak in row {index + 1} is outside the matching tolerance.')
-        points.append(CalibrationPoint(str(row.get('sample_name') or f'Standard {index+1}'),
-            concentration, response, included, source_id=str(row.get('id') or ''), position=measured_position))
-    trial.update_standards(model.model_id, points)
-    trial.fit_model(model.model_id)
-    return service.replace_model(model)
+from services.calibration_workflow import add_peak_rows, fit_calibration_form  # noqa: E402,F401  (shared with the agent)
 
 
 def _form_signature(form):
@@ -146,6 +79,18 @@ def register_calibration_callbacks(app: dash.Dash, data_manager) -> None:
     inputs += [Input(cid,prop) for cid,prop in field_ids]
     inputs += [Input('cal-import-peaks','data')]
     states = [State('cal-standards-table','data'),State('cal-peak-picker','value'),State('cal-revision','data')]
+
+    @app.callback(
+        [Output('cal-active-model', 'data', allow_duplicate=True),
+         Output('cal-active-model', 'value', allow_duplicate=True)],
+        Input('loaded-files', 'data'), State('cal-active-model', 'value'), prevent_initial_call=True)
+    def list_calibrations(_files, current):
+        """The calibrations of the workspace in the editor's list: after opening a project, after the agent made one, after
+        removing data. The first is shown when none was chosen."""
+        options = [{'value': m.model_id, 'label': m.analyte_name} for m in service.get_all_models().values()]
+        ids = [o['value'] for o in options]
+        value = current if current in ids else (ids[0] if ids else None)
+        return options, (value if value != current else dash.no_update)
 
     @app.callback(outputs, inputs, states, prevent_initial_call=True)
     def edit_calibration(_new, _add, _manual, _fit, upload, model_id, _timestamp, included, _link, *args):

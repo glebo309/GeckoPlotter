@@ -29,7 +29,8 @@ server = MCPServer(
         'check or correct every peak by hand. Show a figure when a result depends on where a peak was cut. '
         'Single-quadrupole m/z values are read about 0.4-0.5 below the exact mass. Samples with PDA data hold the '
         'whole UV range: list_samples shows pda=true; add_uv_channel reads any wavelength, uv_spectrum a spectrum. '
-        'First call identify_agent with your model name: changes are recorded as made by an MCP agent.'),
+        'First call identify_agent with your model name: changes are recorded as made by an MCP agent. To quantify, '
+        'integrate a peak in the standards and call calibrate with {sample: concentration}; read its warnings.'),
 )
 workspace = Workspace()
 
@@ -122,6 +123,30 @@ def peak_table(samples: list[str] | None = None, ctx: Context = None) -> list:
 def rename_peak(sample: str, peak: str, new_name: str, ctx: Context = None) -> list:
     """Rename a peak (by its name or id); the same peak in every sample gets the name. Returns the peak table."""
     return _run(workspace.rename_peak, sample, peak, new_name, ctx=ctx)
+
+
+@server.tool()
+def calibrate(peak: str, standards: dict[str, float], units: str = 'mM', fit: str = 'linear',
+              through_zero: bool = False, channel: str | None = None, rt_tolerance: float = 0.2,
+              name: str | None = None, ctx: Context = None) -> dict:
+    """Calibrate a peak from standards: standards maps sample name -> concentration (e.g. {"Ala 1 mM": 1.0, ...}).
+    The peak (by its name) must be integrated in the standards first. Every other sample with that peak (same channel,
+    retention time ± rt_tolerance min) gets a concentration. fit: linear, quadratic or power. Read 'warnings':
+    missing standards, low R², standards that back-calculate badly, samples outside the calibrated range or the
+    retention-time window. Recalibrating with the same name replaces the curve."""
+    return _run(workspace.calibrate, peak, standards, units, fit, through_zero, channel, rt_tolerance, name, ctx=ctx)
+
+
+@server.tool()
+def list_calibrations(ctx: Context = None) -> list:
+    """The calibrations of the workspace: name, fit, units, R², number of standards, range, retention-time window."""
+    return _run(workspace.list_calibrations, ctx=ctx)
+
+
+@server.tool()
+def remove_calibration(name: str, ctx: Context = None) -> list:
+    """Delete a calibration (its concentrations are cleared); returns the remaining calibrations."""
+    return _run(workspace.remove_calibration, name, ctx=ctx)
 
 
 @server.tool()
