@@ -266,7 +266,7 @@ _layout_body = html.Div(
                             n_clicks=0,
                             title='About GeckoPlotter: version and folders',
                             children=[
-                                html.Span('🦎', style={'fontSize': '18px'}),
+                                html.Img(src='/assets/logo.svg', className='app-logo-icon', alt=''),
                                 html.Span('GeckoPlotter'),
                             ],
                         ),
