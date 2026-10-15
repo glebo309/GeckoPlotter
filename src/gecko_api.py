@@ -160,8 +160,31 @@ class Workspace:
         path = Path(path).expanduser()
         if path.suffix.lower() != '.gecko':
             path = path.with_suffix('.gecko')
-        saved = session_service.save_session(self.store, str(path), None, project_name=project_name or path.stem)
+        saved = session_service.save_session(self.store, str(path), self._present_results(),
+                                             project_name=project_name or path.stem)
         return str(saved)
+
+    def _present_results(self) -> Optional[dict]:
+        """Open the project on what was done: the runs holding peaks shown (the others of their folder hidden) and the
+        first of them selected, so its peak table and Peak mass match the plot. Returns the app's client state."""
+        from services.channel_visibility import set_sample_visibility, show_channel
+        with_peaks = []
+        for bundle in self._bundles():
+            owners = [c.component_id for c in bundle.component_list
+                      if self.store.peak_service.get_peaks(c.component_id)]
+            if owners:
+                with_peaks.append((bundle, owners))
+        if not with_peaks:
+            return None
+        grouped = getattr(self.store, 'group_overrides', {}) or {}
+        for bundle in self._bundles():
+            if bundle.bundle_id in grouped:
+                set_sample_visibility(self.store, bundle.bundle_id, False)
+        for bundle, owners in with_peaks:
+            set_sample_visibility(self.store, bundle.bundle_id, True)
+            for owner in owners:                          # the channel the peaks are on is drawn
+                show_channel(self.store, owner)
+        return {'active-file': with_peaks[0][1][0]}
 
     # -- what is loaded -------------------------------------------------------------------------------------------
 

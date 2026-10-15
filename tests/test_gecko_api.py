@@ -105,6 +105,11 @@ def test_an_integration_is_saved_in_a_project_that_reopens_with_the_peak(sequenc
     again.open(project)
     reopened = [r for r in again.peaks() if r['name'] == 'm634 compound']
     assert len(reopened) == 1 and reopened[0]['area'] == pytest.approx(peak['area'])
+    shown = {b.name for b in again._bundles() if again.store.visibility_state.get(b.bundle_id, True)}
+    assert shown == {'4'}                                    # it opens on the run that holds the result
+    from services import session_service
+    report = session_service.restore_session(again.store, project)
+    assert report.client_state['active-file'] == again._channel(again._sample('4'), '+TIC').component_id
 
 
 def test_detected_peaks_are_the_detect_buttons_peaks(sequence):

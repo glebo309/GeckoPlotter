@@ -278,6 +278,8 @@ def register_session_callbacks(app, data_manager) -> None:
         if not exists(active):
             active = None
             bundles = list(data_manager.iter_bundles())
+            shown = [b for b in bundles if data_manager.visibility_state.get(b.bundle_id, True)]
+            bundles = shown or bundles                  # never open on a hidden sample: its peaks are not drawn
             if bundles:
                 last = bundles[-1]
                 if last.bundle_type in (BundleType.CHROMATOGRAM, BundleType.LCMS):
