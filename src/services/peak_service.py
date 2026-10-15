@@ -61,6 +61,10 @@ class Peak:
     p_line: Optional[List[Tuple[float, float]]] = None  # User-drawn baseline [(x0,y0),(x1,y1)]
     q1: Optional[Tuple[float, float]] = None  # Constraint point 1
     q2: Optional[Tuple[float, float]] = None  # Constraint point 2
+    # Name label dragged away from its place above the peak: [dx, dy] in screen pixels (dy up), and whether a line
+    # leads from the peak's top to it (Cmd/Ctrl-drag). None: centred above the peak.
+    label_offset: Optional[List[float]] = None
+    label_leader: bool = False
 
 
 class PeakService:
@@ -958,6 +962,20 @@ class PeakService:
             self.remove_peak(file_id, peak.peak_id)
         self.group_peaks_across_samples(file_overlay_map=file_overlay_map)
         return [peak for _, peak in found]
+
+    def set_label_position(self, file_id: str, peak_id: str, offset, leader: bool = False) -> bool:
+        """Place a peak's name label ``offset`` = (dx, dy) screen pixels from its spot above the peak (dy up), with or
+        without a leader line; None puts it back above the peak."""
+        file_id = self._resolve_file_id(file_id)
+        for peak in self._peaks.get(file_id, []):
+            if peak.peak_id == peak_id:
+                if offset is None:
+                    peak.label_offset, peak.label_leader = None, False
+                else:
+                    peak.label_offset = [round(float(offset[0]), 1), round(float(offset[1]), 1)]
+                    peak.label_leader = bool(leader)
+                return True
+        return False
 
     def rename_peak(self, file_id: str, peak_id: str, new_name: str) -> bool:
         """Rename a peak and propagate to all peaks in the same group."""

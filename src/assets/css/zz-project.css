@@ -118,3 +118,9 @@
 .about-btn:focus { outline:none; }
 .about-btn:focus-visible { outline:none; box-shadow:0 0 0 3px rgba(127,209,158,.25); }
 .about-copy-icon { display:inline-flex; color:#d5e3da; }
+
+/* Peak names can be dragged in the plot (assets/js/peak-label-drag.js) */
+.js-plotly-plot.over-peak-label .nsewdrag, .js-plotly-plot.over-peak-label .drag { cursor: grab !important; }
+.peak-label-ghost { position: fixed; z-index: 5000; pointer-events: none; font: 10px "Open Sans", verdana, arial, sans-serif;
+    color: #333; white-space: nowrap; padding: 0 1px; border-radius: 2px; cursor: grabbing; }
+.peak-label-ghost.snapped { color: #2c7a52; text-shadow: 0 0 6px rgba(90,168,119,.45); }

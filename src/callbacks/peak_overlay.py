@@ -130,6 +130,21 @@ def cleanup_peak_traces(fig):
     """Remove all existing peak overlay traces and shapes from the figure."""
     fig.data = [t for t in fig.data if not (hasattr(t, 'meta') and isinstance(t.meta, str) and t.meta in ('peak_overlay', 'deconv_overlay'))]
     fig.layout.shapes = ()
+    fig.layout.annotations = tuple(a for a in (fig.layout.annotations or ())
+                                   if not str(a.name or '').startswith('peak-label:'))
+
+
+def _add_moved_label(fig, peak, text, top, add_kw):
+    """A name label dragged away from its peak (peak.label_offset, screen pixels): an annotation anchored at the
+    peak's top, shifted by the offset, with a thin leader line from the peak when peak.label_leader."""
+    dx, dy = peak.label_offset
+    common = dict(x=peak.rt, y=top, text=text, name=f'peak-label:{peak.peak_id}', font=dict(size=10, color='#333'),
+                  xanchor='center', yanchor='bottom', captureevents=False)
+    if getattr(peak, 'label_leader', False):
+        fig.add_annotation(**common, showarrow=True, ax=dx, ay=-dy, axref='pixel', ayref='pixel', arrowhead=0,
+                           arrowwidth=0.8, arrowcolor='#666', standoff=2, startstandoff=1, **add_kw)
+    else:
+        fig.add_annotation(**common, showarrow=False, xshift=dx, yshift=dy, **add_kw)
 
 
 def add_peak_traces(fig, all_peaks, time_arr, signal_arr, selected_peak_id=None, row=None, labelled=None):
@@ -150,6 +165,7 @@ def add_peak_traces(fig, all_peaks, time_arr, signal_arr, selected_peak_id=None,
     from services.peak_display import register_peak_geometry, refresh_peak_display
 
     for i, peak in enumerate(all_peaks):
+        annotation_start = len(fig.layout.annotations)
         register_peak_geometry(fig, peak)
         trace_start = len(fig.data)
         shape_start = len(fig.layout.shapes)
@@ -173,7 +189,10 @@ def add_peak_traces(fig, all_peaks, time_arr, signal_arr, selected_peak_id=None,
                 hoverinfo='skip',
                 showlegend=False, meta='peak_overlay',
             ), **add_kw)
-            if has_custom_label:
+            if has_custom_label and getattr(peak, 'label_offset', None):
+                label_y = max((v for v in peak.poly_y if v is not None), default=peak.height)
+                _add_moved_label(fig, peak, peak_text, label_y, add_kw)
+            elif has_custom_label:
                 # Above the highest point of the peak (the filled outline follows the signal), never on it.
                 label_y = max((v for v in peak.poly_y if v is not None), default=peak.height)
                 fig.add_trace(go.Scatter(
@@ -192,6 +211,8 @@ def add_peak_traces(fig, all_peaks, time_arr, signal_arr, selected_peak_id=None,
             if is_selected:
                 add_selected_baseline_handle(fig, peak, row=row)
 
+        elif has_custom_label and getattr(peak, 'label_offset', None):
+            _add_moved_label(fig, peak, peak_text, _y_curve(time_arr, signal_arr, peak.rt), add_kw)
         elif has_custom_label:
             marker_y = _y_curve(time_arr, signal_arr, peak.rt)
             fig.add_trace(go.Scatter(
@@ -221,6 +242,9 @@ def add_peak_traces(fig, all_peaks, time_arr, signal_arr, selected_peak_id=None,
                 for shape in fig.layout.shapes[shape_start:]:
                     shape.xref = source.xaxis or 'x'
                     shape.yref = source.yaxis or 'y'
+                for annotation in fig.layout.annotations[annotation_start:]:
+                    annotation.xref = source.xaxis or 'x'
+                    annotation.yref = source.yaxis or 'y'
 
     refresh_peak_display(fig)
 

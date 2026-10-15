@@ -220,6 +220,21 @@ def register_context_menu_callbacks(app: dash.Dash, data_manager) -> None:
         ps.rename_peak(fid, peak.peak_id, name)               # the whole peak group, in every sample
         return (peak_counter or 0) + 1, (render_counter or 0) + 1
 
+    # ── Move a peak's name by dragging it in the plot ─────────────────
+    @app.callback(
+        Output('render-trigger', 'data', allow_duplicate=True),
+        Input('peak-label-move', 'data'),
+        State('render-trigger', 'data'),
+        prevent_initial_call=True,
+    )
+    def move_label_from_plot(move, render_counter):
+        fid, peak = _find_peak((move or {}).get('peak_id'))
+        if fid is None:
+            raise PreventUpdate
+        offset = move.get('offset')
+        ps.set_label_position(fid, peak.peak_id, offset, move.get('leader', False))
+        return (render_counter or 0) + 1
+
     # ── Integrate in All Files ────────────────────────────────────────
     @app.callback(
         [Output('context-menu', 'hidden', allow_duplicate=True),

@@ -57,8 +57,35 @@
     // A peak's name above it in the plot (a text trace of peak_overlay.add_peak_traces, carrying the peak id). Plotly's
     // drag layer lies over the traces and draws these unclipped names in a layer of their own, so the name is found by
     // its text and position.
+    function axisPoint(gd, xref, yref, x, y) {
+        var box = gd.getBoundingClientRect(), fl = gd._fullLayout;
+        var xa = fl[(xref || 'x').replace(/^x/, 'xaxis')], ya = fl[(yref || 'y').replace(/^y/, 'yaxis')];
+        if (!xa || !ya || typeof xa.l2p !== 'function' || typeof ya.l2p !== 'function') return null;
+        return {x: box.left + xa._offset + xa.l2p(Number(x)), y: box.top + ya._offset + ya.l2p(Number(y))};
+    }
+    // A label dragged away from its peak is an annotation named 'peak-label:<id>' (peak_overlay._add_moved_label).
+    function movedPeakLabelAt(gd, event) {
+        var annotations = (gd._fullLayout && gd._fullLayout.annotations) || [];
+        for (var i = 0; i < annotations.length; i++) {
+            var a = annotations[i], name = String(a.name || '');
+            if (name.indexOf('peak-label:') !== 0) continue;
+            var group = gd.querySelector('.annotation[data-index="' + i + '"]');
+            var text = group && group.querySelector('.annotation-text');
+            if (!text) continue;
+            var r = text.getBoundingClientRect();
+            if (event.clientX >= r.left - 3 && event.clientX <= r.right + 3 &&
+                event.clientY >= r.top - 3 && event.clientY <= r.bottom + 3) {
+                return {field: 'peak', peakId: name.slice(11), value: a.text, element: text,
+                        home: axisPoint(gd, a.xref, a.yref, a.x, a.y), leader: !!a.showarrow,
+                        offset: a.showarrow ? [a.ax || 0, -(a.ay || 0)] : [a.xshift || 0, a.yshift || 0]};
+            }
+        }
+        return null;
+    }
     function peakLabelAt(gd, event) {
         if (!gd || !gd._fullData || !gd._fullLayout || !gd.querySelectorAll) return null;
+        var moved = movedPeakLabelAt(gd, event);
+        if (moved) return moved;
         var box = gd.getBoundingClientRect(), texts = null;
         for (var i = 0; i < gd._fullData.length; i++) {
             var trace = gd._fullData[i];
@@ -73,7 +100,9 @@
                 if (!r.width || Math.abs((r.left + r.right) / 2 - px) > 12) continue;
                 if (event.clientX >= r.left - 3 && event.clientX <= r.right + 3 &&
                     event.clientY >= r.top - 3 && event.clientY <= r.bottom + 3) {
-                    return {field: 'peak', peakId: trace.customdata[0], value: name, element: texts[j]};
+                    return {field: 'peak', peakId: trace.customdata[0], value: name, element: texts[j],
+                            home: axisPoint(gd, trace.xaxis, trace.yaxis, trace.x[0], trace.y[0]),
+                            leader: false, offset: [0, 0]};
                 }
             }
         }
@@ -157,6 +186,7 @@
         if(!gd || !gd._context) return;
         var over=!!peakLabelAt(gd,event);
         gd.__geckoOverPeakLabel=over;                    // manual-integration.js then leaves the zoom alone
+        gd.classList.toggle('over-peak-label',over);     // a grab cursor: the name can be dragged (peak-label-drag.js)
         if(over && gd.__geckoDoubleClick===undefined){gd.__geckoDoubleClick=gd._context.doubleClick;gd._context.doubleClick=false;}
         else if(!over && gd.__geckoDoubleClick!==undefined){gd._context.doubleClick=gd.__geckoDoubleClick;delete gd.__geckoDoubleClick;}
     },true);
