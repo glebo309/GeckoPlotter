@@ -153,6 +153,10 @@ class Bundle:
             wl = meta.get('wavelength')
             ch = meta.get('detector_channel', role.value[-1].upper())
             if wl:
+                try:
+                    wl = f'{float(wl):g}'                       # 280.0 (entered) reads as 280
+                except (TypeError, ValueError):
+                    pass
                 return f"UV {wl} nm (Ch {ch})"
             return f"UV Ch {ch}"
         if role == ComponentRole.INTEGRATION:

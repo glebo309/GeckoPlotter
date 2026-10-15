@@ -793,7 +793,7 @@
         if (!gd || event.__geckoManualIntegrationHandled || event.__geckoManualIntegrationSeen) return;
         event.__geckoManualIntegrationSeen = true;
         if (beginModifierPan(gd, event)) return;
-        if (isDoublePointer(gd, event)) {
+        if (isDoublePointer(gd, event) && !gd.__geckoOverPeakLabel) {   // over a peak name: rename, keep the zoom
             stopPlotlyGesture(event);
             gd.__geckoManualIntegrationLastDoubleClickAt = Date.now();
             clearEmptyClickTimer(gd);
@@ -871,6 +871,7 @@
             });
             gd.on('plotly_doubleclick', function () {
                 if (Date.now() - (gd.__geckoAxisResetAt || 0) < 500) return;
+                if (gd.__geckoOverPeakLabel) return;           // double-click on a peak name renames it (figure-label-edit.js)
                 gd.__geckoManualIntegrationLastDoubleClickAt = Date.now();
                 clearEmptyClickTimer(gd);
                 resetAxes(gd);
@@ -892,6 +893,7 @@
 
         gd.addEventListener('dblclick', function (event) {
             if (window.GeckoPlotterAxisReset && window.GeckoPlotterAxisReset.axisAtEvent(gd,event)) return;
+            if (gd.__geckoOverPeakLabel) return;
             gd.__geckoManualIntegrationLastDoubleClickAt = Date.now();
             clearEmptyClickTimer(gd);
             resetAxes(gd);

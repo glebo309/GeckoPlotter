@@ -645,7 +645,9 @@ def compose_raw_figure(data_manager, plot_manager, active_tab_id, group_key, s, 
         cleanup_peak_traces(fig_obj_for_peaks)
         flat_files = [entry for files in visible_files.values() for entry in files]
         labelled = None
-        if layout_mode != 'stacked':
+        if 'hide-labels' in (display_opts or []):
+            labelled = set()                                  # "Hide peak names" (Integration panel)
+        elif layout_mode != 'stacked':
             # Overlaid samples: the same compound (peak group) is named once, above its tallest peak.
             tallest = {}
             for _name, fdata in flat_files:

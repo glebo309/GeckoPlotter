@@ -68,3 +68,5 @@ def test_opening_lcms_data_with_scans_shows_the_scan_viewer_and_keeps_a_chosen_m
     assert side_view_for(True, 'metadata', 'side-tabs') is no_update          # the user clicked Metadata: keep it
     assert side_view_for(False, 'ms-scan', 'active-file') == 'metadata'
     assert side_view_for(False, 'metadata', 'active-file') is no_update
+    # The same files, renamed or given a wavelength in Metadata: no jump to MS scan.
+    assert side_view_for(True, 'metadata', 'loaded-files', files_changed=False) is no_update

@@ -54,6 +54,31 @@
         }
         return null;
     }
+    // A peak's name above it in the plot (a text trace of peak_overlay.add_peak_traces, carrying the peak id). Plotly's
+    // drag layer lies over the traces and draws these unclipped names in a layer of their own, so the name is found by
+    // its text and position.
+    function peakLabelAt(gd, event) {
+        if (!gd || !gd._fullData || !gd._fullLayout || !gd.querySelectorAll) return null;
+        var box = gd.getBoundingClientRect(), texts = null;
+        for (var i = 0; i < gd._fullData.length; i++) {
+            var trace = gd._fullData[i];
+            if (trace.meta !== 'peak_overlay' || trace.mode !== 'text' || !trace.customdata || !trace.text) continue;
+            var xa = gd._fullLayout[(trace.xaxis || 'x').replace('x', 'xaxis')];
+            if (!xa || typeof xa.l2p !== 'function') continue;
+            var px = box.left + xa._offset + xa.l2p(Number(trace.x[0])), name = String(trace.text[0]);
+            texts = texts || gd.querySelectorAll('text');
+            for (var j = 0; j < texts.length; j++) {
+                if (texts[j].textContent !== name) continue;
+                var r = texts[j].getBoundingClientRect();
+                if (!r.width || Math.abs((r.left + r.right) / 2 - px) > 12) continue;
+                if (event.clientX >= r.left - 3 && event.clientX <= r.right + 3 &&
+                    event.clientY >= r.top - 3 && event.clientY <= r.bottom + 3) {
+                    return {field: 'peak', peakId: trace.customdata[0], value: name, element: texts[j]};
+                }
+            }
+        }
+        return null;
+    }
     function cancel() {
         if (!editing) return;
         var old=editing; editing=null; old.input.remove();
@@ -61,15 +86,15 @@
     function begin(gd, hit) {
         cancel();
         var layout=gd && gd.layout || {}, meta=layout.meta || {};
-        if (!hit.fileId && !meta.gecko_tab_id) return null;
+        if (!hit.fileId && !hit.peakId && !meta.gecko_tab_id) return null;
         var title=hit.field==='title' ? layout.title : (layout[hit.field] || {}).title;
         var value=typeof title==='string' ? title : title && title.text || '';
         if (hit.annotationIndex!==undefined) value=hit.text;
-        if (hit.fileId) value=hit.value;
+        if (hit.fileId || hit.peakId) value=hit.value;
         if (hit.field==='title') value=value.replace(/^<b>([\s\S]*)<\/b>$/, '$1');
         var input=document.createElement('input'), rect=hit.element.getBoundingClientRect();
         input.type='text';input.value=value;input.className='figure-label-editor';
-        input.setAttribute('aria-label',hit.fileId?'Edit dataset name':hit.field==='title'?'Edit plot title':'Edit axis label');
+        input.setAttribute('aria-label',hit.peakId?'Edit peak name':hit.fileId?'Edit dataset name':hit.field==='title'?'Edit plot title':'Edit axis label');
         input.setAttribute('title','Enter to apply · Esc to cancel');
         var width=Math.min(420,Math.max(190,rect.width+40));
         Object.assign(input.style,{position:'fixed',left:Math.max(8,Math.min(rect.left,window.innerWidth-width-8))+'px',
@@ -78,6 +103,10 @@
         function commit() {
             if (editing!==session) return;
             var text=input.value;cancel();
+            if(hit.peakId){
+                if(text.trim() && text.trim()!==value) window.dash_clientside.set_props('peak-name-edit',{data:{peak_id:hit.peakId,text:text.trim(),ts:Date.now()}});
+                return;
+            }
             if(hit.fileId){
                 if(text.trim() && text.trim()!==value) window.dash_clientside.set_props('dataset-name-edit',{data:{file_id:hit.fileId,text:text.trim(),ts:Date.now()}});
                 return;
@@ -110,15 +139,28 @@
         if(event.type==='click' && event.target.closest && event.target.closest('#plot-tool-integrate')) setEnabled(false);
         var label=event.target.closest && event.target.closest('.dataset-name');
         var gd=event.target.closest && event.target.closest('.js-plotly-plot');
-        var hit=label ? {field:'dataset',fileId:label.dataset.fileId,value:label.textContent,element:label} : targetAtEvent(gd,event);
+        var peak=!label && event.type==='dblclick' ? peakLabelAt(gd,event) : null;
+        var hit=label ? {field:'dataset',fileId:label.dataset.fileId,value:label.textContent,element:label} : peak || targetAtEvent(gd,event);
         if(!hit) return;
-        if(!enabled && (hit.fileId || event.type==='click')) return;
-        if(!hit.fileId && !(gd.layout && gd.layout.meta && gd.layout.meta.gecko_tab_id)) return;
+        // Double-click edits a file name in Files or a peak name in the plot straight away; legend names and single
+        // clicks need the text tool.
+        var direct=event.type==='dblclick' && (label || peak);
+        if(!enabled && !direct && (hit.fileId || event.type==='click')) return;
+        if(!hit.fileId && !hit.peakId && !(gd.layout && gd.layout.meta && gd.layout.meta.gecko_tab_id)) return;
         event.preventDefault();event.stopPropagation();event.stopImmediatePropagation();
         if((enabled && event.type==='click') || event.type==='dblclick') begin(gd,hit);
     }
     ['pointerdown','mousedown','click','dblclick'].forEach(function(name){document.addEventListener(name,handle,true);});
+    // Over a peak name, a double-click renames the peak instead of resetting the zoom.
+    document.addEventListener('pointermove',function(event){
+        var gd=event.target.closest && event.target.closest('.js-plotly-plot');
+        if(!gd || !gd._context) return;
+        var over=!!peakLabelAt(gd,event);
+        gd.__geckoOverPeakLabel=over;                    // manual-integration.js then leaves the zoom alone
+        if(over && gd.__geckoDoubleClick===undefined){gd.__geckoDoubleClick=gd._context.doubleClick;gd._context.doubleClick=false;}
+        else if(!over && gd.__geckoDoubleClick!==undefined){gd._context.doubleClick=gd.__geckoDoubleClick;delete gd.__geckoDoubleClick;}
+    },true);
     document.addEventListener('gecko:plot-leave',cancel);
     document.addEventListener('keydown',function(event){if(event.key==='Escape'){if(editing)cancel();else setEnabled(false);}},true);
-    window.GeckoFigureLabels={targetAtEvent:targetAtEvent,begin:begin,cancel:cancel,setEnabled:setEnabled};
+    window.GeckoFigureLabels={targetAtEvent:targetAtEvent,peakLabelAt:peakLabelAt,begin:begin,cancel:cancel,setEnabled:setEnabled};
 })();

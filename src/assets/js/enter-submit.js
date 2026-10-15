@@ -10,6 +10,7 @@
     'use strict';
     var BUTTON_FOR = {
         'eic-mz-input': 'eic-extract-btn',
+        'detector-wavelength': 'detector-wavelength-set',
         'eic-tolerance-input': 'eic-extract-btn',
         'ctx-rename-input': 'ctx-rename-save',
         'session-name-input': 'session-name-confirm',

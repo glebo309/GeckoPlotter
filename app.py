@@ -182,6 +182,8 @@ _layout_body = html.Div(
         dcc.Store(id='custom-plot-counter', data=0),  # Auto-incrementing counter for plot names
         dcc.Store(id='tab-rename-event', data=None),  # {tab_id, new_label} from JS
         dcc.Store(id='dataset-name-edit'),
+        dcc.Store(id='side-view-files', data=[]),   # loaded file ids when the side view was last chosen (workspace_callbacks)
+        dcc.Store(id='peak-name-edit'),   # a peak renamed by double-clicking its name in the plot (figure-label-edit.js)
         dcc.Store(id='legend-position-edit'),
         dcc.Store(id='plot-export-data'),  # Export data from publication plot
         dcc.Store(id='peak-shared-selections', data={}),  # Shared selections for peak-analysis tab
@@ -756,6 +758,7 @@ _layout_body = html.Div(
                                                         html.Div(className='integration-inline-row', children=[
                                                             dmc.CheckboxGroup(id='int-display-opts', value=['peaks'], children=[
                                                                 dmc.Checkbox(label='Show integrated areas', value='peaks', size='xs'),
+                                                                dmc.Checkbox(label='Hide peak names', value='hide-labels', size='xs'),
                                                             ]),
                                                             html.Div(className='integration-tolerance', children=[
                                                                 html.Label('Match RT', className='form-label', htmlFor='int-rt-tolerance',
@@ -1181,6 +1184,13 @@ _layout_body = html.Div(
                                                                           ('Room Temp.', 'Room temperature'))]]),
                                                         ]),
                                                         html.Div(id='overlay-note', className='overlay-note', role='status'),
+                                                        html.Div(id='wavelength-bar', className='metadata-overlay-bar', style={'display': 'none'}, children=[
+                                                            html.Label(id='wavelength-bar-label', htmlFor='detector-wavelength', className='form-label'),
+                                                            dcc.Input(id='detector-wavelength', type='number', min=100, max=1100, step=1,
+                                                                      placeholder='e.g. 280', className='form-input', style={'width': '90px'}),
+                                                            html.Span('nm', className='form-label'),
+                                                            dmc.Button('Set', id='detector-wavelength-set', size='xs', variant='default', n_clicks=0),
+                                                        ]),
                                                         html.Div(
                                                             id='metadata-container',
                                                             style={'padding': '15px', 'width': '100%', 'boxSizing': 'border-box'},
@@ -1882,6 +1892,8 @@ from callbacks.plot_settings_callbacks import register_plot_settings_callbacks
 from callbacks.lcms_callbacks import register_lcms_callbacks
 
 register_upload_callbacks(app, data_manager)
+from callbacks.detector_wavelength_callbacks import register_detector_wavelength_callbacks
+register_detector_wavelength_callbacks(app, data_manager)
 register_clear_callbacks(app, data_manager)
 register_viz_callbacks(app, data_manager)
 register_file_tree_callbacks(app, data_manager)

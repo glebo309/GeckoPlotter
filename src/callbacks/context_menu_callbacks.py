@@ -204,6 +204,22 @@ def register_context_menu_callbacks(app: dash.Dash, data_manager) -> None:
         log.debug(f"context-menu rename: {store['peak_id']} -> {name}")
         return False, (peak_counter or 0) + 1, (render_counter or 0) + 1
 
+    # ── Rename by double-clicking the peak's name in the plot ─────────
+    @app.callback(
+        [Output('peak-change-trigger', 'data', allow_duplicate=True),
+         Output('render-trigger', 'data', allow_duplicate=True)],
+        Input('peak-name-edit', 'data'),
+        [State('peak-change-trigger', 'data'), State('render-trigger', 'data')],
+        prevent_initial_call=True,
+    )
+    def rename_from_plot(edit, peak_counter, render_counter):
+        name = ((edit or {}).get('text') or '').strip()
+        fid, peak = _find_peak((edit or {}).get('peak_id'))
+        if not name or fid is None:
+            raise PreventUpdate
+        ps.rename_peak(fid, peak.peak_id, name)               # the whole peak group, in every sample
+        return (peak_counter or 0) + 1, (render_counter or 0) + 1
+
     # ── Integrate in All Files ────────────────────────────────────────
     @app.callback(
         [Output('context-menu', 'hidden', allow_duplicate=True),

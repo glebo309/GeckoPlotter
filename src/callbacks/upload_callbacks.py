@@ -274,6 +274,8 @@ def register_upload_callbacks(app: dash.Dash, data_manager) -> None:
                 if bundle.bundle_type == BundleType.LCMS and len(bundle.component_list) > 1:
                     auto_layout_mode = 'stacked'
 
+            from services.detector_wavelengths import apply_remembered
+            apply_remembered(data_manager)                 # UV channels exported without their wavelength (VWD CSV)
             from services.shimadzu_method import apply_methods
             apply_methods(data_manager)
             from services.channel_visibility import initialize_imported_channels, visible_component_id

@@ -3,15 +3,18 @@ from dash import Input, Output, State, no_update, ctx, ClientsideFunction
 from services.workspace_inspector import active_figure, signal_choices, edit_signal
 
 
-def side_view_for(scans_available, selected, trigger):
+def side_view_for(scans_available, selected, trigger, files_changed=True):
     """Which view the side panel should switch to (no_update to keep it).
 
     Opening LC-MS data with scans shows the MS scan viewer straight away; a chosen MS view is kept. Without scans,
-    an MS view falls back to Metadata.
+    an MS view falls back to Metadata. A change of the loaded files that adds or removes none (a name or a wavelength
+    entered in Metadata) leaves the view the user is on.
     """
     from services.analysis_capabilities import MS_ANALYSIS_TABS
     if not scans_available:
         return 'metadata' if selected in MS_ANALYSIS_TABS else no_update
+    if trigger == 'loaded-files' and not files_changed:
+        return no_update
     if trigger in ('active-file', 'loaded-files') and selected not in MS_ANALYSIS_TABS:
         return 'ms-scan'
     return no_update
@@ -129,11 +132,13 @@ def register_workspace_callbacks(app, data_manager):
     @app.callback(
         [Output('analysis-nav-ms-scan','style'), Output('analysis-nav-ms-eic','style'),
          Output('analysis-nav-ms-peak-mass','style'),
-         Output('side-tabs','value',allow_duplicate=True)],
+         Output('side-tabs','value',allow_duplicate=True),
+         Output('side-view-files','data')],
         [Input('active-file','data'), Input('loaded-files','data'), Input('side-tabs','value')],
+        State('side-view-files','data'),
         prevent_initial_call=True,
     )
-    def analysis_capabilities(active_file, _loaded_files, selected):
+    def analysis_capabilities(active_file, loaded_files, selected, seen_files=None):
         from services.analysis_capabilities import has_lcms_scans, MS_ANALYSIS_TABS
         available = has_lcms_scans(data_manager, active_file)
         style = {'flexShrink':0, 'whiteSpace':'nowrap'}
@@ -143,7 +148,10 @@ def register_workspace_callbacks(app, data_manager):
             trigger = ctx.triggered_id or ''
         except Exception:                                      # called outside a Dash request (tests)
             trigger = ''
-        return dict(style), dict(style), dict(style), side_view_for(available, selected, trigger)
+        files = sorted(str(f.get('id')) for f in (loaded_files or []) if isinstance(f, dict))
+        changed = files != (seen_files or [])
+        return (dict(style), dict(style), dict(style), side_view_for(available, selected, trigger, changed),
+                files if changed else no_update)
 
     @app.callback(Output('figure-action-status', 'children', allow_duplicate=True),
                   Input('file-removal-message', 'children'), prevent_initial_call=True)

@@ -77,7 +77,11 @@ def register_pda_callbacks(app, data_manager):
         # Opening Shimadzu data with a PDA matrix shows the PDA view straight away (an MS view chosen is kept).
         if available and analysis_tab not in ('pda', 'ms-scan', 'ms-eic', 'ms-peak-mass'):
             return style, 'pda'
-        return style, 'metadata' if not available and analysis_tab == 'pda' else dash.no_update
+        if not available and analysis_tab == 'pda':
+            # Leaving PDA for data without a PDA matrix: LC-MS data with scans opens on its MS scan view.
+            from services.analysis_capabilities import has_lcms_scans
+            return style, 'ms-scan' if has_lcms_scans(data_manager, active_file) else 'metadata'
+        return style, dash.no_update
 
     @app.callback(
         [Output('pda-heatmap', 'figure'),
