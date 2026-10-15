@@ -132,11 +132,12 @@ def cleanup_peak_traces(fig):
     fig.layout.shapes = ()
 
 
-def add_peak_traces(fig, all_peaks, time_arr, signal_arr, selected_peak_id=None, row=None):
+def add_peak_traces(fig, all_peaks, time_arr, signal_arr, selected_peak_id=None, row=None, labelled=None):
     """Add peak overlay traces to the figure.
 
     Peak colors come from ``peak.color`` which is set by
-    ``group_peaks_across_samples`` using the active palette.
+    ``group_peaks_across_samples`` using the active palette. ``labelled``: the peak ids that carry the name label
+    (one per peak group when samples are overlaid); None labels every peak.
     """
     import plotly.graph_objects as go
 
@@ -157,7 +158,7 @@ def add_peak_traces(fig, all_peaks, time_arr, signal_arr, selected_peak_id=None,
         fill_color = rgba(base_color, 0.58 if is_selected else 0.30) if base_color else FILL_COLORS[i % len(FILL_COLORS)]
         line_color = (base_color or '#447da5') if is_selected or peak.source == 'deconvolved' else 'rgba(0,0,0,0)'
 
-        has_custom_label = True                              # every peak shows its name (Peak 1, ...) or its own label
+        has_custom_label = labelled is None or peak.peak_id in labelled
         peak_text = (getattr(peak, 'label', '') or peak.name or '')
 
         if peak.poly_x and peak.poly_y:

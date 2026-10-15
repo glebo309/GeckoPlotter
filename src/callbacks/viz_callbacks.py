@@ -644,6 +644,17 @@ def compose_raw_figure(data_manager, plot_manager, active_tab_id, group_key, s, 
         fig_obj_for_peaks = go.Figure(figure) if isinstance(figure, dict) else figure
         cleanup_peak_traces(fig_obj_for_peaks)
         flat_files = [entry for files in visible_files.values() for entry in files]
+        labelled = None
+        if layout_mode != 'stacked':
+            # Overlaid samples: the same compound (peak group) is named once, above its tallest peak.
+            tallest = {}
+            for _name, fdata in flat_files:
+                for p in data_manager.peak_service.get_peaks(_find_file_id(data_manager, fdata) or ''):
+                    top = max((v for v in (p.poly_y or []) if v is not None), default=p.height or 0)
+                    key = p.group_id or p.peak_id
+                    if key not in tallest or top > tallest[key][0]:
+                        tallest[key] = (top, p.peak_id)
+            labelled = {peak_id for _top, peak_id in tallest.values()}
         for row_idx, (_name, fdata) in enumerate(flat_files, start=1):
             fid = _find_file_id(data_manager, fdata)
             if not fid or fid in ([preview_owner] if isinstance(preview_owner, str) else (preview_owner or [])):
@@ -659,7 +670,7 @@ def compose_raw_figure(data_manager, plot_manager, active_tab_id, group_key, s, 
             if time_arr is None:
                 continue
             row = row_idx if layout_mode == 'stacked' else None
-            add_peak_traces(fig_obj_for_peaks, peaks, time_arr, signal_arr, selected_peak_id, row=row)
+            add_peak_traces(fig_obj_for_peaks, peaks, time_arr, signal_arr, selected_peak_id, row=row, labelled=labelled)
             if deconvolving:
                 from callbacks.peak_overlay import add_deconv_overlays
                 add_deconv_overlays(fig_obj_for_peaks, deconv_markers, deconv_result,

@@ -1125,8 +1125,33 @@ class PeakService:
                     peak.group_id = gid
                     peak.color = colors[gid]
                 result.setdefault(gid, []).extend(members)
+            self._name_groups(groups)
 
         return result
+
+    def _name_groups(self, groups: Dict[str, List[Peak]]) -> None:
+        """One name per group: the same compound has the same name in every sample.
+
+        A group with a name the user gave (or a calibration) gives it to all its members; groups that only have
+        automatic names are numbered across the samples by retention time (Peak 1, Peak 2 ...) instead of within each
+        sample, where one compound could be "Peak 1" in one run and "Peak 2" in the next.
+        """
+        named = {}
+        for gid, members in groups.items():
+            custom = [p.label or p.name for p in members if self.has_custom_name(p)]
+            if custom:
+                named[gid] = max(dict.fromkeys(custom), key=custom.count)       # most used; first one on a tie
+        automatic = [gid for gid, members in groups.items()
+                     if gid not in named and members and not any(p.source == 'deconvolved' for p in members)]
+        automatic.sort(key=lambda gid: float(np.median([p.rt for p in groups[gid]])))
+        for number, gid in enumerate(automatic, start=1):
+            named[gid] = f'Peak {number}'
+        for gid, name in named.items():
+            for peak in groups[gid]:
+                if peak.source == 'deconvolved':
+                    continue
+                peak.name = name
+                peak.label = name
 
     # ------------------------------------------------------------------
     # Integration and measurement
