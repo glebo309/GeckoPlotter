@@ -27,7 +27,8 @@ server = MCPServer(
         'folder of run folders or a .gecko project first, then list the samples to learn their names and channels. '
         'Peaks you integrate are kept in the workspace; save a project so the user can open it in GeckoPlotter and '
         'check or correct every peak by hand. Show a figure when a result depends on where a peak was cut. '
-        'Single-quadrupole m/z values are read about 0.4-0.5 below the exact mass.'),
+        'Single-quadrupole m/z values are read about 0.4-0.5 below the exact mass. Samples with PDA data hold the '
+        'whole UV range: list_samples shows pda=true; add_uv_channel reads any wavelength, uv_spectrum a spectrum.'),
 )
 workspace = Workspace()
 
@@ -91,6 +92,21 @@ def peak_table(samples: list[str] | None = None) -> list:
 def rename_peak(sample: str, peak: str, new_name: str) -> list:
     """Rename a peak (by its name or id); the same peak in every sample gets the name. Returns the peak table."""
     return _run(workspace.rename_peak, sample, peak, new_name)
+
+
+@server.tool()
+def add_uv_channel(wavelength_nm: float, samples: list[str] | None = None) -> list:
+    """Extract one wavelength from each sample's PDA (3D UV) data as a new channel, like the app's "Add N nm
+    channel". Use it when the recorded channels miss the compound (no chromophore: try 200-210 nm); then
+    detect_peaks or integrate on that channel (e.g. channel='205 nm')."""
+    return _run(workspace.add_uv_channel, wavelength_nm, samples)
+
+
+@server.tool()
+def uv_spectrum(sample: str, rt: float, top: int = 5) -> dict:
+    """UV spectrum at a retention time from the sample's PDA data: absorbance maxima and the absorbance every
+    10 nm. Use it to find the wavelength a peak absorbs at."""
+    return _run(workspace.uv_spectrum, sample, rt, top)
 
 
 @server.tool()

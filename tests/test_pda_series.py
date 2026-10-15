@@ -189,3 +189,13 @@ def test_a_wavelength_the_instrument_already_exports_reuses_that_channel_instead
     assert pda.add_pda_chromatogram(store, 'a-extra', 220.) == channel.component_id
     assert len(store.get_bundle('a').component_list) == before
     assert pda.add_pda_chromatogram(store, 'a-extra', 200.) != channel.component_id      # a new wavelength still adds one
+
+
+def test_a_preview_at_the_channels_own_wavelength_keeps_the_channel_and_its_peaks():
+    store = series_store()
+    fig = go.Figure()
+    for owner in ['a-uv', 'b-uv']:
+        fig.add_trace(go.Scatter(x=[0., .5, 1.], y=[3., 6., 9.], name=owner, meta={'file_id': owner}))
+    replaced = _apply_pda_main_preview(fig, store, {'owner_id': 'a-uv', 'source_id': 'a-uv', 'wavelength_nm': 280.})
+    assert replaced is None                                   # nothing hidden: the 280 nm channels are the preview
+    assert [t.name for t in fig.data] == ['a-uv', 'b-uv']

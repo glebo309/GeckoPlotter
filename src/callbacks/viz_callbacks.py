@@ -496,6 +496,15 @@ def _add_signal_processing_overlays(figure, data_manager, file_id, display_opts)
 
 
 
+def _same_wavelength(identity, wavelength_nm) -> bool:
+    """True when a UV channel (``('uv:263', ...)``) is the wavelength a PDA preview shows (to the nm)."""
+    try:
+        return bool(identity) and identity[0].startswith('uv:') and \
+            round(float(identity[0][3:])) == round(float(wavelength_nm))
+    except (TypeError, ValueError):
+        return False
+
+
 def _apply_pda_main_preview(figure, data_manager, preview):
     """Preview one UV channel per visible sample of this plot without changing data.
 
@@ -551,6 +560,8 @@ def _apply_pda_main_preview(figure, data_manager, preview):
                   or (options[0] if options else None))
         if target is None:
             continue
+        if _same_wavelength(target[2], preview.get('wavelength_nm')):
+            continue                    # the channel itself, with its peaks: a preview of it would only hide them
         try:
             view = extract_pda_views(payload, preview.get('wavelength_nm'), preview.get('time_min'))
         except (ValueError, TypeError):

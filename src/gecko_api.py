@@ -220,6 +220,7 @@ class Workspace:
             'points': int(len(x)) if x is not None else 0,
             'rt_range': [round(float(np.nanmin(x)), 3), round(float(np.nanmax(x)), 3)] if x is not None and len(x) else None,
             'mass_spectra': LCMSService._get_spectral_arrays(entry) is not None,
+            'pda': isinstance(meta.get('pda'), dict),
             'file': component.original_filename,
         }
 
@@ -275,6 +276,18 @@ class Workspace:
         if exact:
             return exact[0]
         hits = [(n, c) for n, c in named if key in n.lower()]
+        wanted = re.fullmatch(r'(?:uv\s*|pda\s*)?(\d+(?:\.\d+)?)\s*(?:nm)?', key)
+        if not hits and wanted:                   # '200 nm' is the 201 nm channel the detector's pixel grid gives
+            from services.channel_visibility import channel_identity
+            near = []
+            for n, c in named:
+                identity = channel_identity(c)
+                if identity and identity[0].startswith('uv:'):
+                    gap = abs(float(identity[0][3:]) - float(wanted.group(1)))
+                    if gap <= 2:
+                        near.append((gap, n, c))
+            if near:
+                return min(near, key=lambda item: item[0])[2]
         preferred = [(n, c) for n, c in hits if '(export)' not in n.lower()] or hits
         if len(preferred) == 1:
             return preferred[0][1]
@@ -363,6 +376,53 @@ class Workspace:
                 if p.peak_id == peak or (p.name or '').lower() == key or (p.label or '').lower() == key:
                     return component, p
         raise GeckoError(f'{bundle.name} has no peak "{peak}".')
+
+    # -- PDA (3D UV) ----------------------------------------------------------------------------------------------
+
+    def _pda_source(self, bundle):
+        from services.pda_service import resolve_pda_source
+        for component in bundle.component_list:
+            found = resolve_pda_source(self.store, component.component_id)
+            if found:
+                return found
+        raise GeckoError(f'{bundle.name} has no PDA (3D UV) data: only its recorded channels can be used.')
+
+    def add_uv_channel(self, wavelength_nm: float, samples=None) -> List[dict]:
+        """Extract the absorbance at one wavelength from each sample's PDA data as a channel of its own (as the app's
+        "Add N nm channel"), for compounds the recorded channels miss (no chromophore: 200-210 nm). It can then be
+        integrated like any channel; an existing channel at that wavelength is reused."""
+        from services.pda_service import add_pda_chromatogram, extract_pda_views
+        out = []
+        for bundle in self._samples(samples):
+            try:
+                source_id, payload = self._pda_source(bundle)
+            except GeckoError as exc:
+                out.append({'sample': bundle.name, 'error': str(exc)})
+                continue
+            view = extract_pda_views(payload, wavelength_nm)
+            component_id = add_pda_chromatogram(self.store, source_id, wavelength_nm)
+            component = next(c for c in bundle.component_list if c.component_id == component_id)
+            out.append({'sample': bundle.name, 'channel': bundle.component_display_name(component),
+                        'measured_nm': round(view['measured_wavelength_nm'], 2)})
+        return out
+
+    def uv_spectrum(self, sample, rt: float, top: int = 5) -> dict:
+        """The UV spectrum at one time from the sample's PDA data (the nearest recorded scan): its absorbance maxima
+        and the absorbance every 10 nm."""
+        from scipy.signal import find_peaks
+        from services.pda_service import extract_pda_views
+        bundle = self._sample(sample)
+        _source, payload = self._pda_source(bundle)
+        view = extract_pda_views(payload, None, float(rt))
+        nm, mau = np.asarray(view['wavelengths'], dtype=float), np.asarray(view['spectrum'], dtype=float)
+        order = np.argsort(nm)
+        nm, mau = nm[order], mau[order]
+        found, _ = find_peaks(mau, prominence=max(float(np.nanmax(np.abs(mau))) * 0.02, 1e-9))
+        maxima = sorted(found, key=lambda i: -mau[i])[:max(1, int(top))]
+        grid = np.arange(np.ceil(nm.min() / 10) * 10, nm.max() + 0.01, 10)
+        return {'sample': bundle.name, 'time_min': round(view['time_min'], 4),
+                'maxima': [{'nm': round(float(nm[i]), 1), 'mAU': round(float(mau[i]), 2)} for i in sorted(maxima)],
+                'every_10_nm': {int(g): round(float(np.interp(g, nm, mau)), 2) for g in grid}}
 
     # -- mass spectra ---------------------------------------------------------------------------------------------
 

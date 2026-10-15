@@ -6,17 +6,12 @@ from services.workspace_inspector import active_figure, signal_choices, edit_sig
 def side_view_for(scans_available, selected, trigger, files_changed=True):
     """Which view the side panel should switch to (no_update to keep it).
 
-    Opening LC-MS data with scans shows the MS scan viewer straight away; a chosen MS view is kept. Without scans,
-    an MS view falls back to Metadata. A change of the loaded files that adds or removes none (a name or a wavelength
-    entered in Metadata) leaves the view the user is on.
+    The side panel stays on the view the user chose (Metadata at first); MS views are a click away. Without scans,
+    an MS view falls back to Metadata.
     """
     from services.analysis_capabilities import MS_ANALYSIS_TABS
     if not scans_available:
         return 'metadata' if selected in MS_ANALYSIS_TABS else no_update
-    if trigger == 'loaded-files' and not files_changed:
-        return no_update
-    if trigger in ('active-file', 'loaded-files') and selected not in MS_ANALYSIS_TABS:
-        return 'ms-scan'
     return no_update
 
 

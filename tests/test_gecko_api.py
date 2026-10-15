@@ -164,3 +164,28 @@ def test_a_folder_of_runs_is_one_group_and_tab_named_after_it_with_one_run_shown
         keys.add(_get_overlay_group(entry['metadata'], entry, file_id=bundle.bundle_id, dm=ws.store))
     assert len(keys) == 1 and _tab_label_from_group(keys.pop(), ws.store) == 'HalB'
     assert sorted(ws.store.visibility_state.get(b.bundle_id, True) for b in runs) == [False, True]
+
+
+def test_pda_channels_and_spectra_are_read_from_the_3d_data():
+    from services.data_store import Bundle, BundleType, Component, ComponentRole
+    from src.ingestion.types import ColumnRole, SourceCategory
+    import pandas as pd
+    times = np.linspace(0, 3, 301)
+    wavelengths = np.arange(190.0, 400.0, 1.2)
+    peak = np.exp(-((times - 2.5) / 0.03) ** 2)[:, None]
+    matrix = 800 * peak * np.exp(-((wavelengths - 205) / 12) ** 2)[None, :] + 300 * peak * \
+        np.exp(-((wavelengths - 263) / 10) ** 2)[None, :]
+    frame = pd.DataFrame({'Time (min)': times, 'Absorbance (mAU)': matrix[:, np.argmin(abs(wavelengths - 263))]})
+    meta = {'wavelength_nm': 263, 'auto_x': 'Time (min)', 'auto_y': ['Absorbance (mAU)'],
+            'pda': {'time_min': times, 'wavelength_nm': wavelengths, 'absorbance_mau': matrix}}
+    component = Component('ala-263', ComponentRole.PRIMARY, 'ala.txt', dataframe=frame,
+                          column_roles={'Time (min)': ColumnRole.X, 'Absorbance (mAU)': ColumnRole.Y},
+                          source_category=SourceCategory.CHROMATOGRAM, metadata=meta)
+    ws = Workspace()
+    ws.store.add_bundle(Bundle('ala', 'ala 10 mM', BundleType.CHROMATOGRAM, component_list=[component]))
+    spectrum = ws.uv_spectrum('ala 10 mM', 2.5)
+    assert [m['nm'] for m in spectrum['maxima']] == [pytest.approx(205, abs=1.5), pytest.approx(263, abs=1.5)]
+    added = ws.add_uv_channel(205)
+    assert added[0]['measured_nm'] == pytest.approx(205, abs=0.7)
+    rows = ws.detect_peaks(channel='205 nm')                        # the nearest recorded wavelength's channel
+    assert [round(r['rt'], 2) for r in rows] == [2.5]
