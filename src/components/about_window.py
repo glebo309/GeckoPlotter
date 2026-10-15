@@ -17,7 +17,7 @@ def create_about_window():
                 html.Div(id='about-peak', className='about-peak'),
                 html.Div(className='about-title', children=[
                     html.H1('GeckoPlotter'),
-                    html.Div('Chromatograms · spectra · any x/y data', className='about-tag'),
+                    html.Div(['Chromatograms · LC-MS mass data', html.Br(), 'spectra · any x/y data'], className='about-tag'),
                     html.Div('Checking GitHub…', id='about-status', className='about-status checking'),
                 ]),
             ]),
