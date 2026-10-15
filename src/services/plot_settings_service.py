@@ -43,10 +43,11 @@ def palette_options():
 # ---------------------------------------------------------------------------
 
 _LEGEND_COORDS: Dict[str, dict] = {
-    "top-right": {"x": 0.98, "y": 0.94, "xanchor": "right", "yanchor": "top"},
-    "top-left": {"x": 0.02, "y": 0.94, "xanchor": "left", "yanchor": "top"},
-    "bottom-right": {"x": 0.98, "y": 0.06, "xanchor": "right", "yanchor": "bottom"},
-    "bottom-left": {"x": 0.02, "y": 0.06, "xanchor": "left", "yanchor": "bottom"},
+    # Close to the corner of the plot (or of each subplot), clear of the frame line.
+    "top-right": {"x": 0.995, "y": 0.99, "xanchor": "right", "yanchor": "top"},
+    "top-left": {"x": 0.005, "y": 0.99, "xanchor": "left", "yanchor": "top"},
+    "bottom-right": {"x": 0.995, "y": 0.01, "xanchor": "right", "yanchor": "bottom"},
+    "bottom-left": {"x": 0.005, "y": 0.01, "xanchor": "left", "yanchor": "bottom"},
 }
 
 
@@ -179,6 +180,7 @@ class PlotSettings:
     legend_pos: str = "top-right"
     legend_font_size: Optional[float] = None
     legend_positions: Dict[str, dict] = field(default_factory=dict)
+    legends_linked: bool = True        # dragging one subplot legend moves the others to the same place
 
     # -- 8. Grid & Frame --
     show_grid_x: bool = True
@@ -524,6 +526,9 @@ class PlotSettingsService:
                 lk_kwargs.update(bgcolor=_hex_to_rgba(settings.paper_color, .85), borderwidth=0,
                                  font=dict(size=settings.legend_font_size or settings.font_size, color=foreground))
             fig.update_layout(**{lk: lk_kwargs})
+        meta = dict(fig.layout.meta) if isinstance(fig.layout.meta, dict) else {}
+        meta['gecko_legends_linked'] = getattr(settings, 'legends_linked', True) is not False
+        fig.layout.meta = meta                          # legend-drag.js moves subplot legends together
 
         # -- Colour palette & trace styling ----------------------------------
         # Always apply the selected palette to data traces so lines and

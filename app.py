@@ -1621,6 +1621,8 @@ _layout_body = html.Div(
                 dmc.NumberInput(id='legend-ctx-font-size', label='Font size', min=6, max=48, step=1, value=10, size='xs', debounce=True, mb=8),
                 dmc.Switch(id='legend-ctx-show', label='Show legend',
                            checked=True, size='sm', mb=8),
+                dmc.Switch(id='legend-ctx-linked', label='Move subplot legends together',
+                           checked=True, size='sm', mb=8),
                 html.Div([
                     html.Label('Position', className='form-label'),
                     dmc.Select(

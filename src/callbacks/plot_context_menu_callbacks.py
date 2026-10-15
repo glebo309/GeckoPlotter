@@ -305,7 +305,9 @@ def register_plot_context_menu_callbacks(app: dash.Dash, data_manager) -> None:
         if not event or not event.get('legend', '').startswith('legend'):
             raise PreventUpdate
         updated = copy.deepcopy(_settings(settings))
-        updated.setdefault('legend_positions', {})[event['legend']] = event['position']
+        positions = updated.setdefault('legend_positions', {})
+        positions[event['legend']] = event['position']
+        positions.update(event.get('linked') or {})          # the other subplots' legends, moved along
         return updated
 
     @app.callback(
@@ -314,6 +316,7 @@ def register_plot_context_menu_callbacks(app: dash.Dash, data_manager) -> None:
             Output('legend-ctx-show', 'checked'),
             Output('legend-ctx-pos', 'value'),
             Output('legend-ctx-font-size', 'value'),
+            Output('legend-ctx-linked', 'checked'),
         ],
         [
             Input('legend-context-menu-store', 'data'),
@@ -341,6 +344,7 @@ def register_plot_context_menu_callbacks(app: dash.Dash, data_manager) -> None:
             bool(s.get('show_legend', True)),
             s.get('legend_pos', 'top-right'),
             s.get('legend_font_size') or s.get('font_size', 10),
+            s.get('legends_linked', True) is not False,
         )
 
     @app.callback(
@@ -365,6 +369,7 @@ def register_plot_context_menu_callbacks(app: dash.Dash, data_manager) -> None:
             Input('legend-ctx-show', 'checked'),
             Input('legend-ctx-pos', 'value'),
             Input('legend-ctx-font-size', 'value'),
+            Input('legend-ctx-linked', 'checked'),
         ],
         [
             State('current-plot-settings', 'data'),
@@ -373,7 +378,7 @@ def register_plot_context_menu_callbacks(app: dash.Dash, data_manager) -> None:
         ],
         prevent_initial_call=True,
     )
-    def edit_legend_from_context(show_legend, legend_pos, font_size, current_settings,
+    def edit_legend_from_context(show_legend, legend_pos, font_size, linked, current_settings,
                                  panel_style, render_counter):
         """Write legend context edits into the same store as Plot Settings."""
         if not panel_style or panel_style.get('display') == 'none':
@@ -384,6 +389,7 @@ def register_plot_context_menu_callbacks(app: dash.Dash, data_manager) -> None:
         new_settings['show_legend'] = bool(show_legend)
         new_settings['legend_pos'] = legend_pos or 'top-right'
         new_settings['legend_font_size'] = max(6, min(48, float(font_size or 10)))
+        new_settings['legends_linked'] = linked is not False
         if _triggered_id() == 'legend-ctx-pos' and legend_pos != s.get('legend_pos'):
             new_settings['legend_positions'] = {}
 
