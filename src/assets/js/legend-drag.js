@@ -41,16 +41,19 @@
             if (Math.abs(top-ymax)<SNAP) top=ymax;
             var pos={x:left/size.w,y:1-top/size.h,xanchor:'left',yanchor:'top'};
             var change={}; Object.keys(pos).forEach(function(k){change[key+'.'+k]=pos[k];});
+            // Saved as a place inside its own subplot, so it stays there when subplots are added or removed.
+            var fx=(pos.x-xd[0])/((xd[1]-xd[0])||1), fy=(pos.y-yd[0])/((yd[1]-yd[0])||1);
+            pos.in_subplot=[fx,fy];
             var linked={}, meta=gd.layout.meta||{};
             if (meta.gecko_legends_linked!==false) {
-                // The same place inside every other subplot: fractions of the dragged legend's own subplot.
-                var fx=(pos.x-xd[0])/((xd[1]-xd[0])||1), fy=(pos.y-yd[0])/((yd[1]-yd[0])||1);
+                // The same place inside every other subplot.
                 Object.keys(gd._fullLayout).filter(function(k){return /^legend\d*$/.test(k) && k!==key;}).forEach(function(k){
                     var sfx=k.slice(6), oxa=gd._fullLayout['xaxis'+sfx], oya=gd._fullLayout['yaxis'+sfx];
                     if (!oxa || !oya) return;
                     var ox=oxa.domain||[0,1], oy=oya.domain||[0,1];
                     linked[k]={x:ox[0]+fx*(ox[1]-ox[0]), y:oy[0]+fy*(oy[1]-oy[0]), xanchor:'left', yanchor:'top'};
                     Object.keys(linked[k]).forEach(function(p){change[k+'.'+p]=linked[k][p];});
+                    linked[k].in_subplot=[fx,fy];
                 });
             }
             window.Plotly.relayout(gd,change);

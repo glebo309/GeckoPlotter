@@ -515,13 +515,18 @@ class PlotSettingsService:
             lk_kwargs = dict(visible=settings.show_legend)
             if settings.show_legend:
                 coords = cls.get_legend_coords(settings.legend_pos)
+                suffix = lk[len('legend'):]
+                y_domain = layout_json.get('yaxis' + suffix, {}).get('domain', [0, 1])
+                x_domain = layout_json.get('xaxis' + suffix, {}).get('domain', [0, 1])
                 if len(legend_keys) > 1:
-                    suffix = lk[len('legend'):]
-                    y_domain = layout_json.get('yaxis' + suffix, {}).get('domain', [0, 1])
-                    x_domain = layout_json.get('xaxis' + suffix, {}).get('domain', [0, 1])
                     coords['y'] = y_domain[0] + coords['y'] * (y_domain[1] - y_domain[0])
                     coords['x'] = x_domain[0] + coords['x'] * (x_domain[1] - x_domain[0])
-                coords.update(settings.legend_positions.get(lk, {}))
+                moved = dict(settings.legend_positions.get(lk, {}))
+                inside = moved.pop('in_subplot', None)      # a dragged legend's place in its subplot (legend-drag.js)
+                if inside:
+                    moved['x'] = x_domain[0] + inside[0] * (x_domain[1] - x_domain[0])
+                    moved['y'] = y_domain[0] + inside[1] * (y_domain[1] - y_domain[0])
+                coords.update(moved)
                 lk_kwargs.update(coords)
                 lk_kwargs.update(bgcolor=_hex_to_rgba(settings.paper_color, .85), borderwidth=0,
                                  font=dict(size=settings.legend_font_size or settings.font_size, color=foreground))
