@@ -111,6 +111,17 @@ def info() -> dict:
             ('Packages', ', '.join(f'{name} {_package(name)}' for name in
                                    ('dash', 'plotly', 'dash-mantine-components', 'numpy', 'pandas', 'scipy'))),
         ],
+        # The window shows these five lines; the full lists above go into "Copy details".
+        'summary': [
+            ('Source', (f"Installed by the launcher from {VERSION.get('branch')}" + (f", {_when(VERSION['updated'])}" if VERSION.get('updated') else ''))
+             if VERSION['source'] == 'launcher' else
+             f"Git checkout, {VERSION.get('branch') or '?'}" + (' (edited)' if VERSION.get('changed') else '') + (f', {made}' if made else '')
+             if VERSION['source'] == 'git' else source),
+            ('Running since', datetime.fromtimestamp(STARTED).strftime('%d %b %Y, %H:%M')),
+            ('Computer', f'{_system()} · Python {platform.python_version()}'),
+            ('Packages', ' · '.join(f'{label} {_package(name)}' for label, name in
+                                    (('Dash', 'dash'), ('Plotly', 'plotly'), ('Mantine', 'dash-mantine-components')))),
+        ],
         'folders': [
             ('Program', str(ROOT)),
             ('Autosaves', str(session_service.autosave_dir(create=False))),
