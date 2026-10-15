@@ -120,9 +120,17 @@
         return true;
     }
 
+    // Separate subplots each have a legend of their own: g.legend, g.legend2, g.legend3 ...
+    function legendOf(element) {
+        for (var node = element; node && node.getAttribute; node = node.parentNode) {
+            if (/^legend\d*$/.test(node.getAttribute('class') || '')) return node;
+        }
+        return null;
+    }
+
     function openLegendContextMenu(gd, event) {
         if (!gd || !event || !event.target || !event.target.closest) return false;
-        var legend = event.target.closest('.legend');
+        var legend = legendOf(event.target);
         if (!legend || !gd.contains(legend)) return false;
 
         event.preventDefault();
@@ -207,7 +215,7 @@
         if (!event.target || !event.target.closest) return;
         var gd = getGraphDiv();
         if (!gd) return;
-        var legend = event.target.closest('.legend');
+        var legend = legendOf(event.target);
         if (legend && gd.contains(legend)) {
             event.stopImmediatePropagation();
         }

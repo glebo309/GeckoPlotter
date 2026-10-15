@@ -364,9 +364,25 @@ def _collect_visible_files(dm, active_file_id=None, loaded_files=None, target_gr
                                             if hasattr(dm, 'get_bundle_for_component') else None)
         return (bundle.bundle_id, bundle.name) if bundle else (fid, '')
 
+    def channel_rank(fd):
+        """Within one sample, from the top: extracted ions, then +TIC and −TIC, then UV by wavelength."""
+        from services.channel_visibility import channel_identity
+        fid = (fd.get('record') or {}).get('id', '')
+        bundle = dm.get_bundle_for_component(fid) if fid and hasattr(dm, 'get_bundle_for_component') else None
+        component = next((c for c in bundle.component_list if c.component_id == fid), None) if bundle else None
+        key = (channel_identity(component) or ('',))[0] if component else ''
+        if key.startswith('eic:'):
+            return (0, float(key.split(':')[2]))
+        if key.startswith('ms:'):
+            return (1, 0 if key == 'ms:positive' else 1)
+        if key.startswith('uv:'):
+            return (2, float(key[3:]))
+        return (3, 0.0)
+
     for gkey, file_list in result.items():
         group_order = (file_order or {}).get(_tab_id_from_group(gkey)) or {}
         explicit = group_order.get('order')
+        file_list.sort(key=lambda entry: channel_rank(entry[1]))          # stable: samples are sorted next
         if explicit:
             id_map = {fid: idx for idx, fid in enumerate(explicit)}
             file_list.sort(key=lambda entry: (id_map.get(sample_of(entry[1])[0], 999999),

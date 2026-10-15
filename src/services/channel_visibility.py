@@ -61,13 +61,16 @@ def channel_controls(store, bundle_ids):
         n = len(group['sources'])
         group['state'] = 'true' if group['enabled'] == n else 'false' if not group['enabled'] else 'mixed'
     def order(group):
+        """UV by wavelength, then −TIC and +TIC, then the extracted ions by m/z."""
         key = group['key']
         if key.startswith('uv:'):
-            return (1, float(key[3:]), '')
-        if key.startswith('eic:'):                      # after UV: by polarity, then m/z
+            return (0, float(key[3:]), '')
+        if key.startswith('ms:'):
+            return (1, 0, key)
+        if key.startswith('eic:'):
             _, pol, mz, _tol = key.split(':')
             return (2, float(mz), pol)
-        return (0 if key.startswith('ms:') else 3, 0, key)
+        return (0, 9999, key)
     return sorted(groups.values(), key=order)
 
 

@@ -404,7 +404,7 @@ def test_plot_switches_show_the_tabs_own_channels_and_toggle_them_in_every_run()
     tab = _tab_id_from_group(_get_overlay_group(entry['metadata'], entry, 'lys', store))
     controls = app.functions['update_plot_channel_controls']([], tab, 'raw')
     labels = [getattr(n, 'data-channel-label') for n in controls.children]
-    assert labels == ['+TIC', '250 nm', '280 nm']                  # no 214 nm: that run is not in this tab
+    assert labels == ['250 nm', '280 nm', '+TIC']                  # no 214 nm: that run is not in this tab
     from services.channel_visibility import group_bundle_ids, toggle_channel
     toggle_channel(store, group_bundle_ids(store, tab), 'uv:250')
     assert store.visibility_state['lysuv250'] == store.visibility_state['blankuv250']
@@ -428,10 +428,10 @@ def test_plot_switches_leave_out_the_channels_of_hidden_runs_in_the_tab():
             return wrap
     app = App(); register_file_tree_callbacks(app, store)
     controls = app.functions['update_plot_channel_controls']([], 'tab-folder_time_min_sequence', 'raw')
-    assert [getattr(n, 'data-channel-label') for n in controls.children] == ['+TIC', '220 nm']
+    assert [getattr(n, 'data-channel-label') for n in controls.children] == ['220 nm', '+TIC']
     set_sample_visibility(store, 'blank', True)
     controls = app.functions['update_plot_channel_controls']([], 'tab-folder_time_min_sequence', 'raw')
-    assert [getattr(n, 'data-channel-label') for n in controls.children] == ['+TIC', '214 nm', '220 nm']
+    assert [getattr(n, 'data-channel-label') for n in controls.children] == ['214 nm', '220 nm', '+TIC']
 
 
 def test_new_samples_show_one_uv_channel_the_lowest_wavelength():
