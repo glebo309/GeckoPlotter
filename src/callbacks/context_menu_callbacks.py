@@ -232,7 +232,7 @@ def register_context_menu_callbacks(app: dash.Dash, data_manager) -> None:
         if fid is None:
             raise PreventUpdate
         offset = move.get('offset')
-        ps.set_label_position(fid, peak.peak_id, offset, move.get('leader', False))
+        ps.set_label_position(fid, peak.peak_id, offset, move.get('leader', False), bool(move.get('in_data')))
         return (render_counter or 0) + 1
 
     # ── Integrate in All Files ────────────────────────────────────────

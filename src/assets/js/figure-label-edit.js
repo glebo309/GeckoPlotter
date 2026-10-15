@@ -63,6 +63,21 @@
         if (!xa || !ya || typeof xa.l2p !== 'function' || typeof ya.l2p !== 'function') return null;
         return {x: box.left + xa._offset + xa.l2p(Number(x)), y: box.top + ya._offset + ya.l2p(Number(y))};
     }
+    // Plot units per screen pixel of a subplot (x right, y up): a dragged name is saved in plot units.
+    function unitsPerPixel(gd, xref, yref) {
+        var fl = gd._fullLayout, xa = fl[(xref || 'x').replace(/^x/, 'xaxis')], ya = fl[(yref || 'y').replace(/^y/, 'yaxis')];
+        if (!xa || !ya || typeof xa.p2l !== 'function' || typeof ya.p2l !== 'function') return null;
+        return [xa.p2l(1) - xa.p2l(0), ya.p2l(0) - ya.p2l(1)];
+    }
+    // Where a moved name sits from its peak, in screen pixels (dx right, dy up), and whether its line shows.
+    function labelOffset(gd, a) {
+        if (a.axref && a.axref !== 'pixel') {
+            var fl = gd._fullLayout, xa = fl[a.xref.replace(/^x/, 'xaxis')], ya = fl[a.yref.replace(/^y/, 'yaxis')];
+            return [xa.l2p(Number(a.ax)) - xa.l2p(Number(a.x)), ya.l2p(Number(a.y)) - ya.l2p(Number(a.ay))];
+        }
+        return a.showarrow ? [a.ax || 0, -(a.ay || 0)] : [a.xshift || 0, a.yshift || 0];
+    }
+    function labelLeader(a) { return !!a.showarrow && a.arrowcolor !== 'rgba(0,0,0,0)'; }
     // A label dragged away from its peak is an annotation named 'peak-label:<id>' (peak_overlay._add_moved_label).
     function movedPeakLabelAt(gd, event) {
         var annotations = (gd._fullLayout && gd._fullLayout.annotations) || [];
@@ -76,8 +91,8 @@
             if (event.clientX >= r.left - 3 && event.clientX <= r.right + 3 &&
                 event.clientY >= r.top - 3 && event.clientY <= r.bottom + 3) {
                 return {field: 'peak', peakId: name.slice(11), value: a.text, element: text,
-                        home: axisPoint(gd, a.xref, a.yref, a.x, a.y), leader: !!a.showarrow,
-                        offset: a.showarrow ? [a.ax || 0, -(a.ay || 0)] : [a.xshift || 0, a.yshift || 0]};
+                        home: axisPoint(gd, a.xref, a.yref, a.x, a.y), leader: labelLeader(a),
+                        offset: labelOffset(gd, a), units: unitsPerPixel(gd, a.xref, a.yref)};
             }
         }
         return null;
@@ -91,18 +106,21 @@
             var trace = gd._fullData[i];
             if (trace.meta !== 'peak_overlay' || trace.mode !== 'text' || !trace.customdata || !trace.text) continue;
             var xa = gd._fullLayout[(trace.xaxis || 'x').replace('x', 'xaxis')];
-            if (!xa || typeof xa.l2p !== 'function') continue;
+            var ya = gd._fullLayout[(trace.yaxis || 'y').replace('y', 'yaxis')];
+            if (!xa || !ya || typeof xa.l2p !== 'function' || typeof ya.l2p !== 'function') continue;
             var px = box.left + xa._offset + xa.l2p(Number(trace.x[0])), name = String(trace.text[0]);
+            var py = box.top + ya._offset + ya.l2p(Number(trace.y[0]));
             texts = texts || gd.querySelectorAll('text');
             for (var j = 0; j < texts.length; j++) {
                 if (texts[j].textContent !== name) continue;
                 var r = texts[j].getBoundingClientRect();
-                if (!r.width || Math.abs((r.left + r.right) / 2 - px) > 12) continue;
+                // The same name stands at the same time in every subplot: the label sits just above its own peak.
+                if (!r.width || Math.abs((r.left + r.right) / 2 - px) > 12 || r.bottom < py - 12 || r.top > py + 4) continue;
                 if (event.clientX >= r.left - 3 && event.clientX <= r.right + 3 &&
                     event.clientY >= r.top - 3 && event.clientY <= r.bottom + 3) {
                     return {field: 'peak', peakId: trace.customdata[0], value: name, element: texts[j],
                             home: axisPoint(gd, trace.xaxis, trace.yaxis, trace.x[0], trace.y[0]),
-                            leader: false, offset: [0, 0]};
+                            leader: false, offset: [0, 0], units: unitsPerPixel(gd, trace.xaxis, trace.yaxis)};
                 }
             }
         }
@@ -192,5 +210,5 @@
     },true);
     document.addEventListener('gecko:plot-leave',cancel);
     document.addEventListener('keydown',function(event){if(event.key==='Escape'){if(editing)cancel();else setEnabled(false);}},true);
-    window.GeckoFigureLabels={targetAtEvent:targetAtEvent,peakLabelAt:peakLabelAt,begin:begin,cancel:cancel,setEnabled:setEnabled};
+    window.GeckoFigureLabels={targetAtEvent:targetAtEvent,peakLabelAt:peakLabelAt,labelOffset:labelOffset,begin:begin,cancel:cancel,setEnabled:setEnabled};
 })();

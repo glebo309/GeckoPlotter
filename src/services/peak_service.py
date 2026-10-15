@@ -61,10 +61,12 @@ class Peak:
     p_line: Optional[List[Tuple[float, float]]] = None  # User-drawn baseline [(x0,y0),(x1,y1)]
     q1: Optional[Tuple[float, float]] = None  # Constraint point 1
     q2: Optional[Tuple[float, float]] = None  # Constraint point 2
-    # Name label dragged away from its place above the peak: [dx, dy] in screen pixels (dy up), and whether a line
-    # leads from the peak's top to it (Cmd/Ctrl-drag). None: centred above the peak.
+    # Name label dragged away from its place above the peak: [dx, dy] (dy up), and whether a line leads from the peak's
+    # top to it. In the plot's own units (minutes, signal) when label_in_data, so it keeps its place in a subplot of any
+    # size; older projects have screen pixels. None: centred above the peak.
     label_offset: Optional[List[float]] = None
     label_leader: bool = False
+    label_in_data: bool = False
 
 
 class PeakService:
@@ -963,17 +965,20 @@ class PeakService:
         self.group_peaks_across_samples(file_overlay_map=file_overlay_map)
         return [peak for _, peak in found]
 
-    def set_label_position(self, file_id: str, peak_id: str, offset, leader: bool = False) -> bool:
-        """Place a peak's name label ``offset`` = (dx, dy) screen pixels from its spot above the peak (dy up), with or
-        without a leader line; None puts it back above the peak."""
+    def set_label_position(self, file_id: str, peak_id: str, offset, leader: bool = False, in_data: bool = False) -> bool:
+        """Place a peak's name label ``offset`` = (dx, dy) from its spot above the peak (dy up), in screen pixels or, with
+        ``in_data``, in the plot's units (minutes, signal); with or without a leader line. None puts it back."""
         file_id = self._resolve_file_id(file_id)
         for peak in self._peaks.get(file_id, []):
             if peak.peak_id == peak_id:
                 if offset is None:
-                    peak.label_offset, peak.label_leader = None, False
+                    peak.label_offset, peak.label_leader, peak.label_in_data = None, False, False
+                elif in_data:
+                    peak.label_offset = [float(f'{float(offset[0]):.6g}'), float(f'{float(offset[1]):.6g}')]
+                    peak.label_leader, peak.label_in_data = bool(leader), True
                 else:
                     peak.label_offset = [round(float(offset[0]), 1), round(float(offset[1]), 1)]
-                    peak.label_leader = bool(leader)
+                    peak.label_leader, peak.label_in_data = bool(leader), False
                 return True
         return False
 

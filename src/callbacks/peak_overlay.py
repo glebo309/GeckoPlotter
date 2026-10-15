@@ -158,6 +158,16 @@ def _add_moved_label(fig, peak, text, top, add_kw):
     dx, dy = peak.label_offset
     common = dict(x=peak.rt, y=top, text=text, name=f'peak-label:{peak.peak_id}', font=dict(size=10, color='#333'),
                   xanchor='center', yanchor='bottom', captureevents=False)
+    if getattr(peak, 'label_in_data', False):
+        # In the plot's units: the name sits at (rt + dx, top + dy) of its own subplot (an arrow's tail in axis units),
+        # with an invisible arrow when there is no leader line.
+        leader = getattr(peak, 'label_leader', False)
+        fig.add_annotation(**common, showarrow=True, ax=peak.rt + dx, ay=float(top) + dy, arrowhead=0,
+                           arrowwidth=0.8 if leader else 0.1, arrowcolor='#666' if leader else 'rgba(0,0,0,0)',
+                           standoff=2, startstandoff=1, **add_kw)
+        added = fig.layout.annotations[-1]
+        added.axref, added.ayref = added.xref or 'x', added.yref or 'y'
+        return
     if getattr(peak, 'label_leader', False):
         fig.add_annotation(**common, showarrow=True, ax=dx, ay=-dy, axref='pixel', ayref='pixel', arrowhead=0,
                            arrowwidth=0.8, arrowcolor='#666', standoff=2, startstandoff=1, **add_kw)

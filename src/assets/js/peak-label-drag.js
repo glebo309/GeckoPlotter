@@ -44,6 +44,13 @@
         }
     }
 
+    // Saved in the plot's units (minutes, signal), so the name keeps its place in a subplot of any size.
+    function moveData(hit, offset, leader) {
+        var data = {peak_id: hit.peakId, offset: offset, leader: !!leader, ts: Date.now()};
+        if (offset && hit.units) { data.offset = [offset[0] * hit.units[0], offset[1] * hit.units[1]]; data.in_data = true; }
+        return data;
+    }
+
     function finish(cancelled) {
         var state = drag;
         drag = null;
@@ -51,9 +58,8 @@
         var restore = function () { state.ghost.remove(); state.hidden.style.opacity = ''; overlay().style.display = 'none'; };
         if (cancelled) { restore(); return; }
         if (window.dash_clientside) {
-            window.dash_clientside.set_props('peak-label-move', {data: {
-                peak_id: state.hit.peakId, offset: state.snapped ? null : state.offset,
-                leader: !!state.leader, ts: Date.now()}});
+            state.sent = moveData(state.hit, state.snapped ? null : state.offset, state.leader);
+            window.dash_clientside.set_props('peak-label-move', {data: state.sent});
         }
         // The name (and its line) stay where they were dropped until the plot is redrawn with them there.
         var finished = false;
@@ -63,8 +69,13 @@
                 return String(x.name || '') === 'peak-label:' + state.hit.peakId; });
             if (state.snapped) return !a;
             if (!a) return false;
-            var dx = a.showarrow ? a.ax : a.xshift, dy = a.showarrow ? -a.ay : a.yshift;
-            return Math.abs(dx - state.offset[0]) < 1 && Math.abs(dy - state.offset[1]) < 1;
+            if (state.sent.in_data && a.axref && a.axref !== 'pixel') {     // the saved place, in plot units
+                var near = function (u, v) { return Math.abs(u - v) <= 1e-4 * Math.max(Math.abs(v), 1e-9); };
+                return near(Number(a.ax) - Number(a.x), state.sent.offset[0]) &&
+                    near(Number(a.ay) - Number(a.y), state.sent.offset[1]);
+            }
+            var now = window.GeckoFigureLabels.labelOffset(state.gd, a);
+            return Math.abs(now[0] - state.offset[0]) < 1.5 && Math.abs(now[1] - state.offset[1]) < 1.5;
         };
         var wait = function () {
             if (finished || !state.gd.once) return;
@@ -123,8 +134,7 @@
     var menu = null;
     function closeMenu() { if (menu) { menu.remove(); menu = null; } }
     function send(hit, offset, leader) {
-        if (window.dash_clientside) window.dash_clientside.set_props('peak-label-move', {data: {
-            peak_id: hit.peakId, offset: offset, leader: !!leader, ts: Date.now()}});
+        if (window.dash_clientside) window.dash_clientside.set_props('peak-label-move', {data: moveData(hit, offset, leader)});
     }
     function item(label, enabled, action, checked) {
         var button = document.createElement('button');

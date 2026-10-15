@@ -50,3 +50,17 @@ def test_the_position_is_saved_with_the_peaks():
     again.deserialize(service.serialize())
     peak = again.get_peaks('f1')[0]
     assert peak.label_offset == [12.3, -8.0] and peak.label_leader is True
+
+
+def test_a_label_placed_in_plot_units_keeps_its_place_in_any_subplot_size():
+    service = PeakService()
+    service._peaks['f1'] = [_peak()]
+    service.set_label_position('f1', 'p1', (0.3, 2.5), leader=False, in_data=True)
+    fig = go.Figure(go.Scatter(x=[2.4, 2.5, 2.6], y=[0, 5, 0], meta={'file_id': 'f1'}))
+    add_peak_traces(fig, service.get_peaks('f1'), [2.4, 2.5, 2.6], [0, 5, 0])
+    label = _labels(fig)[1][0]
+    assert (label.ax, label.ay, label.axref, label.ayref) == (2.8, 7.5, 'x', 'y')
+    assert label.arrowcolor == 'rgba(0,0,0,0)'                  # no leader: the arrow is invisible
+    again = PeakService()
+    again.deserialize(service.serialize())
+    assert again.get_peaks('f1')[0].label_in_data is True
