@@ -11,6 +11,11 @@ def channel_identity(component):
     role = _value(component.role)
     category = _value(component.source_category)
     meta = component.metadata or {}
+    eic = meta.get('eic') if meta.get('eic_extracted') else None
+    if eic:                                             # an extracted ion (services/eic_service): one switch per ion
+        from services.eic_service import eic_key, eic_label
+        return eic_key(eic['mz'], eic['tolerance'], eic['polarity']), \
+            eic_label(eic['mz'], eic['tolerance'], eic['polarity']).replace('EIC ', '')
     if role in ('ms_positive', 'ms_negative') or category == 'lcms_ms':
         polarity = {'ms_positive': 'positive', 'ms_negative': 'negative'}.get(role, meta.get('ionization_mode'))
         if polarity in ('positive', 'negative'):
@@ -59,7 +64,10 @@ def channel_controls(store, bundle_ids):
         key = group['key']
         if key.startswith('uv:'):
             return (1, float(key[3:]), '')
-        return (0 if key.startswith('ms:') else 2, 0, key)
+        if key.startswith('eic:'):                      # after UV: by polarity, then m/z
+            _, pol, mz, _tol = key.split(':')
+            return (2, float(mz), pol)
+        return (0 if key.startswith('ms:') else 3, 0, key)
     return sorted(groups.values(), key=order)
 
 
@@ -165,7 +173,12 @@ def _lowest_uv(keys):
     measured = [key for key in keys if key.startswith('uv:')]
     if measured:
         return min(measured, key=lambda key: float(key[3:]))
-    return next((key for key in keys if not key.startswith('ms:')), None)
+    return next((key for key in keys if _is_uv(key)), None)
+
+
+def _is_uv(key) -> bool:
+    """A UV channel key (uv:250, uv-channel:A), not MS (ms:, eic:)."""
+    return not key.startswith(('ms:', 'eic:'))
 
 
 def initialize_imported_channels(store, new_bundles):
@@ -192,8 +205,8 @@ def initialize_imported_channels(store, new_bundles):
             tic = 'ms:positive' if 'ms:positive' in keys else next((key for key in keys if key.startswith('ms:')), None)
             requested = ([key for key in (uv, tic) if key] if _value(bundle.bundle_type) == 'lcms'
                          else [uv] if uv else keys[:1])
-        elif uv and not any(key in requested for key in keys if not key.startswith('ms:')) \
-                and any(not key.startswith('ms:') for key in requested):
+        elif uv and not any(key in requested for key in keys if _is_uv(key)) \
+                and any(_is_uv(key) for key in requested):
             requested = requested + [uv]       # other wavelengths than the samples before: its own lowest one
         for component in bundle.component_list:
             identity = channel_identity(component)

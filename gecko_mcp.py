@@ -165,11 +165,21 @@ def uv_spectrum(sample: str, rt: float, top: int = 5, ctx: Context = None) -> di
 
 
 @server.tool()
+def add_eic_channel(mz: float, tolerance: float = 0.5, polarity: str = '+', samples: list[str] | None = None,
+                    ctx: Context = None) -> list:
+    """Add the extracted-ion chromatogram of m/z ± tolerance as a channel in each run with full-scan spectra
+    (polarity '+', '-' or 'both'). The channel ('EIC 633.8 ±0.5 (+)') then works like any other: detect_peaks,
+    integrate, calibrate, figure and export with channel='EIC 633.8'."""
+    return _run(workspace.add_eic_channel, mz, tolerance, polarity, samples, ctx=ctx)
+
+
+@server.tool()
 def extract_ion_chromatogram(mz: float, tolerance: float = 0.5, samples: list[str] | None = None,
                              polarity: str = '+', rt_start: float | None = None,
                              rt_end: float | None = None, ctx: Context = None) -> list:
-    """EIC of m/z ± tolerance in each sample with full mass spectra; per sample the apex RT, height and area (the
-    tallest peak, inside rt_start-rt_end when given; integrated to 5 % of its height or over the given window)."""
+    """EIC of m/z ± tolerance in each run, added as a channel and integrated on it: per sample the apex RT, height
+    and area of the tallest peak (inside rt_start-rt_end when given; to 5 % of its height or over the window). The
+    peaks are in the app, where the user can correct them; running it again replaces the earlier EIC peak."""
     return _run(workspace.eic, mz, tolerance, samples, polarity, rt_start, rt_end, ctx=ctx)
 
 

@@ -676,8 +676,9 @@ def _build_parts(store, client_state, project_name, embed_raw, raw_limit_bytes,
 
     for bundle in store.iter_bundles():
         components = list(bundle.component_list)
-        extracted = [c for c in components if c.metadata.get('pda_extracted')
-                     and c.metadata.get('pda_source_id') and not c.raw_bytes]
+        extracted = [c for c in components if not c.raw_bytes and (
+            (c.metadata.get('pda_extracted') and c.metadata.get('pda_source_id'))
+            or (c.metadata.get('eic_extracted') and c.metadata.get('source_file_id')))]
         base = [c for c in components if c not in extracted]
         derived = any(getattr(getattr(c.standardized, 'identity', None), 'detected_format', None)
                       in _DERIVED_FORMATS for c in base)
@@ -689,7 +690,8 @@ def _build_parts(store, client_state, project_name, embed_raw, raw_limit_bytes,
         bundle_files: List[Tuple[str, str]] = []
         for component in components:
             is_extracted = component in extracted
-            kind = 'frame' if recipe == 'frame' else 'pda_extracted' if is_extracted else 'ingested'
+            kind = 'frame' if recipe == 'frame' else ('eic_extracted' if component.metadata.get('eic_extracted')
+                                                      else 'pda_extracted') if is_extracted else 'ingested'
             raw_key = register(component) if component.raw_bytes else None
             if raw_key and recipe == 'ingest' and raw_key not in bundle_files:
                 bundle_files.append(raw_key)
@@ -728,7 +730,10 @@ def _build_parts(store, client_state, project_name, embed_raw, raw_limit_bytes,
                     state['sample_name'] = component.standardized.sample_name
             else:
                 state['metadata'] = _metadata_overrides(component)
-                if is_extracted:
+                if is_extracted and kind == 'eic_extracted':
+                    state['eic'] = {'source_id': component.metadata['source_file_id'],
+                                    **component.metadata['eic']}
+                elif is_extracted:
                     state['pda'] = {'source_id': component.metadata['pda_source_id'],
                                     'wavelength_nm': component.metadata.get('wavelength_nm')}
                 if (frame is not None and parsed_sha is not None
@@ -1466,16 +1471,19 @@ def _install_ingested_bundle(store, saved: dict, archive: _Archive, resolver: _R
         _apply_saved_component(component, saved_component, archive, report,
                                f"{saved['name']} / {saved_component['original_filename']}", remap)
 
-    # PDA chromatograms the user extracted: recreate from the measured matrix.
-    from . import pda_service
+    # PDA wavelengths and ion chromatograms the user extracted: recreate them from the measured data.
+    from . import eic_service, pda_service
     for saved_component in saved['components']:
-        if saved_component['kind'] != 'pda_extracted':
+        if saved_component['kind'] not in ('pda_extracted', 'eic_extracted'):
             continue
-        spec = saved_component.get('pda') or {}
+        is_eic = saved_component['kind'] == 'eic_extracted'
+        spec = saved_component.get('eic' if is_eic else 'pda') or {}
         source = idmap.get(spec.get('source_id'), spec.get('source_id'))
-        label = f"{saved['name']} / PDA {spec.get('wavelength_nm')} nm"
+        label = (f"{saved['name']} / EIC {spec.get('mz')}" if is_eic
+                 else f"{saved['name']} / PDA {spec.get('wavelength_nm')} nm")
         try:
-            new_id = pda_service.add_pda_chromatogram(store, source, spec.get('wavelength_nm'))
+            new_id = (eic_service.add_eic_chromatogram(store, source, spec.get('mz'), spec.get('tolerance'))
+                      if is_eic else pda_service.add_pda_chromatogram(store, source, spec.get('wavelength_nm')))
         except (ValueError, TypeError, KeyError) as exc:
             report.errors.append(f'{label}: could not be extracted again ({exc}).')
             report.missing_ids.append(saved_component['component_id'])

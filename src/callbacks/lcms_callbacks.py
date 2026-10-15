@@ -337,6 +337,42 @@ def register_lcms_callbacks(app, data_manager):
         )
 
     @app.callback(
+        [Output('loaded-files', 'data', allow_duplicate=True),
+         Output('active-file', 'data', allow_duplicate=True),
+         Output('render-trigger', 'data', allow_duplicate=True),
+         Output('status-text', 'children', allow_duplicate=True)],
+        Input('eic-add-channel-btn', 'n_clicks'),
+        [State('eic-mz-input', 'value'), State('eic-tolerance-input', 'value'),
+         State('eic-polarity-toggle', 'value'), State('active-file', 'data'), State('render-trigger', 'data')],
+        prevent_initial_call=True,
+        running=[(Output('eic-add-channel-btn', 'disabled'), True, False)],
+    )
+    def add_eic_channel(n_clicks, mz_value, tolerance, polarity, active_file, counter):
+        """The EIC as a channel in every LC-MS run of the tab (services/eic_service), shown in the plot."""
+        if not n_clicks:
+            raise dash.exceptions.PreventUpdate
+        if mz_value is None:
+            return dash.no_update, dash.no_update, dash.no_update, 'Enter a target m/z first.'
+        from services.channel_visibility import group_bundle_ids
+        from services.eic_service import add_eic_series, eic_label
+        from callbacks.viz_callbacks import _get_active_file_group, _tab_id_from_group
+        group = _get_active_file_group(data_manager, active_file) if active_file else None
+        bundles = group_bundle_ids(data_manager, _tab_id_from_group(group), span=False) if group else []
+        if not bundles:
+            return dash.no_update, dash.no_update, dash.no_update, 'Select an LC-MS run first.'
+        try:
+            added = add_eic_series(data_manager, bundles, float(mz_value), float(tolerance or 0.5),
+                                   '-' if polarity == 'negative' else '+')
+        except ValueError as exc:
+            return dash.no_update, dash.no_update, dash.no_update, str(exc)
+        owner = data_manager.get_bundle(active_file) or data_manager.get_bundle_for_component(active_file)
+        channel = (added.get(owner.bundle_id) or [None])[0] if owner else None
+        label = eic_label(float(mz_value), float(tolerance or 0.5), polarity)
+        runs = len(added)
+        return (data_manager.get_loaded_files_list(), channel or dash.no_update, (counter or 0) + 1,
+                f'Added {label} to {runs} run' + ('s' if runs != 1 else '') + ': integrate it like any channel.')
+
+    @app.callback(
         Output('eic-active-list', 'children'),
         [Input('render-trigger', 'data'),
          Input('active-file', 'data')],
@@ -1042,6 +1078,16 @@ def _resolve_lcms_spectral_entry(data_manager, active_file, lcms_svc):
                 selected = _polarity_spectral_entry(data_manager, active_file, preferred == 'ms_negative', lcms_svc)
                 if selected:
                     return selected
+            # No mode chosen yet (a UV channel is selected): the polarity whose TIC the plot shows, positive first.
+            from services.data_store import ComponentRole
+            shown = getattr(data_manager, 'visibility_state', {}) or {}
+            for negative in (False, True):
+                role = ComponentRole.MS_NEGATIVE if negative else ComponentRole.MS_POSITIVE
+                if any(c.role == role and shown.get(data_manager.peak_owner_id(c.component_id), True)
+                       for c in bundle.component_list):
+                    selected = _polarity_spectral_entry(data_manager, active_file, negative, lcms_svc)
+                    if selected:
+                        return selected
             for component in bundle.component_list:
                 entry = data_manager.get_data_by_id(component.component_id)
                 if entry and lcms_svc.has_spectral_data(entry):

@@ -219,6 +219,12 @@ class FileRemovalService:
                     matching.append(component.component_id)
                     label = identity[1]
                     state_ids.add(self.store.peak_owner_id(component.component_id))
+            # Ion chromatograms extracted from a removed MS channel go with it (they could not be rebuilt).
+            for component in bundle.component_list:
+                if (component.metadata or {}).get('eic_extracted') and \
+                        component.metadata.get('source_file_id') in matching and component.component_id not in matching:
+                    matching.append(component.component_id)
+                    state_ids.add(self.store.peak_owner_id(component.component_id))
             if matching:
                 bundles.append(bundle)
                 removed.update(matching)

@@ -227,7 +227,7 @@ class Workspace:
         role = component.role.value
         return {
             'name': bundle.component_display_name(component),
-            'kind': ('ms+' if role == 'ms_positive' else 'ms-' if role == 'ms_negative'
+            'kind': ('eic' if meta.get('eic_extracted') else 'ms+' if role == 'ms_positive' else 'ms-' if role == 'ms_negative'
                      else 'uv' if meta.get('is_uv_data') or role.startswith('vwd') else role),
             'wavelength_nm': meta.get('wavelength_nm'),
             'points': int(len(x)) if x is not None else 0,
@@ -593,35 +593,53 @@ class Workspace:
         raise GeckoError(f'{bundle.name} has no {"negative" if role == ComponentRole.MS_NEGATIVE else "positive"}-mode '
                          'mass spectra (only exported TIC traces or no MS at all).')
 
+    def add_eic_channel(self, mz: float, tolerance: float = 0.5, polarity: str = '+', samples=None) -> List[dict]:
+        """Add the extracted-ion chromatogram of m/z ± tolerance as a channel of each run with full-scan spectra
+        (polarity '+', '-' or 'both'), like the app's EIC "Add as channel": then it is integrated, matched across
+        samples, calibrated and exported like any channel. Returns the channel names."""
+        from services.eic_service import add_eic_chromatogram, ms_source
+        out = []
+        polarities = ['+', '-'] if str(polarity).lower() == 'both' else [polarity]
+        for bundle in self._samples(samples):
+            for pol in polarities:
+                source = ms_source(self.store, bundle, pol)
+                if source is None:
+                    out.append({'sample': bundle.name, 'error': f'no {"negative" if pol.startswith("-") else "positive"}'
+                                '-mode full-scan spectra'})
+                    continue
+                component_id = add_eic_chromatogram(self.store, source.component_id, mz, tolerance)
+                component = next(c for c in bundle.component_list if c.component_id == component_id)
+                out.append({'sample': bundle.name, 'channel': bundle.component_display_name(component)})
+        self._record(f'Added EIC m/z {mz:g} ± {tolerance:g} ({polarity}) as a channel in '
+                     f'{_names(self._samples(samples))}')
+        return out
+
     def eic(self, mz: float, tolerance: float = 0.5, samples=None, polarity: str = '+',
             rt_start: Optional[float] = None, rt_end: Optional[float] = None) -> List[dict]:
-        """Extracted-ion chromatogram of m/z ± tolerance in each sample with mass spectra.
-
-        The peak is the tallest point (inside ``rt_start``-``rt_end`` if given); its area is integrated from where
-        the trace falls to 5 % of that height on each side, or over the given window, with a straight baseline.
-        The EIC also appears in the app's EIC view of that sample."""
-        from services.lcms_service import LCMSService
+        """Extracted-ion chromatogram of m/z ± tolerance in each run with spectra, added as a channel and integrated
+        there: the tallest point (inside ``rt_start``-``rt_end`` if given), from where the trace falls to 5 % of
+        that height on each side (or over the given window), straight baseline. The peak is in the app, editable;
+        extracting again replaces the agent's earlier EIC peak at that place."""
         from callbacks.baseline_callbacks import _area_with_constraints
-        service = LCMSService()
+        from services.eic_service import add_eic_chromatogram, ms_source
         rows = []
         for bundle in self._samples(samples):
-            try:
-                component, entry = self._ms_entry(bundle, polarity)
-            except GeckoError as exc:
-                rows.append({'sample': bundle.name, 'error': str(exc)})
+            source = ms_source(self.store, bundle, polarity)
+            if source is None:
+                rows.append({'sample': bundle.name, 'error': 'no full-scan mass spectra of this polarity '
+                                                             '(only exported TIC traces or no MS)'})
                 continue
-            t, inten = service.extract_eic(entry, float(mz), float(tolerance))
-            t, inten = np.asarray(t, dtype=float), np.asarray(inten, dtype=float)
-            if hasattr(self.store, 'add_lcms_eic_overlay'):
-                self.store.add_lcms_eic_overlay(component.component_id, {
-                    'mz': float(mz), 'tolerance': float(tolerance), 'time': t, 'intensity': inten})
+            channel_id = add_eic_chromatogram(self.store, source.component_id, mz, tolerance)
+            component = next(c for c in bundle.component_list if c.component_id == channel_id)
+            t, inten = self._xy(channel_id)
             window = np.ones_like(t, dtype=bool)
             if rt_start is not None:
                 window &= t >= rt_start
             if rt_end is not None:
                 window &= t <= rt_end
+            channel = bundle.component_display_name(component)
             if not window.any() or inten[window].max() <= 0:
-                rows.append({'sample': bundle.name, 'mz': mz, 'apex_rt': None, 'height': 0.0, 'area': 0.0})
+                rows.append({'sample': bundle.name, 'channel': channel, 'apex_rt': None, 'height': 0.0, 'area': 0.0})
                 continue
             apex = int(np.flatnonzero(window)[np.argmax(inten[window])])
             if rt_start is not None and rt_end is not None:
@@ -636,11 +654,24 @@ class Workspace:
                     j += 1
                 lo, hi = float(t[max(i - 1, 0)]), float(t[min(j + 1, len(t) - 1)])
             ends = [(lo, float(np.interp(lo, t, inten))), (hi, float(np.interp(hi, t, inten)))]
-            result, _q1, _q2 = _area_with_constraints(t, inten, *ends)
-            rows.append({'sample': bundle.name, 'mz': mz, 'tolerance': tolerance, 'polarity': polarity,
-                         'apex_rt': round(float(t[apex]), 4), 'height': float(f'{inten[apex]:.6g}'),
-                         'rt_start': round(lo, 4), 'rt_end': round(hi, 4),
-                         'area': float(f'{result["area"]:.6g}') if result else 0.0})
+            result, q1, q2 = _area_with_constraints(t, inten, *ends)
+            row = {'sample': bundle.name, 'channel': channel, 'mz': mz, 'tolerance': tolerance, 'polarity': polarity,
+                   'apex_rt': round(float(t[apex]), 4), 'height': float(f'{inten[apex]:.6g}'),
+                   'rt_start': round(lo, 4), 'rt_end': round(hi, 4), 'area': 0.0}
+            if result:
+                ps = self.store.peak_service
+                for old in list(ps.get_peaks(channel_id) or []):
+                    if old.source == 'agent-eic' and old.rt_start < hi and old.rt_end > lo:
+                        ps.remove_peak(channel_id, old.peak_id)
+                ps.save_undo()
+                peak = ps.add_baseline_peak(channel_id, area=result['area'], height=result['height'],
+                                            apex_x=result['apex_x'], poly_x=result['poly_x'], poly_y=result['poly_y'],
+                                            p_line=ends, q1=q1, q2=q2, source='agent-eic')
+                row.update(area=float(f'{result["area"]:.6g}'), peak_id=peak.peak_id)
+            rows.append(row)
+        self.store.peak_service.group_peaks_across_samples(file_overlay_map=self.store.build_file_overlay_map())
+        self._record(f'Extracted and integrated EIC m/z {mz:g} ± {tolerance:g} ({polarity}) in '
+                     f'{_names(self._samples(samples))}')
         return rows
 
     def mass_spectrum(self, sample, rt: Optional[float] = None, rt_start: Optional[float] = None,

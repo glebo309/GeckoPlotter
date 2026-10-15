@@ -229,3 +229,36 @@ def test_the_results_workbook_has_a_sheet_per_tab_with_areas_peaks_and_traces(se
     assert len(peaks) == 2
     data = list(book['HalB data'].iter_rows(min_row=4, max_row=6, values_only=True))
     assert data[0][0].startswith('4 · ') and data[1][:2] == ('Time (min)', 'Signal') and data[2][0] is not None
+
+
+def test_an_eic_is_a_channel_with_an_editable_peak_that_survives_saving(sequence, tmp_path):
+    ws = Workspace()
+    ws.open(str(sequence))
+    first = {r['sample']: r for r in ws.eic(ION, 0.5)}
+    assert first['4']['channel'] == 'EIC 633.8 ±0.5 (+)' and first['4']['area'] > 0
+    again = {r['sample']: r for r in ws.eic(ION, 0.5)}                  # replaced, not duplicated
+    eic_peaks = [r for r in ws.peaks('4') if r['channel'].startswith('EIC')]
+    assert len(eic_peaks) == 1 and eic_peaks[0]['area'] == pytest.approx(again['4']['area'])
+    assert eic_peaks[0]['area'] == pytest.approx(2 * {r['sample']: r for r in ws.peaks('CONTROL 4')
+                                                     if r['channel'].startswith('EIC')}['CONTROL 4']['area'], rel=0.02)
+    bundle = ws._sample('4')
+    assert bundle.primary.role.value != 'generic'                       # the run's primary channel is unchanged
+    reopened = Workspace()
+    reopened.open(ws.save(str(tmp_path / 'eic')))
+    kept = [r for r in reopened.peaks('4') if r['channel'].startswith('EIC')]
+    assert len(kept) == 1 and kept[0]['area'] == pytest.approx(eic_peaks[0]['area'])
+    names = [c['name'] for c in next(x for x in reopened.samples() if x['name'] == '4')['channels']]
+    assert 'EIC 633.8 ±0.5 (+)' in names
+
+
+def test_removing_the_ms_channel_removes_its_eics(sequence):
+    from services.channel_visibility import channel_controls
+    ws = Workspace()
+    ws.open(str(sequence))
+    ws.add_eic_channel(ION, 0.5)
+    bundle = ws._sample('4')
+    keys = [c['key'] for c in channel_controls(ws.store, [bundle.bundle_id])]
+    assert 'eic:+:633.8:0.5' in keys and keys.index('eic:+:633.8:0.5') > keys.index('ms:positive')
+    ws.store.file_removal_service.remove_channels([bundle.bundle_id], 'ms:positive')
+    left = [c['key'] for c in channel_controls(ws.store, [bundle.bundle_id])]
+    assert 'ms:positive' not in left and not any(k.startswith('eic:') for k in left)

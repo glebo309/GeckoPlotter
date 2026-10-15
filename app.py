@@ -1316,6 +1316,13 @@ _layout_body = html.Div(
                                                                             style={'width': '100%'}),
                                                             ], style={'flex': '1', 'minWidth': '90px', 'paddingTop': '18px'}),
                                                             html.Div([
+                                                                html.Button('Add as channel', id='eic-add-channel-btn',
+                                                                            className='btn btn-secondary', n_clicks=0,
+                                                                            title='Add this ion as a channel in every LC-MS run of the '
+                                                                                  'tab: integrate, compare and calibrate it like UV',
+                                                                            style={'width': '100%'}),
+                                                            ], style={'flex': '1.4', 'minWidth': '120px', 'paddingTop': '18px'}),
+                                                            html.Div([
                                                                 html.Button('Clear', id='eic-clear-btn',
                                                                             className='btn',
                                                                             style={'width': '100%'}),
