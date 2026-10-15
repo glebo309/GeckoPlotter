@@ -74,27 +74,21 @@ def _baseline_area(time_arr, signal_arr, p1, p2):
     # runs of zero absorbance; counting every zero transition can trim away the
     # real peak and integrate only a tiny fluctuation in its tail.
     nonzero = np.flatnonzero(d)
+    if nonzero.size == 0:
+        return None
     idx = nonzero[np.flatnonzero(np.diff(np.sign(d[nonzero])))]
 
-    if idx.size >= 2:
-        i0 = idx[0] + 1 if d[idx[0] + 1] > 0 else idx[0]
-        i1 = idx[-1] if d[idx[-1]] > 0 else idx[-1] - 1
-        if i0 >= i1:
-            return None
-        xs, ys, ybs = x[i0:i1 + 1], y[i0:i1 + 1], yb[i0:i1 + 1]
-    elif idx.size == 1:
-        total_area = trapezoid(y - yb, x)
-        if total_area > 0:
-            xs, ys, ybs = x, y, yb
-        else:
-            return None
-    else:
-        # No sign changes — chromatogram always above baseline
-        total_area = trapezoid(y - yb, x)
-        if total_area > 0:
-            xs, ys, ybs = x, y, yb
-        else:
-            return None
+    # From where the curve rises above the line to where it last falls below it. A curve already above the line at
+    # the window's start (or still above at its end) is taken from there: noisy traces such as a TIC start above a
+    # line drawn by eye, and taking the first crossing would skip the whole peak and keep only a bump in its tail.
+    starts_above, ends_above = d[nonzero[0]] > 0, d[nonzero[-1]] > 0
+    if not idx.size and not starts_above:
+        return None
+    i0 = 0 if starts_above else idx[0] + 1
+    i1 = len(d) - 1 if ends_above else idx[-1]
+    if i0 >= i1:
+        return None
+    xs, ys, ybs = x[i0:i1 + 1], y[i0:i1 + 1], yb[i0:i1 + 1]
 
     area = trapezoid(ys - ybs, xs)
     if area <= 0:
