@@ -430,7 +430,7 @@ class Workspace:
                 warnings.append(f'{bundle.name} has no peak "{peak}": left out of the calibration.')
                 continue
             group = group or found[1].group_id
-            key = f'{found[0].component_id}:{found[1].peak_id}'
+            key = f'{self.store.peak_owner_id(found[0].component_id)}:{found[1].peak_id}'   # as the editor files it
             ids.append(key)
             concentrations[key] = float(concentration)
         if len(ids) < 2:

@@ -76,3 +76,18 @@ def test_the_calibration_is_saved_and_in_the_workbook(workspace, tmp_path):
     assert {r['sample']: r['concentration'] for r in again.peaks()}['Unknown A'] == pytest.approx(1.5, rel=0.01)
     book = load_workbook(again.export_results(str(tmp_path / 'cal')))
     assert 'Calibration' in book.sheetnames
+
+
+def test_calibration_works_on_samples_read_from_files(tmp_path):
+    """One channel per sample (CSV files): the editor files peaks under the sample, not the channel."""
+    t = np.arange(0, 6, 0.01)
+    levels = {'Std 1': 1.0, 'Std 2': 2.0, 'Std 4': 4.0, 'Unknown': 3.0}
+    for name, c in levels.items():
+        y = 50 * c * np.exp(-((t - 3.0) / 0.05) ** 2)
+        (tmp_path / f'{name}.csv').write_text('Time (min),Absorbance (mAU)\n' +
+                                               '\n'.join(f'{a:.2f},{b:.4f}' for a, b in zip(t, y)))
+    ws = Workspace()
+    ws.open(str(tmp_path))
+    ws.integrate(2.8, 3.2, name='Product')
+    result = ws.calibrate('Product', {k: v for k, v in levels.items() if k.startswith('Std')})
+    assert {c['sample']: c['concentration'] for c in result['concentrations']}['Unknown'] == pytest.approx(3.0, rel=0.01)
