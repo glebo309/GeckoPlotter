@@ -83,20 +83,23 @@ def test_first_start_downloads_unpacks_starts_the_app_and_a_second_start_reuses_
         process.wait(timeout=10)
 
 
+@pytest.mark.skipif(sys.platform != 'darwin', reason='the app is built with macOS osacompile')
 def test_the_mac_shortcut_is_an_app_with_the_gecko_icon_that_runs_the_start_script(launcher, tmp_path, monkeypatch):
-    monkeypatch.setattr(launcher.platform, 'system', lambda: 'Darwin')
     monkeypatch.setattr(launcher.Path, 'home', lambda: tmp_path / 'user')
+    monkeypatch.setenv('GECKO_APPS_DIR', str(tmp_path / 'user' / 'Applications'))
     launcher.HOME.mkdir(parents=True)
     (launcher.HOME / 'start-mac.command').write_text('#!/bin/bash\n')
     launcher.create_shortcuts()
     app = tmp_path / 'user' / 'Applications' / 'GeckoPlotter.app' / 'Contents'
-    runner = app / 'MacOS' / 'GeckoPlotter'
+    runner = launcher.HOME / 'GeckoPlotter.sh'
     assert 'start-mac.command' in runner.read_text() and runner.stat().st_mode & 0o111
-    assert '<string>icon</string>' in (app / 'Info.plist').read_text() and (app / 'Resources' / 'icon.icns').exists()
+    assert '<string>GeckoPlotter</string>' in (app / 'Info.plist').read_text()
+    assert (app / 'Resources' / 'GeckoPlotter.icns').exists() or not launcher.asset('icon.icns')
     assert launcher.read_state()['shortcuts'] == launcher.SHORTCUTS_VERSION
-    (runner).unlink()
+    import shutil
+    shutil.rmtree(app.parent)
     launcher.create_shortcuts()                                # only once: a removed shortcut is not forced back
-    assert not runner.exists()
+    assert not app.exists()
 
 
 def test_the_linux_shortcut_is_a_menu_entry(launcher, tmp_path, monkeypatch):
@@ -165,12 +168,13 @@ def test_started_from_the_icon_the_app_is_told_to_stop_when_idle(launcher, monke
         process.wait(timeout=10)
 
 
+@pytest.mark.skipif(sys.platform != 'darwin', reason='the app is built with macOS osacompile')
 def test_the_mac_app_runs_without_terminal_and_keeps_terminal_as_fallback(launcher, tmp_path, monkeypatch):
-    monkeypatch.setattr(launcher.platform, 'system', lambda: 'Darwin')
     monkeypatch.setattr(launcher.Path, 'home', lambda: tmp_path / 'user')
+    monkeypatch.setenv('GECKO_APPS_DIR', str(tmp_path / 'user' / 'Applications'))
     launcher.HOME.mkdir(parents=True)
     (launcher.HOME / 'start-mac.command').write_text('#!/bin/bash\n')
     launcher.create_shortcuts()
-    runner = (tmp_path / 'user' / 'Applications' / 'GeckoPlotter.app' / 'Contents' / 'MacOS' / 'GeckoPlotter').read_text()
-    assert '--background' in runner and 'launcher.py' in runner
+    runner = (launcher.HOME / 'GeckoPlotter.sh').read_text()
+    assert '--background "$@"' in runner and 'launcher.py' in runner        # a double-clicked .gecko is passed on
     assert runner.strip().endswith('start-mac.command"')                 # no uv yet: the visible start script

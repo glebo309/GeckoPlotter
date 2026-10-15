@@ -359,7 +359,32 @@
         }
     }
 
+    // A double-clicked .gecko: the launcher opens the app at ?open=<path> (deploy/launcher/launcher.py with_project).
+    // It is opened like a project picked from the recent list once the page is up, and the address is cleaned so a
+    // reload does not open it again.
+    function openFromAddress(search) {
+        var path = null;
+        try { path = new URLSearchParams(search || '').get('open'); } catch (_) { return null; }
+        if (!path || !isSessionFile(path)) return null;
+        try { window.history.replaceState(null, '', window.location.pathname); } catch (_) {}
+        var tries = 0;
+        (function when() {
+            if (!dc().set_props || !document.getElementById('session-open-menu-btn')) {
+                if (++tries < 150) later(when, 200);
+                return;
+            }
+            var name = path.split(/[\\/]/).pop();
+            var pick = function () {
+                setProps('session-status', {children: 'Opening ' + name + '…'});
+                setProps('session-recent-pick', {data: {path: path, ts: now()}});
+            };
+            if (!guardOpen(pick)) pick();
+        })();
+        return path;
+    }
+
     function install() {
+        openFromAddress(window.location && window.location.search);
         window.addEventListener('keydown', onKeyDown, true);
         window.addEventListener('beforeunload', onBeforeUnload);
         window.addEventListener('drop', onDrop, true);
@@ -375,6 +400,7 @@
             trackChange: trackChange, armRestore: armRestore, finishRestore: finishRestore,
             statusText: statusText, nameLabel: nameLabel,
             isSessionFile: isSessionFile, sessionFileIn: sessionFileIn, guardOpen: guardOpen, confirmAction: confirmAction,
+            openFromAddress: openFromAddress,
             onClick: onClick, onKeyDown: onKeyDown, onBeforeUnload: onBeforeUnload, onDrop: onDrop, onFileInput: onFileInput,
             state: state,
             CONSTANTS: {AUTOSAVE_DELAY: AUTOSAVE_DELAY, SETTLE_MS: SETTLE_MS, QUIET_MS: QUIET_MS, CONTENT_IDS: CONTENT_IDS}

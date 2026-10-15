@@ -43,6 +43,22 @@ FIRST_PORT = 8052
 USER_AGENT = {'User-Agent': 'GeckoPlotter-launcher'}
 IS_WINDOWS = platform.system() == 'Windows'
 BACKGROUND = '--background' in sys.argv          # started from the icon: no window, stops itself when idle
+
+
+def _project_to_open() -> str | None:
+    """A GeckoPlotter project the launcher was asked to open (``--open <file>``: a double-clicked .gecko)."""
+    args = sys.argv[1:]
+    if '--open' in args and args.index('--open') + 1 < len(args):
+        candidate = args[args.index('--open') + 1]
+    else:
+        candidate = next((a for a in args if a.lower().endswith('.gecko')), None)
+    if not candidate:
+        return None
+    path = Path(candidate).expanduser()
+    return str(path.resolve()) if path.is_file() else None
+
+
+OPEN_PROJECT = _project_to_open()
 IDLE_EXIT_SECONDS = 180                          # after the last GeckoPlotter tab is closed (sleep does not count)
 NO_WINDOW = {'creationflags': 0x08000000} if IS_WINDOWS else {}   # helpers never open a console window
 
@@ -360,16 +376,17 @@ def prepare() -> subprocess.Popen:
         process.terminate()
         raise RuntimeError('GeckoPlotter did not start in time.')
     STATUS.set('start', 'done')
-    STATUS.url = f'http://127.0.0.1:{port}/'
-    log(f'running at {STATUS.url} (version {STATUS.version})')
+    base = f'http://127.0.0.1:{port}/'
+    STATUS.url = with_project(base)                    # the progress page goes on to the project when one was asked
+    log(f'running at {base} (version {STATUS.version})')
     try:
-        RUNNING_FILE.write_text(json.dumps({'url': STATUS.url, 'pid': process.pid}), encoding='utf-8')
+        RUNNING_FILE.write_text(json.dumps({'url': base, 'pid': process.pid}), encoding='utf-8')
     except OSError:
         pass
     return process
 
 
-SHORTCUTS_VERSION = 4                                  # raise to rebuild everyone's shortcut once
+SHORTCUTS_VERSION = 5                                  # raise to rebuild everyone's shortcut once (5: .gecko files)
 ICONS_VERSION = 2                                      # raise when the icon changes, so everyone fetches it again
 ICONS = ('icon.png', 'icon.ico', 'icon.icns')
 
@@ -391,6 +408,94 @@ def fetch_icons() -> None:
             return
     state['icons'] = ICONS_VERSION
     write_state(state)
+
+
+PROJECT_TYPE = 'xyz.glecko.geckoplotter.project'      # the .gecko file type (a ZIP: data, peaks, settings)
+
+
+def make_mac_app(apps: Path, script: Path) -> Path:
+    """~/Applications/GeckoPlotter.app: starts GeckoPlotter without a Terminal window and opens a double-clicked .gecko.
+
+    Finder hands a file to an app as an Apple event, which a shell script cannot receive, so the app is a small
+    AppleScript applet (osacompile, part of macOS) that runs ``GeckoPlotter.sh`` with ``--open <file>``. Its Info.plist
+    declares the .gecko type with the gecko icon; the app is signed again ad hoc and registered with Launch Services.
+    """
+    import plistlib
+    runner = HOME / 'GeckoPlotter.sh'
+    launcher = HOME / 'launcher.py'
+    runner.write_text(
+        '#!/bin/sh\n'
+        '# Runs GeckoPlotter without a Terminal window; it stops itself after the last tab is closed.\n'
+        'UV="$HOME/.local/bin/uv"; [ -x "$UV" ] || UV="$HOME/.cargo/bin/uv"\n'
+        f'if [ -x "$UV" ] && [ -f "{launcher}" ]; then\n'
+        f'  exec "$UV" run --python {PYTHON_VERSION} --no-project "{launcher}" --background "$@" >> "{HOME / "launcher.out"}" 2>&1\n'
+        'fi\n'
+        f'exec open -a Terminal "{script}"\n', encoding='utf-8')
+    runner.chmod(0o755)
+    run = f'do shell script quoted form of "{runner}" & " > /dev/null 2>&1 &"'
+    source = ('on run\n  ' + run + '\nend run\n'
+              'on open theFiles\n  repeat with f in theFiles\n'
+              f'    do shell script quoted form of "{runner}" & " --open " & quoted form of (POSIX path of f)'
+              ' & " > /dev/null 2>&1 &"\n  end repeat\nend open\n')
+    apps.mkdir(parents=True, exist_ok=True)
+    app = apps / 'GeckoPlotter.app'
+    shutil.rmtree(app, ignore_errors=True)
+    with tempfile.NamedTemporaryFile('w', suffix='.applescript', delete=False, encoding='utf-8') as handle:
+        handle.write(source)
+    try:
+        subprocess.run(['osacompile', '-o', str(app), handle.name], check=True, capture_output=True, timeout=60)
+    finally:
+        os.unlink(handle.name)
+    resources = app / 'Contents' / 'Resources'
+    if asset('icon.icns'):
+        shutil.copyfile(asset('icon.icns'), resources / 'GeckoPlotter.icns')
+        shutil.copyfile(asset('icon.icns'), resources / 'geckoproject.icns')
+    for leftover in ('applet.icns', 'droplet.icns', 'Assets.car'):        # osacompile's own (script) icon
+        try:
+            (resources / leftover).unlink()
+        except OSError:
+            pass
+    info_path = app / 'Contents' / 'Info.plist'
+    info = plistlib.loads(info_path.read_bytes())
+    info.pop('CFBundleIconName', None)                  # it names the icon in Assets.car, which is gone
+    info.update({
+        'CFBundleIconFile': 'GeckoPlotter',
+        'CFBundleName': 'GeckoPlotter', 'CFBundleDisplayName': 'GeckoPlotter',
+        'CFBundleIdentifier': 'xyz.glecko.geckoplotter', 'CFBundleShortVersionString': '1.0',
+        'CFBundleDocumentTypes': [{
+            'CFBundleTypeName': 'GeckoPlotter project', 'CFBundleTypeRole': 'Editor', 'LSHandlerRank': 'Owner',
+            'CFBundleTypeIconFile': 'geckoproject', 'LSItemContentTypes': [PROJECT_TYPE]}],
+        'UTExportedTypeDeclarations': [{
+            'UTTypeIdentifier': PROJECT_TYPE, 'UTTypeDescription': 'GeckoPlotter project',
+            'UTTypeConformsTo': ['public.data'], 'UTTypeIconFile': 'geckoproject',
+            'UTTypeTagSpecification': {'public.filename-extension': ['gecko']}}],
+    })
+    info_path.write_bytes(plistlib.dumps(info))
+    # Changing the bundle breaks osacompile's signature; Apple silicon only runs signed code (ad hoc is enough).
+    subprocess.run(['codesign', '--force', '--deep', '--sign', '-', str(app)], capture_output=True, timeout=60)
+    lsregister = ('/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/'
+                  'Support/lsregister')
+    if Path(lsregister).exists() and not os.environ.get('GECKO_APPS_DIR'):
+        subprocess.run([lsregister, '-f', str(app)], capture_output=True, timeout=60)
+    return app
+
+
+def register_windows_file_type(command: str, icon) -> None:
+    """.gecko files open in GeckoPlotter with its icon (this user only: HKEY_CURRENT_USER, no admin rights)."""
+    import winreg
+    entries = {r'Software\Classes\.gecko': 'GeckoPlotter.Project',
+               r'Software\Classes\GeckoPlotter.Project': 'GeckoPlotter project',
+               r'Software\Classes\GeckoPlotter.Project\shell\open\command': command}
+    if icon:
+        entries[r'Software\Classes\GeckoPlotter.Project\DefaultIcon'] = f'"{icon}",0'
+    for key, value in entries.items():
+        with winreg.CreateKey(winreg.HKEY_CURRENT_USER, key) as handle:
+            winreg.SetValueEx(handle, '', 0, winreg.REG_SZ, value)
+    try:                                                # Explorer shows the new icon without a restart
+        import ctypes
+        ctypes.windll.shell32.SHChangeNotify(0x08000000, 0, None, None)
+    except Exception:                                   # noqa: BLE001 - the icon appears after the next login then
+        pass
 
 
 def create_shortcuts() -> None:
@@ -419,37 +524,13 @@ def create_shortcuts() -> None:
                   f"$s.IconLocation = '{icon or ''}'; $s.Description = 'GeckoPlotter'; $s.Save() }}")
             subprocess.run(['powershell', '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', ps],
                            check=True, capture_output=True, timeout=60, **NO_WINDOW)
+            if uvw:
+                register_windows_file_type(f'"{uvw}" {arguments} --open "%1"', icon)
         elif system == 'Darwin':
             script = HOME / 'start-mac.command'
             if not script.exists():
                 return
-            app = Path.home() / 'Applications' / 'GeckoPlotter.app'
-            (app / 'Contents' / 'MacOS').mkdir(parents=True, exist_ok=True)
-            (app / 'Contents' / 'Resources').mkdir(parents=True, exist_ok=True)
-            if asset('icon.icns'):
-                shutil.copyfile(asset('icon.icns'), app / 'Contents' / 'Resources' / 'icon.icns')
-            (app / 'Contents' / 'Info.plist').write_text(
-                '<?xml version="1.0" encoding="UTF-8"?>\n<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" '
-                '"http://www.apple.com/DTDs/PropertyList-1.0.dtd">\n<plist version="1.0"><dict>'
-                '<key>CFBundleName</key><string>GeckoPlotter</string>'
-                '<key>CFBundleDisplayName</key><string>GeckoPlotter</string>'
-                '<key>CFBundleIdentifier</key><string>xyz.glecko.geckoplotter</string>'
-                '<key>CFBundleExecutable</key><string>GeckoPlotter</string>'
-                '<key>CFBundleIconFile</key><string>icon</string>'
-                '<key>CFBundlePackageType</key><string>APPL</string>'
-                '<key>CFBundleShortVersionString</key><string>1.0</string>'
-                '</dict></plist>\n', encoding='utf-8')
-            runner = app / 'Contents' / 'MacOS' / 'GeckoPlotter'
-            launcher = HOME / 'launcher.py'
-            runner.write_text(
-                '#!/bin/sh\n'
-                '# Runs GeckoPlotter without a Terminal window; it stops itself after the last tab is closed.\n'
-                'UV="$HOME/.local/bin/uv"; [ -x "$UV" ] || UV="$HOME/.cargo/bin/uv"\n'
-                f'if [ -x "$UV" ] && [ -f "{launcher}" ]; then\n'
-                f'  exec "$UV" run --python {PYTHON_VERSION} --no-project "{launcher}" --background >> "{HOME / "launcher.out"}" 2>&1\n'
-                'fi\n'
-                f'exec open -a Terminal "{script}"\n', encoding='utf-8')
-            runner.chmod(0o755)
+            make_mac_app(Path(os.environ.get('GECKO_APPS_DIR') or Path.home() / 'Applications'), script)
         else:
             script = HOME / 'start-linux.sh'
             if not script.exists():
@@ -483,6 +564,14 @@ def ensure_chrome() -> None:
         log(f'could not set up the figure-export browser: {error}')
 
 
+def with_project(url: str) -> str:
+    """The app's address, asking it to open OPEN_PROJECT (the app opens ``?open=<path>`` like a recent project)."""
+    if not OPEN_PROJECT:
+        return url
+    from urllib.parse import quote
+    return url.rstrip('/') + '/?open=' + quote(OPEN_PROJECT)
+
+
 def running_instance() -> str | None:
     """The address of a GeckoPlotter this launcher already started and that still answers, else None."""
     try:
@@ -514,7 +603,7 @@ def main() -> int:
     HOME.mkdir(parents=True, exist_ok=True)
     already = running_instance()
     if already:
-        webbrowser.open(already)
+        webbrowser.open(with_project(already))
         return 0
     if BACKGROUND and refresh_self():
         subprocess.Popen([sys.executable, str(Path(__file__).resolve()), *sys.argv[1:]], **NO_WINDOW)
