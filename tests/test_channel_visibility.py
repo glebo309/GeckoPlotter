@@ -452,3 +452,23 @@ def test_new_samples_show_one_uv_channel_the_lowest_wavelength():
         runs.append(bundle)
     shown = {c.component_id for b in runs for c in b.component_list if store.visibility_state.get(c.component_id, True)}
     assert shown == {'blankpos', 'blank214', 'lyspos', 'lys250'}     # the second run's own lowest wavelength
+
+
+def test_a_live_preview_at_another_wavelength_turns_the_uv_switches_off_and_names_itself():
+    from callbacks.file_tree_callbacks import register_file_tree_callbacks
+    from callbacks.viz_callbacks import _get_overlay_group, _tab_id_from_group
+    store = samples()                                     # samples a and b with 250 and 263 nm
+    class App:
+        functions = {}
+        def callback(self, *args, **kwargs):
+            def wrap(fn): self.functions[fn.__name__] = fn; return fn
+            return wrap
+    app = App(); register_file_tree_callbacks(app, store)
+    entry = store.get_data_by_id('a')
+    tab = _tab_id_from_group(_get_overlay_group(entry['metadata'], entry, 'a', store))
+    row = app.functions['update_plot_channel_controls']([], tab, 'raw', [], {'wavelength_nm': 426.2})
+    buttons = [n for n in row.children if getattr(n, 'role', None) == 'checkbox']
+    assert {getattr(b, 'aria-checked') for b in buttons} == {'false'}
+    assert row.children[-1].children == '426 nm · preview'
+    row = app.functions['update_plot_channel_controls']([], tab, 'raw', [], {'wavelength_nm': 263})
+    assert all(getattr(n, 'role', None) == 'checkbox' for n in row.children)     # the channel itself: no chip

@@ -127,3 +127,7 @@
 .gecko-menu.peak-label-menu { position: fixed; z-index: 5001; }
 .peak-label-menu .gecko-menu-item.checked::after { content: "\2713"; float: right; margin-left: 16px; color: #2c7a52; }
 .peak-label-menu-note { padding: 6px 12px 4px; font-size: 11px; color: #777b80; }
+/* The wavelength a live PDA preview shows instead of the UV channels (file_tree_callbacks) */
+.channel-preview-chip { display: inline-flex; align-items: center; gap: 5px; margin-left: 6px; padding: 2px 8px; border-radius: 999px;
+    font-size: 12px; color: #2c5240; background: #e8f3ec; border: 1px dashed #5aa877; white-space: nowrap; }
+.channel-preview-chip::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: #5aa877; }

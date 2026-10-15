@@ -120,9 +120,9 @@ def register_file_tree_callbacks(app: dash.Dash, data_manager: DataManager) -> N
     @app.callback(
         Output('plot-channel-controls', 'children'),
         Input('file-tree', 'children'), Input('active-plot-tab', 'data'), Input('view-mode', 'data'),
-        Input('hidden-files', 'data'),
+        Input('hidden-files', 'data'), Input('pda-preview', 'data'),
     )
-    def update_plot_channel_controls(_tree, active_tab, view_mode, _hidden=None):
+    def update_plot_channel_controls(_tree, active_tab, view_mode, _hidden=None, preview=None):
         from services.channel_visibility import channel_controls, group_bundle_ids
         from callbacks.upload_callbacks import _render_channel_controls
         if not active_tab or view_mode != 'raw':
@@ -134,6 +134,20 @@ def register_file_tree_callbacks(app: dash.Dash, data_manager: DataManager) -> N
         controls = channel_controls(data_manager, shown or own)
         if not controls:
             return []
+        # A live PDA preview at another wavelength replaces the UV traces: their switches show off and the previewed
+        # wavelength is named, so the row says what the plot shows.
+        try:
+            previewed = round(float((preview or {}).get('wavelength_nm')))
+        except (TypeError, ValueError):
+            previewed = None
+        uv = [c for c in controls if c['key'].startswith('uv')]
+        if previewed is not None and uv and not any(c['key'] == f'uv:{previewed}' for c in uv):
+            controls = [dict(c, state='false') if c['key'].startswith('uv') else c for c in controls]
+            row = _render_channel_controls(controls, active_tab)
+            row.children = list(row.children) + [html.Span(
+                f'{previewed} nm · preview', className='channel-preview-chip',
+                title='The PDA view previews this wavelength in the plot. "Add channel" there keeps it.')]
+            return row
         return _render_channel_controls(controls, active_tab)
 
     @app.callback(

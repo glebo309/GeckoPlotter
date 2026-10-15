@@ -47,17 +47,30 @@
     function finish(cancelled) {
         var state = drag;
         drag = null;
-        overlay().style.display = 'none';
-        if (!state || !state.moved) return;
-        if (cancelled) { state.ghost.remove(); state.element.style.opacity = ''; return; }
+        if (!state || !state.moved) { overlay().style.display = 'none'; return; }
+        var restore = function () { state.ghost.remove(); state.hidden.style.opacity = ''; overlay().style.display = 'none'; };
+        if (cancelled) { restore(); return; }
         if (window.dash_clientside) {
             window.dash_clientside.set_props('peak-label-move', {data: {
                 peak_id: state.hit.peakId, offset: state.snapped ? null : state.offset,
                 leader: !!state.leader, ts: Date.now()}});
         }
-        // Keep the label where it was dropped until the plot is redrawn with it there.
-        var done = function () { state.ghost.remove(); state.element.style.opacity = ''; };
-        if (state.gd.once) state.gd.once('plotly_afterplot', function () { setTimeout(done, 30); });
+        // The name (and its line) stay where they were dropped until the plot is redrawn with them there.
+        var finished = false;
+        var done = function () { if (!finished) { finished = true; restore(); } };
+        var arrived = function () {                       // the redraw that carries the new position
+            var a = ((state.gd._fullLayout || {}).annotations || []).find(function (x) {
+                return String(x.name || '') === 'peak-label:' + state.hit.peakId; });
+            if (state.snapped) return !a;
+            if (!a) return false;
+            var dx = a.showarrow ? a.ax : a.xshift, dy = a.showarrow ? -a.ay : a.yshift;
+            return Math.abs(dx - state.offset[0]) < 1 && Math.abs(dy - state.offset[1]) < 1;
+        };
+        var wait = function () {
+            if (finished || !state.gd.once) return;
+            state.gd.once('plotly_afterplot', function () { if (arrived()) setTimeout(done, 30); else wait(); });
+        };
+        wait();
         setTimeout(done, 4000);
     }
 
@@ -86,7 +99,9 @@
             ghost.textContent = drag.hit.value;
             document.body.appendChild(ghost);
             drag.ghost = ghost;
-            drag.element.style.opacity = '0';
+            // A moved name is an annotation: its line goes with it (hidden while the preview line is drawn).
+            drag.hidden = drag.element.closest('.annotation') || drag.element;
+            drag.hidden.style.opacity = '0';
         }
         place(event);
         event.preventDefault();

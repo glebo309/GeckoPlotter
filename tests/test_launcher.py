@@ -91,6 +91,8 @@ def test_the_mac_shortcut_is_an_app_with_the_gecko_icon_that_runs_the_start_scri
     (launcher.HOME / 'start-mac.command').write_text('#!/bin/bash\n')
     launcher.create_shortcuts()
     app = tmp_path / 'user' / 'Applications' / 'GeckoPlotter.app' / 'Contents'
+    from test_launcher_open import _forget
+    _forget(app.parent)
     runner = launcher.HOME / 'GeckoPlotter.sh'
     assert 'start-mac.command' in runner.read_text() and runner.stat().st_mode & 0o111
     assert '<string>GeckoPlotter</string>' in (app / 'Info.plist').read_text()
@@ -175,6 +177,8 @@ def test_the_mac_app_runs_without_terminal_and_keeps_terminal_as_fallback(launch
     launcher.HOME.mkdir(parents=True)
     (launcher.HOME / 'start-mac.command').write_text('#!/bin/bash\n')
     launcher.create_shortcuts()
+    from test_launcher_open import _forget
+    _forget(tmp_path / 'user' / 'Applications' / 'GeckoPlotter.app')
     runner = (launcher.HOME / 'GeckoPlotter.sh').read_text()
     assert '--background "$@"' in runner and 'launcher.py' in runner        # a double-clicked .gecko is passed on
     assert runner.strip().endswith('start-mac.command"')                 # no uv yet: the visible start script

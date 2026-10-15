@@ -53,6 +53,15 @@ def test_windows_registers_gecko_files_for_this_user_with_the_icon(monkeypatch, 
     assert written[r'Software\Classes\GeckoPlotter.Project\DefaultIcon'] == r'"C:\G\icon.ico",0'
 
 
+def _forget(app):
+    """macOS registers every app bundle it sees: a test copy must not become the app that owns .gecko files."""
+    import subprocess
+    lsregister = ('/System/Library/Frameworks/CoreServices.framework/Frameworks/LaunchServices.framework/'
+                  'Support/lsregister')
+    if Path(lsregister).exists():
+        subprocess.run([lsregister, '-u', str(app)], capture_output=True, timeout=60)
+
+
 @pytest.mark.skipif(platform.system() != 'Darwin' or not shutil.which('osacompile'), reason='macOS only')
 def test_the_mac_app_declares_gecko_files_and_is_signed(monkeypatch, tmp_path):
     import plistlib
@@ -61,6 +70,7 @@ def test_the_mac_app_declares_gecko_files_and_is_signed(monkeypatch, tmp_path):
     monkeypatch.setenv('GECKO_APPS_DIR', str(tmp_path / 'apps'))
     launcher.HOME.mkdir(parents=True)
     app = launcher.make_mac_app(tmp_path / 'apps', launcher.HOME / 'start-mac.command')
+    _forget(app)
     info = plistlib.loads((app / 'Contents' / 'Info.plist').read_bytes())
     assert info['CFBundleIdentifier'] == 'xyz.glecko.geckoplotter'
     assert info['UTExportedTypeDeclarations'][0]['UTTypeTagSpecification']['public.filename-extension'] == ['gecko']
