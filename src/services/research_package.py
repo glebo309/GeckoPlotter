@@ -82,8 +82,48 @@ def _dataframe_sha256(store, component):
     return digest
 
 
-def record_analysis_state(store, settings=None, triggers=None):
-    """Record changed scientific state, not clicks or rendered UI noise."""
+_PROCESSING = re.compile(r'smooth|normali|baseline|derivative|subtract|offset|factor|multipl', re.I)
+
+
+def _processing_settings(value):
+    """Only the settings that change the numbers (smoothing, normalisation, baselines, offsets, factors) of plot
+    settings or per-file settings: colours, fonts, zoom and which channel is shown are not analysis history."""
+    if not isinstance(value, dict):
+        return value
+    kept = {}
+    for key, item in value.items():
+        if isinstance(item, dict):
+            inner = _processing_settings(item)
+            if inner:
+                kept[key] = inner
+        elif _PROCESSING.search(str(key)):
+            kept[key] = item
+    return kept
+
+
+def agent_summary(store):
+    """The MCP agents that changed this analysis ([] when none did), each with its client and the model it named."""
+    return [dict(a) for a in (getattr(store, 'agent_clients', None) or [])]
+
+
+def agent_note(store) -> str:
+    """One line for the README and report: whether an MCP agent touched the analysis, and which."""
+    agents = agent_summary(store)
+    if not agents:
+        return 'Analysis made in the GeckoPlotter app; no MCP agent changed it.'
+    def one(a):
+        client = ' '.join(str(x) for x in (a.get('client'), a.get('version')) if x)
+        model = f", model {a['model']} (as reported by the agent)" if a.get('model') else ''
+        return client + model
+    return ('Parts of this analysis were made by an MCP agent: ' + '; '.join(one(a) for a in agents) +
+            '. Its steps are marked "agent" in analysis/history.json.')
+
+
+def record_analysis_state(store, settings=None, triggers=None, agent=None):
+    """Record changed scientific state (data, peaks, calibrations, processing settings), not clicks, zoom or styling.
+
+    ``agent``: the MCP agent that made the change ({'client': name, 'version': ..., 'model': ...}), noted on the
+    entry and once on the workspace (``store.agent_clients``), so a report can say the analysis was touched by one."""
     if settings is not None:
         store.analysis_plot_settings = json.loads(dumps(settings))
     signals = {}
@@ -93,8 +133,8 @@ def record_analysis_state(store, settings=None, triggers=None):
                 'metadata': _history_metadata(c.metadata), 'column_roles': c.column_roles,
                 'data_sha256': _dataframe_sha256(store, c)}
     state = json.loads(dumps({'signals': signals,
-        'plot_settings': getattr(store, 'analysis_plot_settings', {}),
-        'file_settings': store.file_ui_state,
+        'plot_settings': _processing_settings(getattr(store, 'analysis_plot_settings', {})),
+        'file_settings': _processing_settings(store.file_ui_state),
         'peaks': store.peak_service.serialize(),
         'calibrations': store.calibration_service.serialize(),
         'integration_settings': store.integration_service.serialize()}))
@@ -111,8 +151,17 @@ def record_analysis_state(store, settings=None, triggers=None):
                     revisions[c.component_id] = {'csv': c.dataframe.to_csv(index=False, lineterminator='\n')}
         if revisions:
             changes['edited_tables'] = revisions
-        store.analysis_history.append({'at': now(), 'trigger': triggers or [], 'changes': changes})
+        entry = {'at': now(), 'trigger': triggers or [], 'changes': changes}
+        if agent:
+            entry['agent'] = agent
+        store.analysis_history.append(entry)
         store._analysis_previous = state
+    if agent:
+        clients = getattr(store, 'agent_clients', None)
+        if clients is None:
+            clients = store.agent_clients = []
+        if agent not in clients:
+            clients.append(dict(agent))
 
 
 SESSION_PATH = 'session/project.gecko'
@@ -325,6 +374,7 @@ def build_research_package(store, metadata, figure_request=None, formats=None, i
         'processing':{'smoothing':smoothing_fair_export_record(settings.get('smooth_window',0)),
             'uv_ms_timing_correction':{'applied':False,'status':'Not implemented'},
             'history_started_at': store.analysis_history[0]['at'] if store.analysis_history else None,
+            'mcp_agents': agent_summary(store),
             'scope':'History records application state changes since import in this workspace. Acquisition timestamps are preserved separately in signal metadata. Imported upstream processing is not inferred.'},
         'figure_export':{k:v for k,v in (figure_request or {}).items() if k in ('width_mm','height_mm','dpi','render_width')},
         'submission_review':issues, 'guidance':POLICY}
@@ -384,6 +434,8 @@ License: {metadata.get('license','Not selected')}
 Funding: {metadata.get('funding','Not supplied')}
 
 ## Contents and provenance
+
+{agent_note(store)}
 
 - raw_data/: untouched parsed CSV at import plus original uploaded files where available. This is the imported instrument export, not a claim that upstream processing never occurred.
 - processed_data/: edited tables only, before display smoothing. Unchanged tables link to their raw CSV without a second copy.

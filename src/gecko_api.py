@@ -47,6 +47,11 @@ def _run_names(folders: Sequence[Path]) -> List[str]:
     return stripped if all(stripped) and len(set(stripped)) == len(stripped) else names
 
 
+def _names(bundles, limit: int = 6) -> str:
+    names = [b.name for b in bundles]
+    return ', '.join(names[:limit]) + (f' and {len(names) - limit} more' if len(names) > limit else '')
+
+
 def _valleys(x, y, rt_start: float, rt_end: float, reach: float = 0.5):
     """``rt_start`` and ``rt_end`` moved outwards down the slope to the nearest minimum of the (lightly smoothed)
     signal, each by at most ``reach`` min: the valleys a chemist would draw the baseline between."""
@@ -91,6 +96,12 @@ class Workspace:
     def __init__(self, store=None):
         from services.data_store import DataStore
         self.store = store or DataStore()
+        self.agent = None           # {'client', 'version', 'model'} of the MCP agent at work (gecko_mcp sets it)
+
+    def _record(self, action: str) -> None:
+        """Note a change in the analysis history (what the FAIR package and its report list), with the agent."""
+        from services.research_package import record_analysis_state
+        record_analysis_state(self.store, triggers=[action], agent=self.agent)
 
     # -- opening and saving ---------------------------------------------------------------------------------------
 
@@ -130,6 +141,7 @@ class Workspace:
         if len(runs) > 1:
             label = re.sub(r'^[\d.\-]+[_ ]+', '', path.name) or path.name     # '2026-...-..._HalB scope' -> 'HalB scope'
             self._group_folder(bundles, label)
+        self._record(f'Opened {path.name}: {len(added)} sample(s)')
         return {'added': added, 'not_readable': failed, 'samples': len(self.samples())}
 
     def _group_folder(self, bundles, folder: str) -> None:
@@ -323,6 +335,8 @@ class Workspace:
             x, y = self._xy(component.component_id)
             detect(self.store, component.component_id, x, y, sensitivity)
             rows += self._peak_rows(bundle, component)
+        self._record(f'Detected peaks (sensitivity {sensitivity:g}) on {channel or "the shown channel"} in '
+                     f'{_names(self._samples(samples))}')
         return rows
 
     def integrate(self, rt_start: float, rt_end: float, samples=None, channel=None, name: Optional[str] = None,
@@ -352,6 +366,8 @@ class Workspace:
             if name:                                    # a custom name, kept by the group numbering
                 self.store.peak_service.rename_peak(component.component_id, peak.peak_id, name)
             out += [r for r in self._peak_rows(bundle, component) if r['peak_id'] == peak.peak_id]
+        self._record(f'Integrated {rt_start:g}-{rt_end:g} min' + (f' as {name}' if name else '') +
+                     f' on {channel or "the shown channel"} in {_names(self._samples(samples))}')
         return out
 
     def peaks(self, samples=None) -> List[dict]:
@@ -367,6 +383,7 @@ class Workspace:
         bundle = self._sample(sample)
         component, found = self._find_peak(bundle, peak)
         self.store.peak_service.rename_peak(component.component_id, found.peak_id, new_name)
+        self._record(f'Renamed peak {found.name} to {new_name}')
         return self.peaks()
 
     def _find_peak(self, bundle, peak):
@@ -404,6 +421,7 @@ class Workspace:
             component = next(c for c in bundle.component_list if c.component_id == component_id)
             out.append({'sample': bundle.name, 'channel': bundle.component_display_name(component),
                         'measured_nm': round(view['measured_wavelength_nm'], 2)})
+        self._record(f'Added a {wavelength_nm:g} nm channel from the PDA data in {_names(self._samples(samples))}')
         return out
 
     def uv_spectrum(self, sample, rt: float, top: int = 5) -> dict:

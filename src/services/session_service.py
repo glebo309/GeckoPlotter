@@ -785,6 +785,7 @@ def _build_parts(store, client_state, project_name, embed_raw, raw_limit_bytes,
         'file_ui_state': store.file_ui_state,
         'shared_plot_settings': store._shared_plot_settings,
         'analysis_history': store.analysis_history,
+        'agent_clients': list(getattr(store, 'agent_clients', None) or []),
         'analysis_plot_settings': store.analysis_plot_settings,
         'analysis_previous': getattr(store, '_analysis_previous', {}),
         'lcms_eic_overlays': overlays,
@@ -1732,6 +1733,7 @@ def _apply_state(store, state: dict, report: SessionReport) -> None:
     if state.get('channel_combine_modes'):
         store._channel_combine_modes = state['channel_combine_modes']
     store.analysis_history[:] = state.get('analysis_history') or []
+    store.agent_clients = [dict(a) for a in (state.get('agent_clients') or []) if isinstance(a, dict)]
     store.analysis_plot_settings = state.get('analysis_plot_settings') or {}
     store._analysis_previous = state.get('analysis_previous') or {}
 

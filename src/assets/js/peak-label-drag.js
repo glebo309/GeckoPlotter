@@ -1,6 +1,6 @@
 // Drag a peak's name in the plot to where it reads best. A name moved away from its peak is joined to the peak's top
 // by a thin line; near its place above the peak it snaps back there. Right-click a name for its menu: connecting line
-// on/off, reset position, rename. The position is kept with the peak (peak-label-move ->
+// on/off, reset position, rename, hide all names (the Integration panel's switch). The position is kept with the peak (peak-label-move ->
 // context_menu_callbacks.move_label_from_plot -> Peak.label_offset / label_leader) and saved with the project.
 (function () {
     'use strict';
@@ -137,6 +137,15 @@
         button.addEventListener('click', function () { closeMenu(); action(); });
         return button;
     }
+    // The same switch as "Hide peak names" in the Integration panel (int-display-opts), so both always agree.
+    function hideNames() {
+        var boxes = document.querySelectorAll('#int-display-opts input[type=checkbox]');
+        var value = [];
+        boxes.forEach(function (box) { if (box.checked && box.value !== 'hide-labels') value.push(box.value); });
+        if (!boxes.length) value.push('peaks');           // panel not drawn: keep the areas shown
+        value.push('hide-labels');
+        if (window.dash_clientside) window.dash_clientside.set_props('int-display-opts', {value: value});
+    }
     function openMenu(gd, hit, event) {
         closeMenu();
         var moved = !!(hit.offset && (hit.offset[0] || hit.offset[1]));
@@ -149,6 +158,7 @@
         divider.className = 'gecko-menu-divider';
         menu.appendChild(divider);
         menu.appendChild(item('Rename…', true, function () { window.GeckoFigureLabels.begin(gd, hit); }));
+        menu.appendChild(item('Hide peak names', true, hideNames));
         if (!moved) {
             var note = document.createElement('div');
             note.className = 'peak-label-menu-note';

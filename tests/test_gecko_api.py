@@ -189,3 +189,24 @@ def test_pda_channels_and_spectra_are_read_from_the_3d_data():
     assert added[0]['measured_nm'] == pytest.approx(205, abs=0.7)
     rows = ws.detect_peaks(channel='205 nm')                        # the nearest recorded wavelength's channel
     assert [round(r['rt'], 2) for r in rows] == [2.5]
+
+
+def test_agent_changes_are_in_the_history_with_the_agent_and_the_project_says_so(sequence, tmp_path):
+    from services.research_package import agent_note, record_analysis_state
+    ws = Workspace()
+    ws.agent = {'via': 'MCP agent', 'client': 'claude-code', 'version': '2.1', 'model': 'Claude Opus 5.5'}
+    ws.open(str(sequence))
+    ws.integrate(8.2, 8.6, samples='4', channel='+TIC', name='m634 compound')
+    steps = [e for e in ws.store.analysis_history if e.get('agent')]
+    assert any('Integrated 8.2-8.6 min as m634 compound' in e['trigger'][0] for e in steps)
+    assert 'claude-code 2.1, model Claude Opus 5.5' in agent_note(ws.store)
+    again = Workspace()
+    again.open(ws.save(str(tmp_path / 'p')))
+    assert again.store.agent_clients == [ws.agent] and 'MCP agent' in agent_note(again.store)
+    # Styling and view state are not analysis history; processing settings are.
+    before = len(again.store.analysis_history)
+    record_analysis_state(again.store, settings={'line_width': 3, 'font_family': 'Arial'})
+    assert len(again.store.analysis_history) == before
+    record_analysis_state(again.store, settings={'line_width': 3, 'smooth_window': 21})
+    assert again.store.analysis_history[-1]['changes']['plot_settings']['after'] == {'smooth_window': 21}
+    assert 'no MCP agent' in agent_note(Workspace().store)
