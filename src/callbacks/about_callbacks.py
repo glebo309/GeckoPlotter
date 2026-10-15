@@ -9,7 +9,7 @@ def _rows(pairs, path=False):
     return [html.Tr([html.Td(label), html.Td(value, className='about-path' if path else None)]) for label, value in pairs]
 
 
-def register_about_callbacks(app):
+def register_about_callbacks(app, store=None):
 
     @app.callback(
         [Output('about-modal', 'opened'), Output('about-body', 'children'), Output('about-copy', 'content'),
@@ -33,20 +33,49 @@ def register_about_callbacks(app):
                 'Checking GitHub…', 'about-status checking', '')
 
     @app.callback(
-        [Output('about-status', 'children'), Output('about-status', 'className'), Output('about-update', 'children')],
+        [Output('about-status', 'children'), Output('about-status', 'className'), Output('about-update', 'children'),
+         Output('about-status', 'disabled'), Output('about-status', 'title')],
         Input('about-modal', 'opened'),
         prevent_initial_call=True,
     )
     def check_update(opened):
         if not opened:
             raise dash.exceptions.PreventUpdate
+        from services.self_update import can_update
         latest = about.latest_sha()
         sha = about.VERSION.get('sha', '')
         if latest is None:
-            return 'GitHub not reachable', 'about-status offline', ''
+            return 'GitHub not reachable', 'about-status offline', '', True, None
         if latest == sha:
-            return f'Up to date with {about.BRANCH}', 'about-status ok', ''
-        return f'Newer version: {latest[:7]}', 'about-status newer', about.update_status(latest)
+            return f'Up to date with {about.BRANCH}', 'about-status ok', '', True, None
+        if can_update():
+            return (f'Update to {latest[:7]}', 'about-status newer clickable', '', False,
+                    'A newer version is on GitHub: click to update')
+        return (f'Newer version: {latest[:7]}', 'about-status newer', '', True,
+                'This copy runs from a git checkout: update it with git pull')
+
+    @app.callback(
+        Output('about-update-confirm', 'hidden'),
+        [Input('about-status', 'n_clicks'), Input('about-update-cancel', 'n_clicks')],
+        prevent_initial_call=True,
+    )
+    def ask_update(update_clicks, cancel_clicks):
+        return dash.ctx.triggered_id != 'about-status'
+
+    @app.callback(
+        [Output('about-update', 'children', allow_duplicate=True),
+         Output('about-update-confirm', 'hidden', allow_duplicate=True)],
+        Input('about-update-go', 'n_clicks'),
+        prevent_initial_call=True,
+    )
+    def update_now(clicks):
+        if not clicks:
+            raise dash.exceptions.PreventUpdate
+        from services.self_update import can_update, restart_to_update
+        if not can_update():
+            return 'This copy cannot update itself (it runs from a git checkout).', True
+        restart_to_update(store)
+        return ('Updating: GeckoPlotter opens again in a new tab within a minute. You can close this tab.', True)
 
     @app.callback(
         Output('about-claude-status', 'children'),
@@ -58,12 +87,14 @@ def register_about_callbacks(app):
             raise dash.exceptions.PreventUpdate
         from services import claude_connect
         found = claude_connect.status()
-        apps = [name for name, key in (('Claude Desktop', 'desktop'), ('Claude Code', 'code')) if found[key]]
+        apps = [(name, found[key]) for name, key in (('Claude Desktop', 'desktop'), ('Claude Code', 'code'),
+                                                     ('Codex', 'codex')) if found[key]]
         if not apps:
-            return 'No Claude app found on this computer (claude.ai/download).'
-        if found['desktop'] == 'connected':
-            return 'Connected to Claude Desktop. ' + ('Claude Code found too.' if found['code'] else '')
-        return 'Found: ' + ' and '.join(apps) + '. Connect so Claude can open your data, integrate and export.'
+            return 'No AI app found on this computer (Claude Desktop, Claude Code or Codex).'
+        listed = ' · '.join(name + (' ✓' if state == 'connected' else '') for name, state in apps)
+        if all(state == 'connected' for _name, state in apps):
+            return listed + '. Connected: ask the agent to open your data.'
+        return listed + '. Connect so an agent can open your data, integrate and export.'
 
     @app.callback(
         Output('about-claude-status', 'children', allow_duplicate=True),

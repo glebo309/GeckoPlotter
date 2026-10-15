@@ -1,7 +1,7 @@
-"""Connect GeckoPlotter's agent interface (gecko_mcp.py) to the Claude apps on this computer, on request (About window).
+"""Connect GeckoPlotter's agent interface (gecko_mcp.py) to the AI apps on this computer, on request (About window).
 
-Claude Desktop lists its MCP servers in claude_desktop_config.json; Claude Code is told with ``claude mcp add``. Both get
-the same entry, ``geckoplotter``: the Python running this app and gecko_mcp.py next to app.py, so it keeps working after
+Claude Desktop lists its MCP servers in claude_desktop_config.json; Claude Code and Codex are told with ``claude mcp add``
+and ``codex mcp add``. All get the same entry, ``geckoplotter``: the Python running this app and gecko_mcp.py next to app.py, so it keeps working after
 every update (the launcher replaces the code in the same folder). Only that entry is added or replaced; a copy of the
 Desktop file is kept as ``claude_desktop_config.json.bak``. Nothing is changed without the user's click.
 """
@@ -54,6 +54,28 @@ def claude_code_cli() -> Optional[str]:
     return None
 
 
+def codex_cli() -> Optional[str]:
+    found = shutil.which('codex')
+    if found:
+        return found
+    for candidate in (Path('/opt/homebrew/bin/codex'), Path('/usr/local/bin/codex'), Path.home() / '.local' / 'bin' / 'codex',
+                      Path(os.environ.get('APPDATA') or '') / 'npm' / 'codex.cmd'):
+        if str(candidate) not in ('', '.') and candidate.is_file():
+            return str(candidate)
+    return None
+
+
+def _cli_has_entry(cli: Optional[str]) -> bool:
+    if not cli:
+        return False
+    try:
+        done = subprocess.run([cli, 'mcp', 'get', NAME], capture_output=True, text=True, timeout=20,
+                              cwd=str(Path.home()))
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return done.returncode == 0 and 'gecko_mcp.py' in (done.stdout or '')
+
+
 def status() -> dict:
     """Which Claude apps are here and whether GeckoPlotter is connected to them already."""
     command = server_command()
@@ -65,8 +87,23 @@ def status() -> dict:
         except (OSError, ValueError):
             entry = None
         desktop = 'connected' if entry and [entry.get('command'), *entry.get('args', [])] == command else 'available'
-    return {'desktop': desktop, 'code': 'available' if claude_code_cli() else None,
+    code, codex = claude_code_cli(), codex_cli()
+    return {'desktop': desktop,
+            'code': ('connected' if _cli_has_entry(code) else 'available') if code else None,
+            'codex': ('connected' if _cli_has_entry(codex) else 'available') if codex else None,
             'ready': agent_package_ready(), 'command': command}
+
+
+def connect_codex() -> str:
+    cli = codex_cli()
+    if not cli:
+        return 'Codex is not installed.'
+    command = server_command()
+    subprocess.run([cli, 'mcp', 'remove', NAME], capture_output=True, timeout=60)
+    done = subprocess.run([cli, 'mcp', 'add', NAME, '--', *command], capture_output=True, text=True, timeout=60)
+    if done.returncode != 0:
+        return 'Codex: could not add GeckoPlotter (' + (done.stderr or done.stdout).strip()[:200] + ').'
+    return 'Codex: connected. Start a new Codex session to use it.'
 
 
 def connect_desktop() -> str:
@@ -114,7 +151,9 @@ def connect() -> List[str]:
         messages.append(connect_desktop())
     if found['code']:
         messages.append(connect_code())
+    if found['codex']:
+        messages.append(connect_codex())
     if not messages:
-        messages.append('No Claude app found on this computer. Install Claude Desktop (claude.ai/download) or Claude '
-                        'Code, then connect again.')
+        messages.append('No AI app found on this computer (Claude Desktop, Claude Code or Codex). Install one, then '
+                        'connect again.')
     return messages

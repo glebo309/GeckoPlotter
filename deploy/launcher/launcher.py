@@ -601,6 +601,10 @@ def refresh_self() -> bool:
 
 def main() -> int:
     HOME.mkdir(parents=True, exist_ok=True)
+    if '--wait-for-exit' in sys.argv:                  # "Update" in the About window: the old app is stopping
+        deadline = time.time() + 60
+        while running_instance() and time.time() < deadline:
+            time.sleep(0.5)
     already = running_instance()
     if already:
         webbrowser.open(with_project(already))

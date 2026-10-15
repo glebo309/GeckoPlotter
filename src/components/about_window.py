@@ -18,18 +18,28 @@ def create_about_window():
                 html.Div(className='about-title', children=[
                     html.H1('GeckoPlotter'),
                     html.Div(['Chromatograms · LC-MS mass data', html.Br(), 'spectra · any x/y data'], className='about-tag'),
-                    html.Div('Checking GitHub…', id='about-status', className='about-status checking'),
+                    html.Button('Checking GitHub…', id='about-status', className='about-status checking', n_clicks=0,
+                                disabled=True),
                 ]),
             ]),
             html.Div(className='about-main', children=[
                 html.Div(id='about-body'),
                 html.Div(id='about-update', className='about-update'),
+                html.Div(id='about-update-confirm', className='about-claude', hidden=True, children=[
+                    html.Div([html.Div('Update now?', className='about-claude-title'),
+                              html.Div('GeckoPlotter closes and opens again with the new version in about a minute. '
+                                       'Your work is autosaved and offered when it reopens.',
+                                       className='about-claude-status')]),
+                    html.Div([html.Button('Not now', id='about-update-cancel', className='about-btn', n_clicks=0),
+                              html.Button('Update', id='about-update-go', className='about-btn primary', n_clicks=0)],
+                             style={'display': 'flex', 'gap': '8px'}),
+                ]),
                 html.Div(className='about-claude', children=[
-                    html.Div([html.Div('Use with Claude', className='about-claude-title'),
+                    html.Div([html.Div('Use with AI agents', className='about-claude-title'),
                               html.Div(id='about-claude-status', className='about-claude-status')]),
-                    html.Button('Connect to Claude', id='about-claude-connect', className='about-btn', n_clicks=0,
-                                title='Add GeckoPlotter to Claude Desktop and Claude Code on this computer, so Claude '
-                                      'can open your data, integrate and export results'),
+                    html.Button('Connect', id='about-claude-connect', className='about-btn', n_clicks=0,
+                                title='Add GeckoPlotter to the AI apps on this computer (Claude Desktop, Claude Code, '
+                                      'Codex), so an agent can open your data, integrate and export results'),
                 ]),
                 html.Div(className='about-foot', children=[
                     html.A('GitHub ↗', id='about-repo', href='', target='_blank'),

@@ -1948,7 +1948,7 @@ register_axis_inspector_callbacks(app)
 from callbacks.workspace_callbacks import register_workspace_callbacks
 register_workspace_callbacks(app, data_manager)
 from callbacks.about_callbacks import register_about_callbacks
-register_about_callbacks(app)
+register_about_callbacks(app, data_manager)
 from callbacks.ms_polarity_callbacks import register_ms_polarity_callbacks
 register_ms_polarity_callbacks(app, data_manager)
 from callbacks.session_callbacks import register_session_callbacks
