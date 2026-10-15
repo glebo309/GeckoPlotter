@@ -211,6 +211,10 @@ Goal: make it feel like a pro figure-editing tool with contextual controls.
   2026-10-13, Waters only. Small mzML-only MCP servers exist (labmcp-ms-data, MSMCP) with no GUI. No tool was found
   that is open, multi-vendor, covers PDA and MS, has a GUI and is agent-callable, with editable figures. PDA agent
   tooling and academic biocatalysis plates are the clearest gaps.
+- Images on figures (idea, 2026-10-15): place a picture (e.g. a structure) on a plot or spectrum, movable and
+  resizable like the peak labels, saved in the `.gecko` and in the exported figure. Agent tool `add_image(tab, file
+  or PNG/SVG data, x, y, size)`, so an agent can draw the molecule with a ChemDraw MCP and put it next to its peak or
+  on the mass spectrum (as in the lincomycin MS figure, structure in the empty space above the baseline).
 
 ### Service Integration (Phase 3)
 - Make DataManager own all services (Peak, Integration, Calibration, etc.)
