@@ -172,6 +172,13 @@ def figure(samples: list[str] | None = None, channel: str | None = None, rt_star
 
 
 @server.tool()
+def export_results(path: str, ctx: Context = None) -> dict:
+    """Write every result to one Excel workbook for the user to keep working with: a summary per compound and sample,
+    concentrations, every peak, calibrations, samples and the analysis history."""
+    return _run(lambda: {'saved': workspace.export_results(path)}, ctx=ctx)
+
+
+@server.tool()
 def save_project(path: str, project_name: str | None = None, ctx: Context = None) -> dict:
     """Save the workspace as a GeckoPlotter project (.gecko): it opens in the app with every sample, peak, name and
     calibration, so the user can check and correct the integration by hand."""

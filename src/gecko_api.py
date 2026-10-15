@@ -534,6 +534,15 @@ class Workspace:
             return {'sample': bundle.name, 'spectrum': what, 'peaks': []}
         return {'sample': bundle.name, 'spectrum': what, 'polarity': polarity, 'peaks': _ions(mz, inten, top)}
 
+    def export_results(self, path: str) -> str:
+        """Every result in one Excel workbook (Summary, Concentrations, Peaks, Calibration, Samples, History, About)."""
+        from services.results_workbook import build_results_workbook
+        path = Path(path).expanduser()
+        if path.suffix.lower() != '.xlsx':
+            path = path.with_suffix('.xlsx')
+        path.write_bytes(build_results_workbook(self.store))
+        return str(path)
+
     # -- figures --------------------------------------------------------------------------------------------------
 
     def figure(self, path: str, samples=None, channel=None, rt_start: Optional[float] = None,

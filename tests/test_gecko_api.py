@@ -210,3 +210,17 @@ def test_agent_changes_are_in_the_history_with_the_agent_and_the_project_says_so
     record_analysis_state(again.store, settings={'line_width': 3, 'smooth_window': 21})
     assert again.store.analysis_history[-1]['changes']['plot_settings']['after'] == {'smooth_window': 21}
     assert 'no MCP agent' in agent_note(Workspace().store)
+
+
+def test_the_results_workbook_has_a_summary_per_compound_and_sample_and_every_peak(sequence, tmp_path):
+    from openpyxl import load_workbook
+    ws = Workspace()
+    ws.open(str(sequence))
+    ws.integrate(8.2, 8.6, samples=['4', 'CONTROL 4'], channel='+TIC', name='m634 compound')
+    book = load_workbook(ws.export_results(str(tmp_path / 'results')))
+    assert book.sheetnames[:2] == ['Summary', 'Peaks'] and 'About' in book.sheetnames
+    summary = list(book['Summary'].iter_rows(min_row=3, values_only=True))
+    assert summary[0][:4] == ('Compound', 'Channel', '4', 'CONTROL 4')
+    assert summary[1][0] == 'm634 compound' and summary[1][2] == pytest.approx(2 * summary[1][3], rel=0.05)
+    peaks = list(book['Peaks'].iter_rows(values_only=True))
+    assert len(peaks) == 3 and peaks[0][:3] == ('Sample', 'Channel', 'Peak')
