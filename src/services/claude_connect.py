@@ -65,15 +65,24 @@ def codex_cli() -> Optional[str]:
     return None
 
 
+def _run(cli: str, *args: str, timeout: float = 60) -> subprocess.CompletedProcess:
+    """Run an AI app's command line. Started from the Dock or Finder, the app's PATH lacks the folder of the CLI, so
+    a CLI that is a Node script (codex: ``#!/usr/bin/env node``) would not find node; its own folder comes first."""
+    folders = [str(Path(cli).parent), '/opt/homebrew/bin', '/usr/local/bin']
+    env = dict(os.environ, PATH=os.pathsep.join(folders + [os.environ.get('PATH', '')]))
+    return subprocess.run([cli, *args], capture_output=True, text=True, timeout=timeout, cwd=str(Path.home()),
+                          env=env)
+
+
 def _cli_has_entry(cli: Optional[str]) -> bool:
+    """The CLI has a ``geckoplotter`` entry that starts this GeckoPlotter (not an old or hand-made one elsewhere)."""
     if not cli:
         return False
     try:
-        done = subprocess.run([cli, 'mcp', 'get', NAME], capture_output=True, text=True, timeout=20,
-                              cwd=str(Path.home()))
+        done = _run(cli, 'mcp', 'get', NAME, timeout=20)
     except (OSError, subprocess.SubprocessError):
         return False
-    return done.returncode == 0 and 'gecko_mcp.py' in (done.stdout or '')
+    return done.returncode == 0 and server_command()[1] in (done.stdout or '')
 
 
 def status() -> dict:
@@ -94,16 +103,26 @@ def status() -> dict:
             'ready': agent_package_ready(), 'command': command}
 
 
+def _replace_entry(cli: str, app: str, remove_scopes, add_args) -> str:
+    """Remove the old entry and add this GeckoPlotter's; tried twice, because a running session of the app can write
+    its settings file back between the two steps."""
+    if _cli_has_entry(cli):
+        return f'{app}: connected.'
+    done = None
+    for _attempt in range(2):
+        for scope in remove_scopes:
+            _run(cli, 'mcp', 'remove', *scope, NAME)
+        done = _run(cli, 'mcp', 'add', *add_args, NAME, '--', *server_command())
+        if done.returncode == 0 or _cli_has_entry(cli):
+            return f'{app}: connected. Start a new {app} session to use it.'
+    return f'{app}: could not add GeckoPlotter (' + (done.stderr or done.stdout).strip()[:200] + ').'
+
+
 def connect_codex() -> str:
     cli = codex_cli()
     if not cli:
         return 'Codex is not installed.'
-    command = server_command()
-    subprocess.run([cli, 'mcp', 'remove', NAME], capture_output=True, timeout=60)
-    done = subprocess.run([cli, 'mcp', 'add', NAME, '--', *command], capture_output=True, text=True, timeout=60)
-    if done.returncode != 0:
-        return 'Codex: could not add GeckoPlotter (' + (done.stderr or done.stdout).strip()[:200] + ').'
-    return 'Codex: connected. Start a new Codex session to use it.'
+    return _replace_entry(cli, 'Codex', [()], ())
 
 
 def connect_desktop() -> str:
@@ -129,15 +148,8 @@ def connect_code() -> str:
     cli = claude_code_cli()
     if not cli:
         return 'Claude Code is not installed.'
-    command = server_command()
-    for scope in ('local', 'user'):                     # an older entry added by hand (local is the default scope)
-        subprocess.run([cli, 'mcp', 'remove', '--scope', scope, NAME], capture_output=True, timeout=60,
-                       cwd=str(Path.home()))
-    done = subprocess.run([cli, 'mcp', 'add', '--scope', 'user', NAME, '--', *command],
-                          capture_output=True, text=True, timeout=60)
-    if done.returncode != 0:
-        return 'Claude Code: could not add GeckoPlotter (' + (done.stderr or done.stdout).strip()[:200] + ').'
-    return 'Claude Code: connected. Start a new Claude Code session to use it.'
+    # An older entry added by hand may sit in the local scope (the default) as well as the user scope.
+    return _replace_entry(cli, 'Claude Code', [('--scope', 'local'), ('--scope', 'user')], ('--scope', 'user'))
 
 
 def connect() -> List[str]:

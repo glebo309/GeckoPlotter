@@ -116,6 +116,16 @@
 .about-btn.primary { background:#5aa877; border-color:#5aa877; color:#0c110e; }
 .about-btn.primary:hover { background:#6cba89; }
 .about-btn:focus { outline:none; }
+/* Working (Connect, Update): a spinner in the button and a moving bar under the row's text. */
+.about-btn.busy { position:relative; color:transparent !important; pointer-events:none; }
+.about-btn.busy::after { content:''; position:absolute; left:50%; top:50%; width:14px; height:14px; margin:-7px 0 0 -7px;
+  border:2px solid #5aa877; border-right-color:transparent; border-radius:50%; animation:about-spin .7s linear infinite; }
+.about-btn.primary.busy::after { border-color:#0c110e; border-right-color:transparent; }
+.about-claude-status.working { position:relative; padding-bottom:6px; }
+.about-claude-status.working::after { content:''; position:absolute; left:0; bottom:0; height:2px; width:30%; border-radius:2px;
+  background:#5aa877; animation:about-slide 1.1s ease-in-out infinite; }
+@keyframes about-spin { to { transform:rotate(360deg); } }
+@keyframes about-slide { 0% { left:0; } 50% { left:70%; } 100% { left:0; } }
 .about-btn:focus-visible { outline:none; box-shadow:0 0 0 3px rgba(127,209,158,.25); }
 .about-copy-icon { display:inline-flex; color:#d5e3da; }
 
@@ -133,6 +143,7 @@
 .channel-preview-chip::before { content: ""; width: 7px; height: 7px; border-radius: 50%; background: #5aa877; }
 .about-claude { display: flex; align-items: center; gap: 12px; justify-content: space-between; margin-top: 12px; padding: 10px 12px;
     border: 1px solid #1d2a23; border-radius: 8px; background: #101814; }
+.about-claude[hidden] { display: none; }
 .about-claude-title { font-size: 12.5px; font-weight: 600; color: #d5e3da; }
 .about-claude-status { font-size: 12px; color: #8aa395; margin-top: 2px; line-height: 1.45; }
 button.about-status { font-family: inherit; cursor: default; background: none; }

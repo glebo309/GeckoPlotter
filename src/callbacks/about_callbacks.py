@@ -16,7 +16,8 @@ def register_about_callbacks(app, store=None):
          Output('about-repo', 'href'), Output('about-peak', 'children'),
          Output('about-status', 'children', allow_duplicate=True),
          Output('about-status', 'className', allow_duplicate=True),
-         Output('about-update', 'children', allow_duplicate=True)],
+         Output('about-update', 'children', allow_duplicate=True),
+         Output('about-update-confirm', 'hidden', allow_duplicate=True)],
         Input('app-logo', 'n_clicks'),
         prevent_initial_call=True,
     )
@@ -30,7 +31,7 @@ def register_about_callbacks(app, store=None):
             html.Tbody([html.Tr([html.Td('Version'), html.Td(sha, className='about-mono')]), *_rows(data['summary'])]),
         ])
         return (True, table, about.as_text(data), data['repo_url'], data['version'],
-                'Checking GitHub…', 'about-status checking', '')
+                'Checking GitHub…', 'about-status checking', '', True)
 
     @app.callback(
         [Output('about-status', 'children'), Output('about-status', 'className'), Output('about-update', 'children'),
@@ -66,6 +67,8 @@ def register_about_callbacks(app, store=None):
         [Output('about-update', 'children', allow_duplicate=True),
          Output('about-update-confirm', 'hidden', allow_duplicate=True)],
         Input('about-update-go', 'n_clicks'),
+        running=[(Output('about-update-go', 'className'), 'about-btn primary busy', 'about-btn primary'),
+                 (Output('about-update-go', 'disabled'), True, False)],
         prevent_initial_call=True,
     )
     def update_now(clicks):
@@ -99,6 +102,9 @@ def register_about_callbacks(app, store=None):
     @app.callback(
         Output('about-claude-status', 'children', allow_duplicate=True),
         Input('about-claude-connect', 'n_clicks'),
+        running=[(Output('about-claude-connect', 'className'), 'about-btn busy', 'about-btn'),
+                 (Output('about-claude-connect', 'disabled'), True, False),
+                 (Output('about-claude-status', 'className'), 'about-claude-status working', 'about-claude-status')],
         prevent_initial_call=True,
     )
     def connect_claude(clicks):
