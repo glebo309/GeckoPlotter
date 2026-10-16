@@ -313,3 +313,20 @@ def test_folder_containing_only_a_project_leaves_the_workspace_empty(tmp_path):
     result = Workspace().open(str(tmp_path))
     assert result['added'] == [] and result['not_readable'] == []
     assert result['projects'] == [str(project)]
+
+
+def test_runs_sharing_a_sample_name_are_named_by_their_sample_id_in_one_group(tmp_path):
+    """Labs put the compound in the Sample Name and tell the runs apart by Sample ID: such runs are named by their ID
+    and grouped (one file-tree group and plot tab) under the name; a run without an ID leaves the set alone."""
+    fixture = open(os.path.join(ROOT, 'tests', 'ingestion', 'fixtures', 'shimadzu_ascii.txt'), encoding='utf-8').read()
+    folder = tmp_path / 'cal'
+    folder.mkdir()
+    for i, sample_id in enumerate(('15mM', '3.25mM')):
+        text = fixture.replace('Synthetic PDA standard', 'Phenylethylamine').replace('fixture-001', sample_id)
+        (folder / f'run_{i}.txt').write_text(text, encoding='utf-8')
+    ws = Workspace()
+    ws.open(str(folder))
+    bundles = list(ws.store.iter_bundles())
+    assert sorted(b.name for b in bundles) == ['15mM', '3.25mM']
+    assert {ws.store.group_overrides[b.bundle_id][2] for b in bundles} == {'Phenylethylamine'}
+    assert all(b.metadata['sample_name'] == 'Phenylethylamine' for b in bundles)        # the Metadata keeps it

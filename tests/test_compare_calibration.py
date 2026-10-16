@@ -132,3 +132,19 @@ def test_calibration_revision_refreshes_current_comparison_rows_without_resettin
     app = App(); register_tab_callbacks(app, dm)
     dependencies = app.registrations['refresh_comparison_calibrations']
     assert any(getattr(dep,'component_id',None)=='cal-revision' for dep in dependencies)
+
+
+def test_samples_that_share_a_name_still_form_a_peak_group():
+    """Five runs all named 'Phenylethylamine' are five samples: their peaks at one time are one group, labelled
+    apart by Sample ID (or a number)."""
+    from types import SimpleNamespace
+    from callbacks.tab_callbacks import group_peaks_by_retention_time
+    bundles = [SimpleNamespace(bundle_id=f'run{i}', name='Phenylethylamine',
+                               metadata={'sample_id': f'{mm}mM'} if mm else {}) for i, mm in enumerate((1, 5, 15, None, None))]
+    peaks = _collect_all_peaks([{'bundle': b, 'peaks': [{'peak_id': 'p', 'retention_time': 1.74 + i * 0.002}]}
+                                for i, b in enumerate(bundles)])
+    groups = [g for g in group_peaks_by_retention_time(peaks, 0.2) if len(g) > 1]
+    assert len(groups) == 1 and len(groups[0]) == 5
+    assert [p['sample_name'] for p in groups[0]] == ['Phenylethylamine (1mM)', 'Phenylethylamine (5mM)',
+                                                     'Phenylethylamine (15mM)', 'Phenylethylamine #1',
+                                                     'Phenylethylamine #2']

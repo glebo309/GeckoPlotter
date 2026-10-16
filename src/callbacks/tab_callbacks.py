@@ -623,7 +623,6 @@ def register_tab_callbacks(app: dash.Dash, data_manager) -> None:
         bundle = data_manager.get_bundle_by_id(active_file)
         if not bundle:
             raise dash.exceptions.PreventUpdate
-        sample_name = bundle.base_name
 
         if time_window is None:
             time_window = 0.2
@@ -637,7 +636,7 @@ def register_tab_callbacks(app: dash.Dash, data_manager) -> None:
         comparison_groups = [g for g in peak_groups if len(g) > 1]
 
         for idx, group in enumerate(comparison_groups):
-            if any(p['sample_name'] == sample_name and abs(p['retention_time'] - selected.rt) < 0.001
+            if any(p.get('sample_id') == bundle.bundle_id and abs(p['retention_time'] - selected.rt) < 0.001
                    for p in group):
                 return idx
 
@@ -809,8 +808,9 @@ def group_peaks_by_retention_time(all_peaks, time_window=0.2):
         placed = False
         for group in peak_groups:
             avg_rt = sum(p['retention_time'] for p in group) / len(group)
-            samples_in_group = {p['sample_name'] for p in group}
-            if abs(peak['retention_time'] - avg_rt) <= time_window and peak['sample_name'] not in samples_in_group:
+            samples_in_group = {p.get('sample_id', p['sample_name']) for p in group}
+            if (abs(peak['retention_time'] - avg_rt) <= time_window
+                    and peak.get('sample_id', peak['sample_name']) not in samples_in_group):
                 group.append(peak)
                 placed = True
                 break
@@ -1097,16 +1097,40 @@ def _collect_bundles_with_peaks(data_manager, loaded_files):
     return bundles_with_peaks
 
 
+def _sample_labels(bundles):
+    """One label per sample: its name, and where several samples share a name (five runs all called
+    'Phenylethylamine'), the name with its Sample ID, or a number when that does not tell them apart either."""
+    from collections import Counter
+    names = Counter(b.name for b in bundles)
+    labels = {}
+    for bundle in bundles:
+        label = bundle.name
+        if names[label] > 1:
+            sample_id = str((getattr(bundle, 'metadata', None) or {}).get('sample_id') or '').strip()
+            label = f'{label} ({sample_id})' if sample_id else label
+        labels[bundle.bundle_id] = label
+    seen = Counter(labels.values())
+    count = Counter()
+    for bundle in bundles:
+        if seen[labels[bundle.bundle_id]] > 1:
+            count[labels[bundle.bundle_id]] += 1
+            labels[bundle.bundle_id] = f'{labels[bundle.bundle_id]} #{count[labels[bundle.bundle_id]]}'
+    return labels
+
+
 def _collect_all_peaks(bundles_with_peaks):
-    """Flatten all peaks from bundles into a single list with sample names."""
+    """Flatten all peaks from bundles into a single list with sample names. Samples are told apart by their bundle
+    (``sample_id``), never by name: runs that share a name are still different samples."""
     all_peaks = []
+    labels = _sample_labels([bd['bundle'] for bd in bundles_with_peaks])
     for bd in bundles_with_peaks:
         bundle = bd['bundle']
         for peak in bd['peaks']:
             all_peaks.append({
                 'file_id': peak.get('file_id'),
                 'peak_id': peak.get('peak_id'),
-                'sample_name': bundle.name,
+                'sample_id': bundle.bundle_id,
+                'sample_name': labels[bundle.bundle_id],
                 'peak_number': peak.get('peak_number', 0),
                 'peak_name': peak.get('peak_name', ''),
                 'retention_time': peak.get('retention_time', 0),

@@ -121,6 +121,38 @@ def auto_import_peaks(store, bundle) -> None:
         log.warning("Could not auto-import peaks for '%s': %s", bundle.name, exc)
 
 
+def name_runs_by_sample_id(store) -> None:
+    """Runs that share a Sample Name ('Phenylethylamine') but carry their own Sample IDs ('15mM', '3.25mM') are named
+    by their Sample ID and shown as one group, and one plot tab, named after the Sample Name: labs put the compound in
+    the name and tell the samples apart by the ID. A run the user renamed keeps its name; the Metadata keeps both."""
+    from collections import defaultdict
+    from callbacks.viz_callbacks import _get_overlay_group
+    runs = defaultdict(list)
+    for bundle in store.iter_bundles():
+        if getattr(bundle.bundle_type, 'value', bundle.bundle_type) not in ('chromatogram', 'lcms'):
+            continue
+        meta = bundle.metadata
+        sample = str(meta.get('sample_group') or meta.get('sample_name') or '').strip()
+        if sample:
+            runs[sample].append(bundle)
+    for sample, bundles in runs.items():
+        ids = [str(b.metadata.get('sample_id') or '').strip() for b in bundles]
+        if len(bundles) < 2 or not all(ids) or len(set(ids)) < len(ids):
+            continue
+        if not hasattr(store, 'group_overrides'):
+            store.group_overrides = {}
+        for bundle, sample_id in zip(bundles, ids):
+            if bundle.name not in (sample, sample_id):
+                continue                                    # renamed by the user
+            bundle.name = sample_id
+            for component in bundle.component_list:
+                component.metadata['sample_group'] = sample
+            entry = store.get_data_by_id(bundle.bundle_id) or {}
+            natural = _get_overlay_group(entry.get('metadata', {}), entry, file_id=bundle.bundle_id, dm=store,
+                                         ignore_override=True)
+            store.group_overrides[bundle.bundle_id] = ('folder', natural[1], sample)
+
+
 def load_files(store, files: Iterable[Tuple[str, bytes]], skip_duplicate_exports: bool = True) -> LoadResult:
     """Parse ``(file name, bytes)`` pairs, group them into samples and add them to ``store``.
 
@@ -179,6 +211,7 @@ def load_files(store, files: Iterable[Tuple[str, bytes]], skip_duplicate_exports
         store.add_bundle(bundle)
         if bundle.has_integration_data():
             auto_import_peaks(store, bundle)
+    name_runs_by_sample_id(store)
 
     from services.detector_wavelengths import apply_remembered
     apply_remembered(store)                             # UV channels exported without their wavelength (VWD CSV)
