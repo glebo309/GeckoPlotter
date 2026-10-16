@@ -41,6 +41,10 @@ def _apex_emg(x, amplitude, center, sigma, gamma):
         center=center - _emg_mode_offset(sigma, gamma), sigma=sigma, gamma=gamma)
 
 
+def _linear_baseline(x, left, right):
+    return left + (right - left) * (x - x[0]) / (x[-1] - x[0])
+
+
 @dataclass
 class DeconvComponent:
     """One fitted EMG component within a composite deconvolution."""
@@ -512,6 +516,40 @@ class DeconvolutionService:
     # Fitting
     # ------------------------------------------------------------------
 
+    def seed_centers(self, x, y, n_peaks, prominence=0.05):
+        """Seed a requested count from maxima and curvature, including weak leading shoulders.
+
+        Unlike auto-detection, a requested count does not require a shoulder to
+        pass model selection before it can seed the fit. ``y`` is baseline corrected.
+        """
+        x, y = np.asarray(x, dtype=float), np.asarray(y, dtype=float)
+        maxima = self._apex_indices(x, y, prominence)
+        main = int(np.argmax(y))
+        candidates, width, _, _ = self._shoulder_candidates(x, y, np.array([main]), 0.)
+        positions = [float(x[i]) for i in sorted(maxima, key=lambda i: y[i], reverse=True)[:n_peaks]]
+        if not positions:
+            positions = [float(x[main])]
+        # A leading-edge curvature minimum is less likely to be the main
+        # peak's unmodelled tail than a candidate downstream of its apex.
+        candidates.sort(key=lambda c: c >= x[main])
+        distance = max(3 * float(np.median(np.diff(x))), .3 * width)
+        for c in candidates:
+            if len(positions) >= n_peaks:
+                break
+            if all(abs(c - p) > distance for p in positions):
+                positions.append(c)
+        if len(positions) < n_peaks:
+            detected = self.auto_detect_centers(x, y, prominence=prominence)
+            for c, _ in detected:
+                if len(positions) < n_peaks and all(abs(c - p) > distance for p in positions):
+                    positions.append(c)
+        if len(positions) < n_peaks:
+            # No resolved curvature candidate: start on the leading flank.
+            # A collapsed/constraint-bound result is reported by the caller.
+            positions += [float(np.clip(x[main] - width * k, x[0] + distance, x[-1] - distance))
+                          for k in range(1, n_peaks - len(positions) + 1)]
+        return [(c, float(np.interp(c, x, y))) for c in sorted(positions)]
+
     def _seed_schedule(
         self, x: np.ndarray, centers: List[Tuple[float, float]], multi_start: bool
     ) -> List[Tuple[float, float]]:
@@ -531,7 +569,8 @@ class DeconvolutionService:
         return [legacy, (sig, 2.0 / span), (sig, 30.0 / span), (0.6 * sig, 60.0 / span)]
 
     def _fit_once(self, x, y_fit, baseline_arr, centers, fixed_apices, sigma_seed, gamma_seed,
-                  center_bounds=None, max_nfev=5000, gamma_min=None, sigma_bounds=None, apex_mode=False):
+                  center_bounds=None, max_nfev=5000, gamma_min=None, sigma_bounds=None, apex_mode=False,
+                  tail_reference=None, fit_baseline=False):
         """One lmfit composite fit from a single starting guess."""
         x_range = float(x.max() - x.min())
         models = []
@@ -584,11 +623,30 @@ class DeconvolutionService:
                 max=g_max,
             )
 
+        if tail_reference is not None:
+            # Gamma is inverse tail lifetime: other components may tail less
+            # than the main peak, but cannot become a long baseline-like shelf.
+            reference = f'p{tail_reference}_gamma'
+            for i in range(len(centers)):
+                if i != tail_reference:
+                    fraction = f'p{i}_tail_fraction'
+                    params.add(fraction, value=.01, min=0., max=1.)
+                    params[f'p{i}_gamma'].set(expr=f'{reference} + {fraction} * ({g_max} - {reference})')
+
         self._seed_amplitudes(x, y_fit, centers, params, sigma_seed, gamma_seed, fixed_apices, apex_mode)
 
         composite = models[0]
         for m in models[1:]:
             composite = composite + m
+        target = y_fit
+        if fit_baseline:
+            line = Model(_linear_baseline, prefix='baseline_')
+            composite += line
+            params.update(line.make_params(left=float(baseline_arr[0]), right=float(baseline_arr[-1])))
+            target = y_fit + baseline_arr
+        if tail_reference is not None or fit_baseline:
+            return composite.fit(target, params, x=x, max_nfev=max_nfev,
+                                 method='least_squares', fit_kws={'x_scale': 'jac'})
         return composite.fit(y_fit, params, x=x, max_nfev=max_nfev)
 
     @staticmethod
@@ -629,6 +687,9 @@ class DeconvolutionService:
         gamma_min: Optional[List[Optional[float]]] = None,
         sigma_bounds: Optional[List[Optional[Tuple[float, float]]]] = None,
         apex_mode: bool = False,
+        baseline: Optional[np.ndarray] = None,
+        tail_reference: Optional[int] = None,
+        fit_baseline: bool = False,
     ) -> Optional[DeconvResult]:
         """Fit a composite EMG model, one component per center.
 
@@ -653,6 +714,15 @@ class DeconvolutionService:
         gamma_min : list of float or None, optional
             Per-component lower bound on the EMG tailing rate (caps the tail
             time constant); ``None`` entries keep the default.
+        baseline : array, optional
+            Explicit baseline under the window, e.g. a line between its ends.
+            Omitting it retains the GUI's local floor estimate.
+        tail_reference : int, optional
+            Index of the main peak. Other components cannot have a longer
+            exponential tail than this component. Omitting it leaves tails independent.
+        fit_baseline : bool
+            Fit the endpoints of a linear baseline jointly with the components.
+            The supplied baseline is its initial guess; otherwise use the local floor.
 
         Returns
         -------
@@ -663,8 +733,12 @@ class DeconvolutionService:
         y = np.asarray(y, dtype=float)
         if not centers:
             return None
-        baseline_arr = self._estimate_local_baseline(y)
-        y_fit = np.maximum(y - baseline_arr, 0.0)
+        baseline_arr = self._estimate_local_baseline(y) if baseline is None else np.asarray(baseline, dtype=float)
+        if baseline_arr.shape != y.shape or not np.isfinite(baseline_arr).all():
+            raise ValueError('baseline must contain one finite value per data point')
+        if tail_reference is not None and not 0 <= tail_reference < len(centers):
+            raise ValueError('tail_reference must identify a component')
+        y_fit = np.maximum(y - baseline_arr, 0.0) if baseline is None and not fit_baseline else y - baseline_arr
         fixed_apices = fixed_apices or {}
 
         result = None
@@ -673,20 +747,23 @@ class DeconvolutionService:
             try:
                 trial = self._fit_once(
                     x, y_fit, baseline_arr, centers, fixed_apices, sigma_seed, gamma_seed,
-                    center_bounds, max_nfev, gamma_min, sigma_bounds, apex_mode
+                    center_bounds, max_nfev, gamma_min, sigma_bounds, apex_mode, tail_reference, fit_baseline
                 )
             except Exception:
                 if result is None and (sigma_seed, gamma_seed) == self._seed_schedule(x, centers, multi_start)[0]:
                     raise
                 continue
-            rss = float(np.sum((np.asarray(trial.best_fit, dtype=float) - y_fit) ** 2))
+            target = y if fit_baseline else y_fit
+            rss = float(np.sum((np.asarray(trial.best_fit, dtype=float) - target) ** 2))
             if np.isfinite(rss) and rss < best_rss:
                 result, best_rss = trial, rss
         if result is None:
             return None
         comp_curves = result.eval_components(x=x)
 
-        best_fit = np.asarray(result.best_fit, dtype=float) + baseline_arr
+        if fit_baseline:
+            baseline_arr = np.asarray(comp_curves['baseline_'], dtype=float)
+        best_fit = np.asarray(result.best_fit, dtype=float) + (0. if fit_baseline else baseline_arr)
         residuals = y - best_fit
         ss_res = float(np.sum(residuals ** 2))
         ss_tot = float(np.sum((y - y.mean()) ** 2))

@@ -25,6 +25,46 @@ def _emg(x, amplitude, center, sigma, gamma):
     )
 
 
+@pytest.mark.parametrize('gamma', [40, 60])
+def test_bounded_tailing_and_linear_baseline_recover_components(gamma):
+    x = np.linspace(.6, 1.6, 801)
+    baseline = 5 + 30 * (x - x[0])
+    y = baseline + _emg(x, 2, .92, .025, gamma) + _emg(x, 10, 1, .04, 40)
+    svc = DeconvolutionService()
+    result = svc.fit_peaks(x, y, [(.94, 30), (1.02, 100)],
+                           baseline=baseline, tail_reference=1)
+    assert [c.area for c in result.components] == pytest.approx([2, 10], rel=.03)
+    assert result.components[0].gamma >= result.components[1].gamma
+    assert result.r_squared > .99999
+    assert result.baseline == pytest.approx(baseline)
+    peaks = svc.result_to_peaks(result, 'sample', 1)
+    assert peaks[0].p_line == [(x[0], baseline[0]), (x[-1], baseline[-1])]
+    assert peaks[0].fit_params['baseline'] == peaks[0].p_line
+
+
+def test_count_seeding_finds_leading_shoulder_on_a_rising_baseline():
+    x = np.linspace(2.15, 2.4, 601)
+    baseline = 5 + 60 * (x - x[0])
+    y = baseline + _emg(x, .4, 2.229, .004, 100) + _emg(x, 12, 2.257, .009, 90)
+    svc = DeconvolutionService()
+    seeds = svc.seed_centers(x, y - baseline, 2)
+    assert len(seeds) == 2
+    assert seeds[0][0] == pytest.approx(2.234, abs=.008)
+    assert seeds[1][0] == pytest.approx(2.264, abs=.008)
+
+
+def test_linear_baseline_is_fitted_with_the_peaks():
+    x = np.linspace(.6, 1.6, 801)
+    baseline = 5 + 30 * (x - x[0])
+    y = baseline + _emg(x, 2, .92, .025, 60) + _emg(x, 10, 1, .04, 40)
+    svc = DeconvolutionService()
+    result = svc.fit_peaks(x, y, [(.94, 30), (1.02, 100)],
+                           baseline=baseline + 3, fit_baseline=True, tail_reference=1)
+    assert result.baseline == pytest.approx(baseline, abs=.01)
+    assert [c.area for c in result.components] == pytest.approx([2, 10], rel=.03)
+    assert result.best_fit + result.residuals == pytest.approx(y)
+
+
 @pytest.fixture
 def two_peak_chromatogram():
     """Two clearly resolved EMG peaks on a clean baseline."""

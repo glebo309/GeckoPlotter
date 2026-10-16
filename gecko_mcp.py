@@ -170,10 +170,12 @@ def deconvolve(rt_start: float, rt_end: float, samples: list[str] | None = None,
                prominence: float = .05, center_tolerance: float | None = None, ctx: Context = None) -> list:
     """Use for a shoulder or overlapping peaks that integrate() cannot separate; check the result with figure().
     Fits the GUI's EMG model in the exact RT window, saving editable deconvolved peaks with undo. samples defaults
-    to every run, channel to the shown channel. n_peaks=None auto-detects shoulders; an integer forces the count.
+    to every run, channel to the shown channel. n_peaks=None auto-detects shoulders; an integer forces the count
+    with curvature seeds for weak shoulders. Fits a linear baseline jointly with the peaks, and limits each
+    component's tailing to the main peak's. Include baseline on both sides (and the full main-peak tail).
     names labels components in RT order. centers supplies seed RTs; center_tolerance optionally bounds actual
     apex RTs around those seeds (minutes), useful when a weak shoulder drifts into the main peak. Returns per sample
-    components (name, apex_rt, area, height, area % of this fit), R², residual RMSE, redchi and poor-fit warnings.
+    components (name, apex_rt, area, height, area % of this fit, FWHM), R², residual RMSE, redchi and shape/fit warnings.
     Existing peaks with stored RT in the window are replaced. A high R² alone does not identify the shoulder."""
     return _run('deconvolve', rt_start, rt_end, samples, channel, n_peaks, names, centers, prominence,
                 center_tolerance, ctx=ctx)
