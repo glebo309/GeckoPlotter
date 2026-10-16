@@ -57,9 +57,20 @@
         band.classList.toggle('on', !!working);
     }
 
-    function frame(now) {
+    // The loop runs only while there is something to move (the agent works, or the drops are still merging): an idle
+    // page draws nothing, so old computers pay nothing for it.
+    var looping = false;
+    function wake() {
+        if (looping) return;
+        looping = true;
+        lastFrame = 0;
         window.requestAnimationFrame(frame);
+    }
+    function frame(now) {
+        var active = (current.busy || current.working) && !current.stopped;
         if (!el) show(current);                                      // Dash may mount after the first poll
+        if (active || spread > 0 || !el) window.requestAnimationFrame(frame);
+        else { looping = false; placeBand(false); return; }
         if (!el || el.hidden || now - lastFrame < 33) return;          // about 30 frames a second is plenty
         placeBand((current.busy || current.working) && !current.stopped);
         sweep(now);
@@ -97,6 +108,7 @@
 
     function show(state) {
         current = state || {};
+        if ((current.busy || current.working) && !current.stopped) wake();
         if (!build()) return;
         var connected = current.connected || [];
         var working = !!(current.busy || current.working) && !current.stopped;
@@ -225,11 +237,18 @@
     window.dash_clientside = window.dash_clientside || {};
     window.dash_clientside.geckoLive = { applyView: applyView };
 
-    window.setInterval(function () { if (!document.hidden) ask(); }, 1000);
+    // Once a second while an agent is connected; every 4 s otherwise (a page without agents still learns of one).
+    var lastAsk = 0;
+    window.setInterval(function () {
+        if (document.hidden) return;
+        var quick = (current.connected && current.connected.length) || current.busy || current.working;
+        var now = Date.now();
+        if (quick || now - lastAsk >= 4000) { lastAsk = now; ask(); }
+    }, 1000);
     window.addEventListener('focus', here);
     document.addEventListener('pointerdown', here, true);
     document.addEventListener('visibilitychange', function () { if (!document.hidden) here(); });
     show(current);
     here();
-    window.requestAnimationFrame(frame);
+    wake();
 })();

@@ -17,8 +17,8 @@
 .agent-live-band { position:absolute; left:0; right:0; top:0; height:3px; overflow:hidden; pointer-events:none;
   opacity:0; transition:opacity .5s ease;
   background:linear-gradient(90deg, transparent 0%, #5aa877 18%, #9fe0b7 50%, #5aa877 82%, transparent 100%);
-  background-size:28% 100%; background-repeat:no-repeat; animation:agent-live-band 2.2s ease-in-out infinite; }
-.agent-live-band.on { opacity:1; }
+  background-size:28% 100%; background-repeat:no-repeat; }
+.agent-live-band.on { opacity:1; animation:agent-live-band 2.2s ease-in-out infinite; }   /* runs only while shown */
 @keyframes agent-live-band { from { background-position:-40% 0; } to { background-position:140% 0; } }
 @media (prefers-reduced-motion: reduce) { .agent-live-band { animation:none; background-size:100% 100%; } }
 
