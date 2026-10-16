@@ -14,7 +14,7 @@ log = logging.getLogger(__name__)
 
 # Calls that are about one place in the data; 'open' and the reads of the whole workspace leave the view alone.
 FOLLOWED = {'detect_peaks', 'integrate', 'rename_peak', 'remove_peak', 'calibrate', 'add_uv_channel', 'uv_spectrum',
-            'add_eic_channel', 'eic', 'mass_spectrum', 'figure', 'deconvolve'}
+            'add_eic_channel', 'eic', 'mass_spectrum', 'figure', 'list_calibrations', 'deconvolve'}
 
 
 def _params(workspace, method, args, kwargs) -> dict:
@@ -83,6 +83,8 @@ def focus(workspace, method: str, args, kwargs, result) -> Optional[dict]:
 
 def _focus(workspace, method, params, result) -> Optional[dict]:
     store = workspace.store
+    if method in ('calibrate', 'list_calibrations'):
+        return _calibration_view(store, params, result)
     hit = _first_hit(result)
     name = (hit or {}).get('sample') or params.get('sample')
     samples = params.get('samples')
@@ -116,6 +118,25 @@ def _focus(workspace, method, params, result) -> Optional[dict]:
         component = workspace._channel(bundle, channel)
         if method == 'uv_spectrum':
             view['side'] = 'pda'
+        elif method in ('eic', 'add_eic_channel'):
+            view['side'] = 'ms-eic'
+    # The results pane follows too: the peak table after peaks change, the curve after a calibration.
+    if method in ('integrate', 'detect_peaks', 'deconvolve', 'rename_peak', 'remove_peak', 'eic'):
+        view['results'] = 'peak-analysis'
+
     _show(store, bundle, component)
     view['active'] = component.component_id
+    return view
+
+
+def _calibration_view(store, params, result) -> dict:
+    """The Calibration tab with the agent's curve selected; the sample and channel on screen stay."""
+    view = {'results': 'calibration'}
+    name = (result.get('calibration') if isinstance(result, dict) else None) or params.get('name') or params.get('peak')
+    models = store.calibration_service.get_all_models()
+    chosen = next((m for m in models.values() if m.analyte_name == name), None)
+    if chosen is None and models:
+        chosen = list(models.values())[-1]
+    if chosen is not None:
+        view['calibration'] = chosen.model_id
     return view

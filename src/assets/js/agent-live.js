@@ -126,7 +126,14 @@
     }
     function applyView(view) {
         var set = window.dash_clientside && window.dash_clientside.set_props;
-        if (!view || !view.side || !set) return window.dash_clientside.no_update;
+        if (!view || !(view.side || view.results) || !set) return window.dash_clientside.no_update;
+        if (view.results) {
+            set('active-tab', { data: view.results });
+            if (view.results === 'calibration' && view.calibration) {
+                whenThere('cal-active-model', function () { set('cal-active-model', { value: view.calibration }); });
+            }
+        }
+        if (!view.side) return view.version;
         set('side-tabs', { value: view.side });
         if (view.side === 'ms-scan' && view.scan != null) {
             whenThere('ms-scan-slider', function () {

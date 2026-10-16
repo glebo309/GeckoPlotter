@@ -284,7 +284,7 @@ def test_live_mode_follows_the_agent_to_its_channel_and_view(sequence):
     ws.store.visibility_state[ws.store.peak_owner_id(tic.component_id)] = False     # the user shows UV only
     rows = ws.integrate(8.2, 8.6, samples='4', channel='+TIC', name='m634')
     view = focus(ws, 'integrate', [8.2, 8.6, '4', '+TIC', 'm634'], {}, rows)
-    assert view == {'active': tic.component_id}
+    assert view == {'active': tic.component_id, 'results': 'peak-analysis'}
     assert ws.store.visibility_state[ws.store.peak_owner_id(tic.component_id)] is True
     view = focus(ws, 'mass_spectrum', ['4'], {'rt': 8.4}, ws.mass_spectrum('4', rt=8.4))
     assert view['side'] == 'ms-scan' and abs(TIMES[view['scan']] - 8.4) < 0.03
@@ -346,3 +346,16 @@ def test_a_renamed_group_names_its_tab_and_tree_group_and_is_kept_in_the_project
     session_service.restore_session(restored, session_service.build_session(store))
     assert _tab_label_from_group(key, restored) == 'PEA calibration 8 Oct'
     assert _tab_label_from_group(key, SimpleNamespace()) == 'Phenylethylamine'
+
+
+def test_live_mode_opens_the_tab_of_the_call(sequence):
+    from services.live_focus import focus
+    ws = Workspace()
+    ws.open(str(sequence))
+    rows = ws.integrate(8.2, 8.6, channel='+TIC', name='m634')
+    assert focus(ws, 'integrate', [8.2, 8.6], {'channel': '+TIC', 'name': 'm634'}, rows)['results'] == 'peak-analysis'
+    done = ws.calibrate('m634', {'4': 2.0, 'CONTROL 4': 1.0}, channel='+TIC')
+    view = focus(ws, 'calibrate', ['m634', {'4': 2.0, 'CONTROL 4': 1.0}], {'channel': '+TIC'}, done)
+    model = next(iter(ws.store.calibration_service.get_all_models().values()))
+    assert view == {'results': 'calibration', 'calibration': model.model_id}
+    assert focus(ws, 'eic', [ION, 0.5], {}, ws.eic(ION, 0.5))['side'] == 'ms-eic'

@@ -42,7 +42,7 @@ def register_live_callbacks(app, data_manager):
 
         live = live_agent.CURRENT
         view = live.view if live else None                 # always the last call's: a call without one clears it
-        if view and (data_manager.get_data_by_id(view['active']) or data_manager.get_bundle(view['active'])):
+        if view and view.get('active') and (data_manager.get_data_by_id(view['active']) or data_manager.get_bundle(view['active'])):
             active = view['active']
         if not (active and (data_manager.get_data_by_id(active) or data_manager.get_bundle(active))):
             active = None
@@ -62,4 +62,4 @@ def register_live_callbacks(app, data_manager):
                                                       file_order=file_order or {})
         hidden = [fid for fid, visible in data_manager.visibility_state.items() if not visible]
         return (files, tree, active, table, editor, pub_data, (render_counter or 0) + 1, (peak_counter or 0) + 1,
-                hidden, view if view and view.get('side') else dash.no_update)
+                hidden, view if view and (view.get('side') or view.get('results')) else dash.no_update)
