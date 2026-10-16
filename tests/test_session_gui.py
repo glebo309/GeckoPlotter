@@ -468,7 +468,7 @@ print(json.dumps({
 def test_layout_has_the_project_controls_in_the_header(layout_facts):
     header = layout_facts['header']
     assert 'session-status' in layout_facts['status_bar'] and 'session-status' not in header   # bottom status bar
-    for needed in ('session-bar', 'session-name-btn', 'session-open-upload', 'session-open-btn',
+    for needed in ('session-bar', 'session-name-btn', 'session-open-file-item', 'session-open-menu-btn',
                    'session-open-menu', 'session-recent-list', 'session-save-btn'):
         assert needed in header, needed
     assert layout_facts['upload_accept'] == '.gecko,.zip'   # .zip: a FAIR package that holds a project
@@ -479,6 +479,7 @@ def test_layout_has_the_project_controls_in_the_header(layout_facts):
             'session-missing-modal', 'session-search-dir', 'session-retry-btn', 'session-banner',
             'session-banner-restore', 'session-banner-dismiss', 'session-message', 'session-confirm',
             'session-confirm-text'} <= ids
+    assert 'clear-files-btn' not in ids
     assert not layout_facts['legacy'], 'the old placeholder Save/Load Session stubs are gone'
 
 
@@ -512,3 +513,63 @@ print(json.dumps({'classes': [str(getattr(c, 'className', '')) for c in box.chil
     classes = [c.split()[-1] if c else '' for c in facts['classes']]
     assert classes.index('integration-deconv') < classes.index('integration-recipe') < classes.index('integration-display')
     assert len(facts['ids']) == 7                       # nothing the callbacks write to is missing
+
+
+def test_file_menu_items_are_in_order_with_shortcuts():
+    from components.session_controls import create_session_header_controls
+    from components.workspace_layout import walk
+    nodes = list(walk(create_session_header_controls()))
+    menu = next(n for n in nodes if getattr(n, 'id', None) == 'session-open-menu')
+    assert [getattr(n, 'id', None) or getattr(n, 'role', None) for n in menu.children] == [
+        'session-new-btn', 'session-open-file-item', 'session-recent-section', 'separator',
+        'session-save-btn', 'session-save-as-btn', 'separator', 'session-about-btn']
+    by_id = {n.id: n for n in nodes if isinstance(getattr(n, 'id', None), str)}
+    assert by_id['session-open-menu-btn'].children == 'File ▾'
+    assert by_id['session-recent-section'].children[0].children == 'Open recent'
+    for item, shortcut in [('session-open-file-item', '⌘O'), ('session-save-btn', '⌘S'),
+                           ('session-save-as-btn', '⇧⌘S')]:
+        assert by_id[item].children[-1].children == shortcut
+        assert by_id[item].children[-1].className == 'session-shortcut'
+
+
+def test_new_project_resets_workspace_and_browser_stores():
+    store, a, b = stored_workspace()
+    store.session_meta['project_name'] = 'Old project'
+    store.file_removal_service.remove(a.bundle_id)
+    removal_service = store.file_removal_service
+    app = dash.Dash(__name__)
+    sc.register_session_callbacks(app, store)
+    cb = next(cb for cb in app.callback_map.values()
+              if cb.get('callback') and cb['callback'].__wrapped__.__name__ == 'new_project')
+    result = cb['callback'].__wrapped__(1, None, 7)
+    values = {f'{o.component_id}.{o.component_property}': v for o, v in zip(cb['output'], result)}
+    assert list(store.iter_bundles()) == []
+    assert store.session_meta == {}
+    assert store.file_removal_service is removal_service
+    assert removal_service.undo() is None
+    for key, expected in {
+        'loaded-files.data': [], 'active-file.data': None, 'hidden-files.data': [],
+        'plot-tabs.data': [], 'active-plot-tab.data': None, 'file-order.data': {},
+        'zoom-state.data': None, 'tab-zoom-memory.data': {}, 'tab-panel-memory.data': {},
+        'tab-file-memory.data': {}, 'current-plot-settings.data': {}, 'plot-settings-cache.data': None,
+        'custom-plot-figures.data': {}, 'custom-plot-counter.data': 0,
+        'session-name.data': '', 'session-dirty.data': False, 'session-source.data': None,
+        'session-restore-late.data': None, 'session-banner.hidden': True,
+        'session-message.hidden': True, 'session-missing-modal.opened': False,
+        'render-trigger.data': 8, 'file-multi-selection.data': [],
+        'undo-file-removal-btn.disabled': True,
+    }.items():
+        assert values[key] == expected, key
+    assert values['file-tree.children'] is not dash.no_update
+    assert values['table-editor-container.children'] is not dash.no_update
+
+
+def test_save_as_always_asks_for_a_name_then_downloads_under_it(monkeypatch):
+    store, *_ = stored_workspace()
+    fns = callbacks(store)
+    opened, value = fns['save_project_as'](1, 'Existing project')
+    assert opened is True and value == 'Existing project'
+    trigger(monkeypatch, 'session-name-confirm.n_clicks')
+    result = fns['save_project'](None, 1, 'Existing project', 'New name', *client_values())
+    assert result[0]['filename'] == 'New name.gecko'
+    assert result[1:4] == (False, 'New name', False)

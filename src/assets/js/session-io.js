@@ -1,6 +1,6 @@
 // Project (.gecko) save / open / autosave, browser side.
 //
-//  * keyboard:   Cmd/Ctrl+S saves (the browser's own "save page" is suppressed), Cmd/Ctrl+O opens the file picker
+//  * keyboard:   Cmd/Ctrl+S saves, Shift+Cmd/Ctrl+S saves as, Cmd/Ctrl+O opens the shared data/project picker
 //  * dirty flag: content changes set `session-dirty`; opening or saving clears it. Selection changes, plot
 //                switching and settings hydration echoes are not changes. A restore replays dozens of store
 //                writes: they are ignored until the workspace has been quiet for a moment.
@@ -24,7 +24,7 @@
                        'cal-revision', 'hidden-files'];
 
     var state = {dirty: false, lastChange: 0, lastActivity: 0, quietUntil: 0, timer: null, seen: {}, settle: null,
-                 pending: null, lastStampTs: null, bypass: false};
+                 finishTimer: null, pending: null, lastStampTs: null, bypass: false};
 
     function dc() { return window.dash_clientside || {}; }
     function nu() { return dc().no_update; }
@@ -62,10 +62,11 @@
     var CONFIRM_TEXT = 'Opening replaces the current workspace. Unsaved changes will be lost.';
 
     // Runs `run` now when nothing would be lost; otherwise asks first. Returns true when it asked (caller must stop).
-    function guardOpen(run) {
+    function guardOpen(run, kind) {
         if (state.bypass || !state.dirty) return false;
-        state.pending = {run: run, saving: false, stampTs: null};
-        setConfirmText(CONFIRM_TEXT);
+        state.pending = {run: run, saving: false, stampTs: null, kind: kind};
+        setConfirmText(kind === 'new' ? 'New project empties the workspace. Unsaved changes will be lost.' : CONFIRM_TEXT);
+        setProps('session-confirm-discard', {children: kind === 'new' ? 'New project anyway' : 'Open anyway'});
         showConfirm(true);
         return true;
     }
@@ -85,7 +86,8 @@
         if (action === 'save') {
             pending.saving = true;
             pending.stampTs = state.lastStampTs;
-            setConfirmText('Saving… the project opens as soon as it is saved.');
+            setConfirmText(pending.kind === 'new' ? 'Saving… a new project starts as soon as it is saved.' :
+                'Saving… the project opens as soon as it is saved.');
             savePressed();
         }
     }
@@ -98,7 +100,8 @@
             if (stamp.kind === 'saved' && !dirty) { resolvePending(true); return; }
             if (stamp.kind === 'failed') {
                 pending.saving = false;
-                setConfirmText('Could not save. ' + CONFIRM_TEXT);
+                setConfirmText('Could not save. ' + (pending.kind === 'new' ?
+                    'New project empties the workspace. Unsaved changes will be lost.' : CONFIRM_TEXT));
             }
         }
     }
@@ -109,7 +112,7 @@
         reader.onerror = function () { setProps('session-status', {children: 'Could not read ' + file.name}); };
         reader.readAsDataURL(file);
     }
-    // Feed a user-chosen file to the Open flow (the same input the picker fills).
+    // Resume a guarded project selection through the internal Open input.
     function openFile(file) {
         showOpening(file);
         readAsDataURL(file, function (contents) {
@@ -209,7 +212,8 @@
             setProps('plot-settings-miss', {data: context}); // same plot: have the server re-read the restored settings
         }
         state.quietUntil = now() + QUIET_MS;
-        later(function () {
+        state.finishTimer = later(function () {
+            state.finishTimer = null;
             cancelAutosave();
             state.dirty = false;
             setProps('session-dirty', {data: false});
@@ -245,22 +249,22 @@
     // ---- DOM wiring (keyboard, unload, drops, menu, rename) ----------------------
     function byId(id) { return document.getElementById(id); }
     function openPicker() {
-        var input = document.querySelector('#session-open-upload input[type="file"]');
+        var input = document.querySelector('#upload-button input[type="file"]');
         if (input) input.click();
     }
-    function savePressed() {
-        var button = byId('session-save-btn');
+    function savePressed(saveAs) {
+        var button = byId(saveAs ? 'session-save-as-btn' : 'session-save-btn');
         if (button) button.click();
     }
 
     function onKeyDown(e) {
         if (e.key === 'Escape' && state.pending) { resolvePending(false); return; }
-        if (!(e.ctrlKey || e.metaKey) || e.altKey || e.shiftKey) return;
+        if (!(e.ctrlKey || e.metaKey) || e.altKey) return;
         var key = String(e.key || '').toLowerCase();
-        if (key !== 's' && key !== 'o') return;
+        if ((key !== 's' && key !== 'o') || (key === 'o' && e.shiftKey)) return;
         e.preventDefault();                           // never the browser's own Save page / Open file
         if (e.repeat) return;
-        if (key === 's') savePressed(); else openPicker();
+        if (key === 's') savePressed(e.shiftKey); else openPicker();
     }
 
     function onBeforeUnload(e) {
@@ -295,7 +299,21 @@
         showOpening(file);
     }
 
-    function setMenu(open) { setProps('session-open-menu', {hidden: !open}); }
+    function newProject() {
+        cancelAutosave();
+        if (state.settle) window.clearTimeout(state.settle);
+        if (state.finishTimer) window.clearTimeout(state.finishTimer);
+        state.settle = null;
+        state.finishTimer = null;
+        state.seen = {};
+        state.quietUntil = 0;
+        state.dirty = false;
+        setProps('session-new-request', {data: now()});
+    }
+    function setMenu(open) {
+        setProps('session-open-menu', {hidden: !open});
+        setProps('session-open-menu-btn', {'aria-expanded': String(open)});
+    }
     var menuOpen = false;
     function onClick(e) {
         var target = e.target && e.target.closest ? e.target : null;
@@ -312,7 +330,16 @@
             if (path) {
                 var pick = function () { setProps('session-recent-pick', {data: {path: path, ts: now()}}); };
                 if (!guardOpen(pick)) pick();
-            } else if (item.getAttribute('data-session-action') === 'open-file') openPicker();
+            } else {
+                var action = item.getAttribute('data-session-action');
+                if (action === 'open-file') openPicker();
+                else if (action === 'new-project') {
+                    if (!guardOpen(newProject, 'new')) newProject();
+                } else if (action === 'about') {
+                    var logo = byId('app-logo');
+                    if (logo) logo.click();
+                }
+            }
         }
         if (menuOpen) { menuOpen = false; setMenu(false); }
     }

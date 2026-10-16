@@ -185,10 +185,56 @@ def register_session_callbacks(app, data_manager) -> None:
             result.update(hidden=False, title='Saved with notes', body=_notes(info.notes))
         return only(**result)
 
+    @app.callback(
+        [Output('session-name-modal', 'opened', allow_duplicate=True),
+         Output('session-name-input', 'value')],
+        Input('session-save-as-btn', 'n_clicks'),
+        State('session-name', 'data'),
+        prevent_initial_call=True,
+    )
+    def save_project_as(clicks, name):
+        """Always ask for a name; the modal's Save uses save_project above."""
+        if not clicks:
+            raise PreventUpdate
+        return True, name or ''
+
     # ------------------------------------------------------------------ Open
     open_outputs = ([Output(cid, prop, allow_duplicate=True) for cid, prop in _OPEN_CORE]
                     + [Output(cid, prop, allow_duplicate=True) for _, cid, prop, _ in _RESTORE_OUTPUTS]
                     + [Output(cid, prop, allow_duplicate=True) for cid, prop in _OPEN_SESSION])
+
+    @app.callback(
+        open_outputs + [Output(cid, prop, allow_duplicate=True) for cid, prop in [
+            ('plot-settings-cache', 'data'), ('file-multi-selection', 'data'), ('pub-selections', 'data'),
+            ('file-removal-feedback', 'style'), ('file-removal-message', 'children'),
+            ('undo-file-removal-btn', 'disabled')]],
+        Input('session-new-request', 'data'),
+        [State('session-source', 'data'), State('render-trigger', 'data')],
+        prevent_initial_call=True,
+    )
+    def new_project(request, source, render_counter):
+        """Start fresh after the browser has resolved the same guard used by Open."""
+        if not request:
+            raise PreventUpdate
+        from components.axis_mapper import get_empty_selections
+        from components.data_table_editor import create_data_table_editor
+
+        sf.forget_stash(source)
+        data_manager.reset_workspace()
+        empty_style = {'color': '#666', 'padding': '20px', 'textAlign': 'center'}
+        values = {f'{cid}.{prop}': default for _, cid, prop, default in _RESTORE_OUTPUTS if default is not _KEEP}
+        values.update({
+            'loaded-files.data': [], 'file-tree.children': [html.Div('No files loaded', style=empty_style)],
+            'active-file.data': None, 'metadata-container.children': html.Div('No file selected', style=empty_style),
+            'table-editor-container.children': create_data_table_editor(None, table_id='pub-table'),
+            'pub-data-store.data': None, 'render-trigger.data': (render_counter or 0) + 1,
+            'pt-layout-mode.value': 'overlay', 'hidden-files.data': [],
+            'session-name.data': '', 'session-dirty.data': False, 'session-stamp.data': _stamp('new'),
+            'session-source.data': None, 'session-restore-late.data': None, 'session-banner.hidden': True,
+            'session-message.hidden': True, 'session-message-title.children': '', 'session-message-body.children': '',
+            'session-missing-modal.opened': False, 'session-missing-list.children': [],
+        })
+        return _ordered_open_outputs(values) + (None, [], get_empty_selections(), {'display': 'none'}, '', True)
 
     @app.callback(
         open_outputs,

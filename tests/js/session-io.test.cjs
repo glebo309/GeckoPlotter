@@ -11,7 +11,9 @@ function load(options = {}) {
     const props = [], timers = [], clicks = [];
     let clock = 1000000, nextTimer = 1, triggered = [];
     const NO = {no_update: true};
-    const elements = {'session-save-btn': {click: () => clicks.push('save')}};
+    const elements = {'session-save-btn': {click: () => clicks.push('save')},
+        'session-save-as-btn': {click: () => clicks.push('save-as')},
+        'app-logo': {click: () => clicks.push('about')}};
     const picker = {click: () => clicks.push('picker')};
     const window = {
         dash_clientside: {
@@ -27,7 +29,7 @@ function load(options = {}) {
         title: '',
         addEventListener: (name, fn) => { listeners.document[name] = fn; },
         getElementById: id => elements[id] || null,
-        querySelector: sel => sel.includes('session-open-upload') ? picker : null,
+        querySelector: sel => sel.includes('upload-button') ? picker : null,
     };
     const FakeDate = {now: () => clock};
     vm.runInNewContext(fs.readFileSync(path.join(__dirname, '../../src/assets/js/session-io.js'), 'utf8'),
@@ -66,7 +68,7 @@ test('shortcuts ignore plain keys, other modifiers, and do not repeat while held
     let prevented = 0;
     const press = extra => env.listeners.window.keydown({key: 's', preventDefault: () => { prevented++; }, ...extra});
     press({});
-    press({metaKey: true, shiftKey: true});
+    press({key: 'o', metaKey: true, shiftKey: true});
     press({metaKey: true, altKey: true});
     env.listeners.window.keydown({key: 'x', metaKey: true, preventDefault: () => { prevented++; }});
     assert.equal(prevented, 0);
@@ -347,4 +349,67 @@ test('data-confirm buttons are routed by the click handler', () => {
     const btn = {getAttribute: () => 'cancel'};
     env.io.onClick(fakeEvent({target: {closest: sel => sel.includes('data-confirm') ? btn : null}}));
     assert.equal(env.io.state.pending, null);
+});
+
+
+test('Shift+Cmd/Ctrl+S presses Save as', () => {
+    const env = load();
+    for (const mod of [{metaKey: true}, {ctrlKey: true}]) {
+        const e = fakeEvent({key: 'S', shiftKey: true, ...mod});
+        env.io.onKeyDown(e);
+        assert.equal(e.prevented, 1);
+    }
+    assert.deepEqual(env.clicks, ['save-as', 'save-as']);
+});
+
+function menuAction(env, action) {
+    const item = {getAttribute: name => name === 'data-session-action' ? action : null};
+    env.io.onClick(fakeEvent({target: {closest: sel => sel.includes('data-session-action') ? item : null}}));
+}
+
+test('File Open uses the Files upload picker and About clicks the logo', () => {
+    const env = load();
+    menuAction(env, 'open-file');
+    menuAction(env, 'about');
+    assert.deepEqual(env.clicks, ['picker', 'about']);
+});
+
+test('New project guards dirty work: Cancel, discard, and Save first', () => {
+    for (const action of ['cancel', 'discard', 'save']) {
+        const env = load();
+        makeDirty(env);
+        menuAction(env, 'new-project');
+        assert.deepEqual(hidden(env), [false]);
+        assert.ok(!env.props.some(p => p[0] === 'session-new-request'));
+        env.io.confirmAction(action);
+        if (action === 'save') {
+            assert.deepEqual(env.clicks, ['save']);
+            assert.ok(!env.props.some(p => p[0] === 'session-new-request'));
+            env.io.statusText(false, {kind: 'saved', ts: 42});
+        }
+        assert.equal(env.props.filter(p => p[0] === 'session-new-request').length, action === 'cancel' ? 0 : 1);
+    }
+});
+
+test('New project in a clean workspace runs immediately and cancels stale restore timers', () => {
+    const env = load();
+    env.io.armRestore({active_plot_tab: 'old'});
+    menuAction(env, 'new-project');
+    assert.equal(env.props.filter(p => p[0] === 'session-new-request').length, 1);
+    assert.equal(env.pending().length, 0);
+    assert.equal(env.io.state.dirty, false);
+});
+
+test('data added immediately after New project is dirty, even following a restore', () => {
+    const env = load();
+    env.io.armRestore({active_plot_tab: 'old'});
+    menuAction(env, 'new-project');
+    assert.equal(track(env, ['loaded-files']), true);
+});
+
+test('New project cancels the final restore cleanup so it cannot clear subsequent edits', () => {
+    const env = load();
+    env.io.finishRestore(1, {active_plot_tab: 'old'}, 'old', [], null, {});
+    menuAction(env, 'new-project');
+    assert.equal(env.pending().length, 0);
 });

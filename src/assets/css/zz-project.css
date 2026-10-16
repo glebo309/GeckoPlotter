@@ -1,7 +1,7 @@
 /* Project (.gecko) controls: header bar, restore banner, message. Loads after main.css / zz-density.css.
    Neutral charcoal and grey only. No fit-content / content-sized widths on tables. */
 
-/* ---- Header: name, status, Open, Save ---------------------------------- */
+/* ---- Header: File menu and name ---------------------------------- */
 .session-bar { display:flex; align-items:center; gap:8px; margin-left:14px; flex:0 0 auto; min-width:0; }
 .session-name { background:none; border:1px solid transparent; border-radius:5px; color:rgba(255,255,255,.88);
   font-size:12px; font-weight:500; line-height:20px; font-family:inherit; padding:1px 8px; max-width:220px; overflow:hidden;
@@ -17,9 +17,8 @@
 .session-btn:hover { background:rgba(255,255,255,.12); border-color:rgba(255,255,255,.42); }
 .session-btn:focus-visible { outline:2px solid rgba(255,255,255,.7); outline-offset:1px; }
 .session-open-group { position:relative; display:flex; align-items:center; }
-.session-open-upload { display:inline-block; }
-.session-open-upload .session-btn { border-top-right-radius:0; border-bottom-right-radius:0; }
-.session-menu-btn { padding:0 6px; margin-left:-1px; border-top-left-radius:0; border-bottom-left-radius:0; }
+.session-menu-btn { border-color:transparent; }
+.session-shortcut { float:right; margin-left:32px; color:#8a8e93; }
 .session-open-group .gecko-menu { top:calc(100% + 6px); left:0; right:auto; min-width:280px; color:#202124; }
 .session-menu-title { padding:4px 12px 2px; font-size:11px; color:#777b80; text-transform:uppercase; letter-spacing:.06em; }
 .session-menu-empty { padding:6px 12px 8px; font-size:12px; color:#8a8e93; }
@@ -57,21 +56,6 @@
 /* The autosave status sits in the bottom status bar */
 .status-bar .session-status { max-width:none; flex:0 1 auto; color:rgba(255,255,255,.7); }
 
-/* Open / Save: icon buttons at the right end of the title bar (icons are masks, so they follow the text colour) */
-.session-bar { margin-left:14px; gap:6px; }
-.session-btn.session-icon-open, .session-btn.session-icon-save { width:28px; padding:0; position:relative; border-color:transparent; }
-.session-btn.session-icon-open:hover, .session-btn.session-icon-save:hover { border-color:rgba(255,255,255,.3); }
-.session-btn.session-icon-open::before, .session-btn.session-icon-save::before {
-  content:''; position:absolute; inset:0; margin:auto; width:16px; height:16px; background:currentColor;
-  -webkit-mask:var(--session-icon) center/contain no-repeat; mask:var(--session-icon) center/contain no-repeat; }
-.session-btn.session-icon-open { --session-icon:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M5 19l2.757-7.351a1 1 0 0 1 .936-.649h12.307a1 1 0 0 1 .986 1.164l-.996 5.211a2 2 0 0 1-1.964 1.625h-14.026a2 2 0 0 1-2-2v-11a2 2 0 0 1 2-2h4l3 3h7a2 2 0 0 1 2 2v2'/%3E%3C/svg%3E"); }
-.session-btn.session-icon-save { --session-icon:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='1.8' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M6 4h10l4 4v10a2 2 0 0 1-2 2h-12a2 2 0 0 1-2-2v-12a2 2 0 0 1 2-2'/%3E%3Cpath d='M12 14m-2 0a2 2 0 1 0 4 0a2 2 0 1 0-4 0'/%3E%3Cpath d='M14 4v4h-6v-4'/%3E%3C/svg%3E"); }
-.session-btn.session-menu-btn { border-color:transparent; margin-left:-4px; }
-.session-open-upload .session-btn { border-radius:6px; }
-
-/* Open (inside dcc.Upload's wrapper), its menu caret, Save and the name share one 24px row and one centre line */
-.session-open-upload { display:flex; align-items:center; height:24px; line-height:0; }
-.session-open-group, .session-bar { align-items:center; }
 .session-btn { box-sizing:border-box; }
 
 /* The logo opens the About window: dark, the icon's chromatogram draws itself (assets/js/about-window.js) */

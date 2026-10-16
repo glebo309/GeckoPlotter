@@ -929,52 +929,6 @@ def register_clear_callbacks(app: dash.Dash, data_manager) -> None:
     """Register clear-related callbacks."""
     
     @app.callback(
-        [Output('loaded-files', 'data', allow_duplicate=True),
-         Output('file-tree', 'children', allow_duplicate=True),
-         Output('active-file', 'data', allow_duplicate=True),
-         Output('metadata-container', 'children', allow_duplicate=True),
-         Output('table-editor-container', 'children', allow_duplicate=True),
-         Output('pub-data-store', 'data', allow_duplicate=True),
-         Output('pub-selections', 'data', allow_duplicate=True),
-         Output('file-removal-feedback', 'style', allow_duplicate=True),
-         Output('file-removal-message', 'children', allow_duplicate=True),
-         Output('undo-file-removal-btn', 'disabled', allow_duplicate=True),
-         Output('render-trigger', 'data', allow_duplicate=True),
-         Output('hidden-files', 'data', allow_duplicate=True)],
-        Input('clear-files-btn', 'n_clicks'),
-        State('active-file', 'data'), State('render-trigger', 'data'),
-        prevent_initial_call=True
-    )
-    def clear_all_files(n_clicks, active_file, render_counter):
-        """Clear all loaded files.  Sets active-file to None; master_render
-        picks up the change and shows the empty-state plot."""
-        if not n_clicks:
-            return (dash.no_update,) * 12
-
-        from components.data_table_editor import create_data_table_editor
-        from components.axis_mapper import get_empty_selections
-
-        record = data_manager.file_removal_service.remove_all(active_file=active_file)
-        if record is None:
-            return (dash.no_update,) * 12
-
-        empty_tree = [html.Div(
-            'No files loaded',
-            style={'color': '#666', 'padding': '20px', 'textAlign': 'center'}
-        )]
-
-        empty_table = html.Div(
-            "No file selected",
-            style={'color': '#666', 'padding': '20px', 'textAlign': 'center'}
-        )
-
-        empty_table_editor = create_data_table_editor(None, table_id='pub-table')
-
-        return ([], empty_tree, None, empty_table, empty_table_editor, None, get_empty_selections(),
-                {'display': 'flex'}, f'Removed {record.label}', False,
-                (render_counter or 0) + 1, [])
-
-    @app.callback(
         Output('status-text', 'children', allow_duplicate=True),
         Input('clear-cache-btn', 'n_clicks'),
         prevent_initial_call=True,

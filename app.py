@@ -275,7 +275,7 @@ _layout_body = html.Div(
                                 html.Span('GeckoPlotter'),
                             ],
                         ),
-                        create_session_header_controls(),    # Open / Save / project name, top left next to the logo
+                        create_session_header_controls(),    # File menu and project name, beside the logo
                         html.Div(style={'flex': 1}),
                         html.Div(
                             id='plot-tab-bar',
@@ -318,17 +318,10 @@ _layout_body = html.Div(
                                                             children=html.Button(
                                                                 '+',
                                                                 className='btn btn-primary',
-                                                                title='Upload files',
+                                                                title='Open data or project files - Cmd/Ctrl+O',
                                                                 style={'padding': '2px 8px', 'fontSize': '14px', 'lineHeight': '1', 'minWidth': '28px'},
                                                             ),
                                                             multiple=True,
-                                                        ),
-                                                        html.Button(
-                                                            _icon('tabler:trash', width=14, height=14, color='#888'),
-                                                            id='clear-files-btn',
-                                                            className='btn btn-secondary',
-                                                            title='Clear all files',
-                                                            style={'padding': '2px 6px', 'fontSize': '12px', 'lineHeight': '1', 'minWidth': '28px'},
                                                         ),
                                                     ],
                                                 ),
