@@ -8,7 +8,7 @@
 .cal-feedback:not(:empty) { padding:6px 0 10px; }
 .cal-workspace-grid { display:grid; grid-template-columns:minmax(0,1fr); gap:16px; }
 .cal-editor, .cal-diagnostics { min-width:0; }
-.cal-diagnostics { display:flex; flex-direction:column; grid-row:1; }
+.cal-diagnostics { display:flex; flex-direction:column; }     /* one column: the curve after the settings */
 .cal-curve-section { display:flex; flex-direction:column; flex:1; }
 .cal-standards-scroll { max-width:100%; min-width:0; overflow-x:auto; border-radius:6px; }
 .cal-standards-scroll:focus-visible { outline:2px solid #426c50; outline-offset:2px; }
