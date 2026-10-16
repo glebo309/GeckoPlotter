@@ -11,3 +11,19 @@
 .agent-live-stop { background:none; border:1px solid rgba(255,255,255,.2); color:rgba(255,255,255,.55); font-size:11px;
                    padding:1px 8px; border-radius:4px; cursor:pointer; margin-left:2px; }
 .agent-live-stop:hover { color:#fff; border-color:rgba(255,255,255,.45); }
+
+/* On the plot while the agent works: large drops in the top-right corner and a band moving along the top edge. */
+.agent-live-stage { position:fixed; pointer-events:none; z-index:55; opacity:0; transition:opacity .5s ease; }
+.agent-live-stage.on { opacity:1; }
+.agent-live-big { position:absolute; right:14px; top:12px; filter:drop-shadow(0 2px 6px rgba(53,95,73,.25)); }
+.agent-live-big circle { fill:#5aa877; }
+.agent-live-band { position:absolute; left:0; right:0; top:0; height:3px; overflow:hidden; border-radius:2px;
+  background:linear-gradient(90deg, transparent 0%, #5aa877 35%, #2c5240 50%, #5aa877 65%, transparent 100%);
+  background-size:40% 100%; background-repeat:no-repeat; animation:agent-live-band 1.8s ease-in-out infinite; }
+@keyframes agent-live-band { from { background-position:-60% 0; } to { background-position:160% 0; } }
+@media (prefers-reduced-motion: reduce) { .agent-live-band { animation:none; background-size:100% 100%; } }
+
+/* A scan time the agent chose glides: the cursor on the plot and the slider handle move instead of jumping. */
+.gecko-agent-glide #lcms-scan-cursor-overlay { transition:left .7s cubic-bezier(.4,0,.2,1); }
+.gecko-agent-glide #ms-scan-slider .rc-slider-handle, .gecko-agent-glide #ms-scan-slider .rc-slider-track,
+.gecko-agent-glide #ms-scan-slider [role="slider"] { transition:left .7s cubic-bezier(.4,0,.2,1), width .7s cubic-bezier(.4,0,.2,1); }

@@ -94,7 +94,8 @@ def _focus(workspace, method, params, result) -> Optional[dict]:
         bundle = workspace._sample(chosen['sample'])
         component = workspace._channel(bundle, chosen['channel'])
         _show(store, bundle, component)
-        return {'active': component.component_id}
+        # The PDA view ends on the chosen wavelength after sweeping through the range during the screen.
+        return {'active': component.component_id, 'side': 'pda', 'wavelength': chosen.get('wavelength_nm')}
     hit = _first_hit(result)
     name = (hit or {}).get('sample') or params.get('sample')
     samples = params.get('samples')

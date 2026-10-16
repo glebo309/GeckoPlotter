@@ -24,27 +24,61 @@
     var drops = [{ r: 3.4, seed: 1.3 }, { r: 3.0, seed: 4.7 }, { r: 2.6, seed: 9.1 }];
     var clock = Math.random() * 100, lastFrame = 0, spread = 0;
 
-    function svg() {
+    // The same drops are drawn twice: small in the status bar, and large on the plot while the agent works (the
+    // viewBox scales them; the filter id differs per copy).
+    function svg(scale, id) {
         var root = document.createElementNS(NS, 'svg');
-        root.setAttribute('width', W); root.setAttribute('height', H); root.setAttribute('viewBox', '0 0 ' + W + ' ' + H);
+        root.setAttribute('width', W * scale); root.setAttribute('height', H * scale);
+        root.setAttribute('viewBox', '0 0 ' + W + ' ' + H);
         root.setAttribute('class', 'agent-live-drops'); root.setAttribute('aria-hidden', 'true');
-        root.innerHTML = '<defs><filter id="agent-live-goo" x="-30%" y="-60%" width="160%" height="220%">' +
+        root.innerHTML = '<defs><filter id="' + id + '" x="-30%" y="-60%" width="160%" height="220%">' +
             '<feGaussianBlur in="SourceGraphic" stdDeviation="1.5" result="b"/>' +
             '<feColorMatrix in="b" mode="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 16 -6.5"/></filter></defs>' +
-            '<g filter="url(#agent-live-goo)"></g>';
+            '<g filter="url(#' + id + ')"></g>';
         var group = root.querySelector('g');
         drops.forEach(function (d, i) {
-            d.node = document.createElementNS(NS, 'circle');
-            d.node.setAttribute('cx', W / 2); d.node.setAttribute('cy', H / 2);
-            d.node.setAttribute('r', i === 0 ? d.r : 0); group.appendChild(d.node);
+            var node = document.createElementNS(NS, 'circle');
+            node.setAttribute('cx', W / 2); node.setAttribute('cy', H / 2);
+            node.setAttribute('r', i === 0 ? d.r : 0); group.appendChild(node);
+            (d.nodes = d.nodes || []).push(node);
         });
         return root;
+    }
+
+    // -- on the plot while the agent works: large drops in its top-right corner and a moving band along its top ----
+    var stage = null;
+    function plotStage() {
+        if (stage) return stage;
+        stage = document.createElement('div');
+        stage.className = 'agent-live-stage';
+        stage.setAttribute('aria-hidden', 'true');
+        var band = document.createElement('div');
+        band.className = 'agent-live-band';
+        stage.appendChild(band);
+        var big = svg(3, 'agent-live-goo-big');
+        big.setAttribute('class', 'agent-live-drops agent-live-big');
+        stage.appendChild(big);
+        document.body.appendChild(stage);
+        return stage;
+    }
+    function placeStage(working) {
+        var gd = (window.geckoActivePlot && window.geckoActivePlot()) || document.getElementById('main-plot');
+        var box = gd && gd.querySelector ? (gd.querySelector('.nsewdrag') || gd) : null;
+        var rect = box && box.getBoundingClientRect ? box.getBoundingClientRect() : null;
+        var on = working && current.here && rect && rect.width > 40 && rect.height > 40;
+        var node = plotStage();
+        node.classList.toggle('on', !!on);
+        if (!on) return;
+        node.style.left = rect.left + 'px'; node.style.top = rect.top + 'px';
+        node.style.width = rect.width + 'px'; node.style.height = rect.height + 'px';
     }
 
     function frame(now) {
         window.requestAnimationFrame(frame);
         if (!el) show(current);                                      // Dash may mount after the first poll
         if (!el || el.hidden || now - lastFrame < 33) return;          // about 30 frames a second is plenty
+        placeStage((current.busy || current.working) && !current.stopped);
+        sweep(now);
         var dt = lastFrame ? Math.min((now - lastFrame) / 1000, 0.1) : 0;
         lastFrame = now;
         var working = (current.busy || current.working) && !current.stopped;
@@ -55,8 +89,10 @@
             var x = W / 2 + noise(clock, d.seed) * (W / 2 - d.r - 1.5) * ease;
             var y = H / 2 + noise(clock * 0.8, d.seed + 50) * (H / 2 - d.r - 1) * ease;
             var r = i === 0 ? d.r : d.r * ease;
-            d.node.setAttribute('cx', x.toFixed(2)); d.node.setAttribute('cy', y.toFixed(2));
-            d.node.setAttribute('r', r.toFixed(2));
+            (d.nodes || []).forEach(function (node) {
+                node.setAttribute('cx', x.toFixed(2)); node.setAttribute('cy', y.toFixed(2));
+                node.setAttribute('r', r.toFixed(2));
+            });
         });
     }
 
@@ -64,7 +100,7 @@
     function build() {
         el = document.getElementById('agent-live');
         if (!el || el.firstChild) return !!el;
-        el.appendChild(svg());
+        el.appendChild(svg(1, 'agent-live-goo'));
         who = document.createElement('span'); who.className = 'agent-live-who';
         doing = document.createElement('span'); doing.className = 'agent-live-doing';
         stop = document.createElement('button'); stop.className = 'agent-live-stop'; stop.type = 'button';
@@ -124,6 +160,34 @@
         if (document.getElementById(id)) { window.setTimeout(then, 700); return; }   // after the view's own setup
         if ((tries || 0) < 40) window.setTimeout(function () { whenThere(id, then, (tries || 0) + 1); }, 100);
     }
+    // While the agent screens every PDA wavelength (compare_wavelengths), the PDA view's wavelength sweeps across the
+    // detector range, as the screen does; when it is done the view goes to the chosen wavelength.
+    var sweeping = null;
+    function sweep(now) {
+        var screening = current.busy && current.here && /comparing wavelengths/.test(current.doing || '');
+        var set = window.dash_clientside && window.dash_clientside.set_props;
+        if (!screening || !set) { sweeping = null; return; }
+        if (!sweeping) {
+            set('side-tabs', { value: 'pda' });
+            var lo = 200, hi = 400, heat = document.getElementById('pda-heatmap');
+            var ys = heat && heat.data && heat.data[0] && heat.data[0].y;
+            if (ys && ys.length) { lo = Math.ceil(Math.min.apply(null, ys)); hi = Math.floor(Math.max.apply(null, ys)); }
+            sweeping = { lo: lo, hi: hi, nm: lo, last: 0 };
+        }
+        if (now - sweeping.last < 180) return;                        // the view redraws as fast as it can, no faster
+        sweeping.last = now;
+        sweeping.nm += Math.max(2, Math.round((sweeping.hi - sweeping.lo) / 40));
+        if (sweeping.nm > sweeping.hi) sweeping.nm = sweeping.lo;
+        set('pda-wavelength', { value: sweeping.nm });
+    }
+
+    // A new scan time glides there: the cursor on the plot and the slider move instead of jumping.
+    function glide() {
+        document.body.classList.add('gecko-agent-glide');
+        window.clearTimeout(glide.timer);
+        glide.timer = window.setTimeout(function () { document.body.classList.remove('gecko-agent-glide'); }, 1600);
+    }
+
     function applyView(view) {
         var set = window.dash_clientside && window.dash_clientside.set_props;
         if (!view || !(view.side || view.results) || !set) return window.dash_clientside.no_update;
@@ -134,9 +198,13 @@
             }
         }
         if (!view.side) return view.version;
+        if (view.side === 'pda' && view.wavelength) {
+            whenThere('pda-wavelength', function () { set('pda-wavelength', { value: view.wavelength }); });
+        }
         set('side-tabs', { value: view.side });
         if (view.side === 'ms-scan' && view.scan != null) {
             whenThere('ms-scan-slider', function () {
+                glide();
                 set('ms-scan-client-input', { value: null });
                 window.setTimeout(function () { set('ms-scan-client-input', { value: view.scan }); }, 50);
             });
