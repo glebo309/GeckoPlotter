@@ -409,12 +409,12 @@ class Workspace:
                    n_peaks: Optional[int] = None, names=None, centers=None, prominence: float = .05,
                    center_tolerance: Optional[float] = None) -> List[dict]:
         """Resolve a shoulder or overlapping peaks with the GUI's composite EMG model in the exact window.
-        Auto-detects centers unless supplied (RTs in minutes); n_peaks overrides the detected count. When detection
-        finds too few, seeds are spaced across the signal above 5% height. For a weak shoulder, supply centers and
-        optionally center_tolerance to bound the actual fitted apexes within that many minutes of each marker.
+        Fits a linear baseline with the components; components may not tail more than the main peak.
+        Auto-detects centers unless supplied (RTs in minutes); n_peaks overrides the detected count and seeds weak
+        shoulders from curvature. Optional center_tolerance bounds fitted apexes around explicit markers.
         names labels components in apex RT order. Replaces peaks whose stored RT lies in the window; the whole
         call is one undo step. Returns components (apex_rt is the fitted maximum, rt the GUI's stored EMG center),
-        R², residual RMSE, reduced chi-square and warnings (R² < .99, collapsed components or apexes at a bound).
+        R², residual RMSE, reduced chi-square, FWHM and warnings for poor, collapsed or non-peak-shaped fits.
         Area % is relative to the fitted window. Check with figure(); a high R² alone does not establish identity."""
         from services.deconvolution_service import DeconvolutionService, _emg_mode_offset
         if not np.isfinite([rt_start, rt_end]).all() or rt_end <= rt_start:
@@ -451,29 +451,34 @@ class Workspace:
                 x, y = x[inside], y[inside]
                 if len(x) < max(10, 4 * (count or 2) + 1) or not np.isfinite(y).all():
                     raise GeckoError('Region too narrow or contains nonfinite signal; widen the window.')
-                seeds = ([(c, float(np.interp(c, x, y))) for c in centers] if centers is not None
-                         else svc.auto_detect_centers(x, y, prominence=prominence))
-                if centers is None and n_peaks is not None:
-                    if len(seeds) >= n_peaks:
-                        seeds = sorted(sorted(seeds, key=lambda c: c[1], reverse=True)[:n_peaks])
-                    else:
-                        above = x[y > y.min() + .05 * np.ptp(y)]
-                        if len(above) < n_peaks:
-                            raise GeckoError('Not enough signal to seed the requested components.')
-                        positions = np.linspace(above[0], above[-1], n_peaks + 2)[1:-1]
-                        seeds = [(float(c), float(np.interp(c, x, y))) for c in positions]
+                baseline = np.interp(x, [x[0], x[-1]], [y[0], y[-1]])
+                signal = y - baseline
+                seeds = ([(c, float(np.interp(c, x, signal))) for c in centers] if centers is not None else
+                         svc.seed_centers(x, signal, n_peaks, prominence) if n_peaks is not None else
+                         svc.auto_detect_centers(x, signal, prominence=prominence))
                 if not seeds or (count is None and len(seeds) < 2):
                     raise GeckoError('No second maximum or shoulder found. Widen the window or supply n_peaks/centers.')
                 if names is not None and len(names) != len(seeds):
                     raise GeckoError(f'Detected {len(seeds)} components but received {len(names)} names.')
-                options = {}
+                main = int(np.argmax([h for _, h in seeds]))
+                options = {'baseline': baseline, 'fit_baseline': True, 'tail_reference': main}
                 if center_tolerance is not None:
-                    options = {'apex_mode': True,
-                               'center_bounds': [(c - center_tolerance, c + center_tolerance) for c in centers]}
+                    options.update(apex_mode=True,
+                                   center_bounds=[(c - center_tolerance, c + center_tolerance) for c in centers])
+                elif len(seeds) > 1:
+                    gaps = [min(abs(c - other) for other, _ in seeds if other != c) for c, _ in seeds]
+                    reach = .25 if centers is None else .5
+                    options.update(apex_mode=True, center_bounds=[(c - reach * gap, c + reach * gap)
+                                                                 for (c, _), gap in zip(seeds, gaps)])
                 result = svc.fit_peaks(x, y, seeds, **options)
                 if result is None or not np.isfinite(result.r_squared):
                     raise GeckoError('Fit failed; try a wider window or explicit centers.')
                 apex = lambda c: c.center + _emg_mode_offset(c.sigma, c.gamma)
+                bounds = options.get('center_bounds') or [(x[0], x[-1])] * len(seeds)
+                at_bound = any(min(abs(apex(c) - max(lo, x[0])), abs(apex(c) - min(hi, x[-1])))
+                               < .01 * (hi - lo) for c, (lo, hi) in zip(result.components, bounds))
+                widths = {id(c): svc._curve_apex_and_fwhm(x, c.curve)[1] for c in result.components}
+                main_width = widths[id(result.components[main])]
                 result.components.sort(key=apex)
                 for i, comp in enumerate(result.components):
                     comp.index = i
@@ -500,22 +505,24 @@ class Workspace:
                 warnings.append('Poor fit (R² < 0.99); check figure() and adjust the window or centers.')
             if total <= 0 or any(p.area < .005 * total for p in stored):
                 warnings.append('A component has collapsed below 0.5% of fitted area; check the component count.')
-            if center_tolerance is not None and any(
-                    min(abs(apex(c) - lo), abs(apex(c) - hi)) < .01 * center_tolerance
-                    for c, (lo, hi) in zip(result.components, options['center_bounds'])):
+            if at_bound:
                 warnings.append('A fitted apex is at its marker bound; the component area may depend on the constraint.')
+            if any(widths[id(c)] > 2 * main_width or max(c.curve[0], c.curve[-1]) > .1 * c.curve.max()
+                   for c in result.components):
+                warnings.append('A component is not peak-shaped: broad relative to the main peak or truncated at an edge.')
             row.update(r_squared=result.r_squared, redchi=result.redchi,
                        residual_rmse=float(np.sqrt(np.mean(result.residuals ** 2))), warnings=warnings)
-            added.append((row, bundle, component, stored, [apex(c) for c in result.components]))
+            added.append((row, bundle, component, stored, [(apex(c), widths[id(c)]) for c in result.components]))
         if added:
             ps.group_peaks_across_samples(file_overlay_map=self.store.build_file_overlay_map())
             for row, bundle, component, stored, apexes in added:
                 rows = {r['peak_id']: r for r in self._peak_rows(bundle, component)}
                 total = sum(p.area for p in stored)
-                row['components'] = [dict(rows[p.peak_id], apex_rt=float(rt),
-                    area_percent=100 * p.area / total if total > 0 else None) for p, rt in zip(stored, apexes)]
+                row['components'] = [dict(rows[p.peak_id], apex_rt=float(rt), fwhm=float(width),
+                    area_percent=100 * p.area / total if total > 0 else None) for p, (rt, width) in zip(stored, apexes)]
             self._record(f'Deconvolved {rt_start:g}-{rt_end:g} min on {channel or "the shown channel"} in '
-                         f'{_names(bundles)} (n_peaks={n_peaks}, centers={centers}, '
+                         f'{_names(bundles)} (fitted linear baseline, tailing bounded to main peak; '
+                         f'n_peaks={n_peaks}, centers={centers}, '
                          f'center_tolerance={center_tolerance}, prominence={prominence:g})')
         return out
 

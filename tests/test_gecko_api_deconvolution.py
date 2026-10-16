@@ -1,4 +1,7 @@
 """Agent deconvolution uses the GUI's EMG fit and editable component peaks."""
+import json
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 import pytest
@@ -74,10 +77,57 @@ def test_unresolved_shoulder_without_a_second_maximum():
     assert [p['area'] for p in row['components']] == pytest.approx([2, 10], rel=.03)
 
 
+def test_default_count_fit_removes_baseline_and_limits_shoulder_tailing():
+    ws = Workspace()
+    x = np.linspace(.6, 1.6, 801)
+    model = ExponentialGaussianModel()
+    baseline = 5 + 30 * (x - x[0])
+    y = baseline + model.eval(x=x, amplitude=2, center=.92, sigma=.025, gamma=60)
+    y += model.eval(x=x, amplitude=10, center=1, sigma=.04, gamma=40)
+    _sample(ws, 'sloping', x, y)
+    row = ws.deconvolve(.6, 1.6, n_peaks=2)[0]
+    assert [p['area'] for p in row['components']] == pytest.approx([2, 10], rel=.03)
+    stored = sorted(ws.store.peak_service.get_peaks('sloping-uv'), key=lambda p: p.rt)
+    assert stored[0].fit_params['gamma'] >= stored[1].fit_params['gamma']
+    assert stored[0].p_line[0][1] == pytest.approx(5, abs=.01)
+    assert stored[0].p_line[-1][1] == pytest.approx(35, abs=.01)
+    assert row['components'][0]['fwhm'] < 2 * row['components'][1]['fwhm']
+
+
 def test_requested_count_overrides_detection(shoulder, monkeypatch):
     monkeypatch.setattr(DeconvolutionService, 'auto_detect_centers', lambda self, x, y, **kw: [(1.02, 100)])
     row = shoulder[0].deconvolve(.6, 1.5, samples=['standard'], n_peaks=2)[0]
     assert [p['area'] for p in row['components']] == pytest.approx([2, 10], rel=.03)
+
+
+@pytest.mark.parametrize('sample', ['0.31.mM', '0.625mM', '1.25mM', '2.5mM', '5mM', '10mM'])
+def test_alanine_default_count_produces_a_leading_peak_not_a_shelf(sample):
+    data = json.loads((Path(__file__).parent / 'fixtures' / 'deconv_ala_250nm.json').read_text())
+    signal = data['l-alanine ' + sample]
+    ws = Workspace()
+    _sample(ws, 'standard', signal['x'], signal['y'])
+    row = ws.deconvolve(2.15, 2.36, n_peaks=2)[0]
+    left, main = row['components']
+    assert 2.22 < left['apex_rt'] < 2.245
+    assert .005 - 1e-9 <= left['fwhm'] < 2 * main['fwhm']
+    peaks = ws.store.peak_service.get_peaks('standard-uv')
+    assert peaks[0].fit_params['gamma'] >= peaks[1].fit_params['gamma']
+    x = np.linspace(2.15, 2.36, 501)
+    for peak in peaks:
+        curve = ExponentialGaussianModel().eval(x=x, **{k: peak.fit_params[k]
+                                                       for k in ['center', 'amplitude', 'sigma', 'gamma']})
+        assert max(curve[0], curve[-1]) < .02 * curve.max()
+
+
+def test_broad_component_shape_warning():
+    ws = Workspace()
+    x = np.linspace(0, 3, 1001)
+    model = ExponentialGaussianModel()
+    y = model.eval(x=x, amplitude=3, center=1, sigma=.2, gamma=40)
+    y += model.eval(x=x, amplitude=10, center=1.5, sigma=.04, gamma=40)
+    _sample(ws, 'broad', x, y)
+    row = ws.deconvolve(0, 3, centers=[1, 1.5])[0]
+    assert any('not peak-shaped' in w for w in row['warnings'])
 
 
 def test_warns_when_apex_hits_a_marker_bound(shoulder):
