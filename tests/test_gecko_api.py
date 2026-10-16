@@ -367,3 +367,11 @@ def test_the_analysis_guides_answer_the_judgement_calls():
     assert {'wavelength', 'integration', 'deconvolution', 'calibration', 'identification', 'conversion'} <= set(TOPICS)
     assert 'saturat' in guide('Wavelength')['guide'] and '15 %' in guide('calibration')['guide']
     assert 'Topics' in guide('nope')['error']
+
+
+def test_a_project_saved_by_name_goes_to_the_projects_folder(sequence, tmp_path, monkeypatch):
+    monkeypatch.setenv('GECKO_SETTINGS_DIR', str(tmp_path / 'settings'))
+    ws = Workspace()
+    ws.open(str(sequence))
+    saved = ws.save('PEA calibration')
+    assert saved == str(tmp_path / 'settings' / 'Projects' / 'PEA calibration.gecko') and os.path.exists(saved)

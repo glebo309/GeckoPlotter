@@ -119,6 +119,12 @@ def _ions(mz, intensity, top: int, merge: float = 0.6) -> List[dict]:
     return [{'mz': round(float(x[i]), 2), 'relative': round(float(100 * y[i] / y.max()), 1)} for i in chosen]
 
 
+def projects_dir() -> Path:
+    """Where a project saved without a folder goes: <settings folder>/Projects (~/Documents/GeckoPlotter/Projects)."""
+    import os
+    return Path(os.environ.get('GECKO_SETTINGS_DIR') or Path.home() / 'Documents' / 'GeckoPlotter') / 'Projects'
+
+
 class Workspace:
     """One GeckoPlotter workspace (the same object the app holds per browser)."""
 
@@ -211,6 +217,9 @@ class Workspace:
         from services import session_service
         self._refresh_concentrations()
         path = Path(path).expanduser()
+        if not path.is_absolute() and path.parent == Path('.'):      # a bare name: GeckoPlotter's projects folder
+            path = projects_dir() / path
+        path.parent.mkdir(parents=True, exist_ok=True)
         if path.suffix.lower() != '.gecko':
             path = path.with_suffix('.gecko')
         saved = session_service.save_session(self.store, str(path), self._present_results(),

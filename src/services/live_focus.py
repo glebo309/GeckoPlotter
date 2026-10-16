@@ -147,7 +147,12 @@ def _focus(workspace, method, params, result) -> Optional[dict]:
     # A UV channel: an open PDA view follows it, at the agent's peak when there is one.
     nm = (component.metadata or {}).get('wavelength_nm')
     if nm and method in ('add_uv_channel', 'integrate', 'detect_peaks', 'deconvolve', 'figure'):
-        view['pda_follow'] = {'wavelength': nm, 'time': (hit or {}).get('rt')}
+        time = (hit or {}).get('rt')
+        if time is None:                                    # no peak in the answer: the channel's largest peak
+            peaks = store.peak_service.get_peaks(store.peak_owner_id(component.component_id)) or []
+            biggest = max(peaks, key=lambda p: getattr(p, 'area', 0) or 0, default=None)
+            time = getattr(biggest, 'rt', None)
+        view['pda_follow'] = {'wavelength': nm, 'time': time}
     return view
 
 

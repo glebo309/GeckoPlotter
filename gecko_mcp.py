@@ -40,7 +40,8 @@ server = MCPServer(
         'When GeckoPlotter is open, the tools work in it and the user sees every step; otherwise in a workspace of '
         'its own. Do the analysis with these tools, not with scripts or by reading the data files yourself: what '
         'a tool does is what the user sees and can check in the app. If a tool is missing, say so instead of working '
-        'around it. Before a judgement call read analysis_guide(topic): wavelength (choosing the detection wavelength), '
+        'around it. Save projects where the user says; without a place pass just a file name: it goes to '
+        'GeckoPlotter\'s Projects folder (never a temporary folder), and tell the user the path. Before a judgement call read analysis_guide(topic): wavelength (choosing the detection wavelength), '
         'integration, deconvolution, calibration (acceptance and outliers), identification (LC-MS ions), conversion. '
         'First call identify_agent with your model name: changes are recorded as made by an MCP agent. To quantify, '
         'integrate a peak in the standards and call calibrate with {sample: concentration}; read its warnings.'),
@@ -324,7 +325,8 @@ def export_results(path: str, ctx: Context = None) -> dict:
 @server.tool()
 def save_project(path: str, project_name: str | None = None, ctx: Context = None) -> dict:
     """Save the workspace as a GeckoPlotter project (.gecko): it opens in the app with every sample, peak, name and
-    calibration, so the user can check and correct the integration by hand."""
+    calibration, so the user can check and correct the integration by hand. path: where the user asked, or only a
+    file name ('PEA calibration.gecko'), which goes to GeckoPlotter's Projects folder (~/Documents/GeckoPlotter)."""
     saved = _run('save', path, project_name, ctx=ctx)
     return saved if isinstance(saved, dict) else {'saved': saved}
 
