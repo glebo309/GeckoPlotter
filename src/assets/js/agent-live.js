@@ -184,6 +184,46 @@
         set('pda-wavelength', { value: sweeping.nm });
     }
 
+    // The plot zooms to the agent's time window, each y axis to the traces inside it (as one would zoom by hand).
+    // Plotly reports the new ranges like a user's zoom, so the next redraw keeps them.
+    function zoomTo(range) {
+        var gd = (window.geckoActivePlot && window.geckoActivePlot()) || document.querySelector('#main-plot .js-plotly-plot');
+        if (!gd || !gd.data || !window.Plotly) return;
+        var a = range[0], b = range[1], update = {}, ys = {};
+        Object.keys(gd._fullLayout || {}).forEach(function (key) {
+            if (/^xaxis\d*$/.test(key)) update[key + '.range'] = [a, b];
+        });
+        gd.data.forEach(function (trace) {
+            if (trace.visible === false || trace.visible === 'legendonly' || !trace.x || !trace.y) return;
+            var axis = 'yaxis' + String(trace.yaxis || 'y').slice(1), xs = trace.x, values = trace.y;
+            for (var i = 0; i < xs.length; i++) {
+                var x = Number(xs[i]), y = Number(values[i]);
+                if (x < a || x > b || !isFinite(y)) continue;
+                var r = ys[axis] || (ys[axis] = [y, y]);
+                if (y < r[0]) r[0] = y;
+                if (y > r[1]) r[1] = y;
+            }
+        });
+        Object.keys(ys).forEach(function (axis) {
+            var lo = ys[axis][0], hi = ys[axis][1], pad = (hi - lo) * 0.08 || 1;
+            update[axis + '.range'] = [lo - pad, hi + pad];
+        });
+        window.Plotly.relayout(gd, update);
+    }
+
+    // The redraw that follows the agent's step replaces the figure: zoom again after each redraw for a few seconds,
+    // until the plot shows the range (then the stored zoom carries it).
+    function keepZoom(range) {
+        var until = Date.now() + 5000;
+        (function check() {
+            var gd = (window.geckoActivePlot && window.geckoActivePlot()) || document.querySelector('#main-plot .js-plotly-plot');
+            var shown = gd && gd.layout && gd.layout.xaxis && gd.layout.xaxis.range;
+            var there = shown && Math.abs(shown[0] - range[0]) < 1e-3 && Math.abs(shown[1] - range[1]) < 1e-3;
+            if (!there) zoomTo(range);
+            if (Date.now() < until) window.setTimeout(check, 400);
+        })();
+    }
+
     // A new scan time glides there: the cursor on the plot and the slider move instead of jumping.
     function glide() {
         document.body.classList.add('gecko-agent-glide');
@@ -193,7 +233,10 @@
 
     function applyView(view) {
         var set = window.dash_clientside && window.dash_clientside.set_props;
-        if (!view || !(view.side || view.results || view.pda_follow) || !set) return window.dash_clientside.no_update;
+        if (!view || !(view.side || view.results || view.pda_follow || view.zoom) || !set) {
+            return window.dash_clientside.no_update;
+        }
+        if (view.zoom) keepZoom(view.zoom);
         var follow = view.pda_follow;
         if (follow && document.getElementById('pda-wavelength')) {     // only when the PDA view is open: no tab switch
             set('pda-wavelength', { value: follow.wavelength });

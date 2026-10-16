@@ -166,6 +166,9 @@ def _focus(workspace, method, params, result) -> Optional[dict]:
 
     _show(store, bundle, component)
     view['active'] = component.component_id
+    window = _window(params, result)
+    if window:
+        view['zoom'] = window
     # A UV channel: an open PDA view follows it, at the agent's peak when there is one.
     nm = (component.metadata or {}).get('wavelength_nm')
     if nm and method in ('add_uv_channel', 'integrate', 'detect_peaks', 'deconvolve', 'figure'):
@@ -179,6 +182,23 @@ def _focus(workspace, method, params, result) -> Optional[dict]:
             time = getattr(biggest, 'rt', None)
         view['pda_follow'] = {'wavelength': nm, 'time': time}
     return view
+
+
+def _window(params, result):
+    """The time range the call worked on, with room around it, for the plot to zoom to (None: leave the zoom)."""
+    starts, ends = [], []
+    for row in result if isinstance(result, list) else []:
+        if isinstance(row, dict) and not row.get('error'):
+            for key_a, key_b in (('rt_start', 'rt_end'), ('window_start', 'window_end')):
+                if row.get(key_a) is not None and row.get(key_b) is not None:
+                    starts.append(row[key_a]); ends.append(row[key_b])
+    if not starts and params.get('rt_start') is not None and params.get('rt_end') is not None:
+        starts, ends = [params['rt_start']], [params['rt_end']]
+    if not starts:
+        return None
+    a, b = float(min(starts)), float(max(ends))
+    pad = max(1.5 * (b - a), 0.15)                      # the peak and its neighbourhood, as one would zoom by hand
+    return [round(max(0.0, a - pad), 4), round(b + pad, 4)]
 
 
 def _calibration_view(store, params, result) -> dict:
