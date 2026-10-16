@@ -1,0 +1,12 @@
+/* Live mode in the status bar (assets/js/agent-live.js): drops, who, what, Stop. */
+.status-bar .agent-live { display:inline-flex; align-items:center; gap:6px; flex:0 1 auto; min-width:0; }
+.status-bar .agent-live[hidden] { display:none; }
+.agent-live-drops { flex:0 0 auto; overflow:visible; }
+.agent-live-drops circle { fill:#6b716e; transition:fill .6s ease; }
+.agent-live.busy .agent-live-drops circle { fill:#5fd19a; }
+.agent-live.stopped .agent-live-drops circle { fill:#c9a24a; }
+.agent-live-who { color:#e1e8e3; }
+.agent-live-doing { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0; }
+.agent-live-stop { background:none; border:1px solid rgba(255,255,255,.2); color:rgba(255,255,255,.55); font-size:11px;
+                   padding:1px 8px; border-radius:4px; cursor:pointer; margin-left:2px; }
+.agent-live-stop:hover { color:#fff; border-color:rgba(255,255,255,.45); }

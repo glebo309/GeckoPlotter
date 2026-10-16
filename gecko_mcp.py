@@ -6,7 +6,9 @@ Register once (Claude Code), with the Python that has GeckoPlotter's packages:
 
     claude mcp add geckoplotter -- "<GeckoPlotter folder>/venv/bin/python" "<GeckoPlotter folder>/app/gecko_mcp.py"
 
-It runs on this computer only (stdio); nothing is sent anywhere. One workspace lives as long as the agent's session.
+It runs on this computer only (stdio); nothing is sent anywhere. When GeckoPlotter is open, every tool works in the
+window used last and the screen redraws (live mode, services/live_agent); otherwise in a workspace of its own that
+lives as long as the agent's session.
 """
 import contextlib
 import os
@@ -18,6 +20,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), 'src
 from mcp.server.mcpserver import Context, Image, MCPServer  # noqa: E402
 
 from gecko_api import GeckoError, Workspace  # noqa: E402
+from services import live_client  # noqa: E402
 
 server = MCPServer(
     name='geckoplotter',
@@ -29,7 +32,8 @@ server = MCPServer(
         'check or correct every peak by hand. Show a figure when a result depends on where a peak was cut. '
         'Single-quadrupole m/z values are read about 0.4-0.5 below the exact mass. Samples with PDA data hold the '
         'whole UV range: list_samples shows pda=true; add_uv_channel reads any wavelength, uv_spectrum a spectrum. '
-        'First call identify_agent with your model name: changes are recorded as made by an MCP agent. To quantify, '
+        'When GeckoPlotter is open, the tools work in it and the user sees every step; otherwise in a workspace of '
+        'its own. First call identify_agent with your model name: changes are recorded as made by an MCP agent. To quantify, '
         'integrate a peak in the standards and call calibrate with {sample: concentration}; read its warnings.'),
 )
 workspace = Workspace()
@@ -60,12 +64,30 @@ def _identify(ctx) -> None:
 MODEL = {}
 
 
-def _run(call, *args, ctx=None, **kwargs):
+def _label(client: str) -> str:
+    """The app's own name for the status bar: 'claude-code' -> 'Claude Code'."""
+    name = (client or '').lower()
+    for part, label in (('claude-code', 'Claude Code'), ('claude-ai', 'Claude Desktop'), ('claude', 'Claude'),
+                        ('codex', 'Codex'), ('gemini', 'Gemini CLI')):
+        if part in name:
+            return label
+    return client or 'Agent'
+
+
+def _run(method, *args, ctx=None, **kwargs):
+    """Run a Workspace method: in the GeckoPlotter that is open (live mode, the screen redraws), or here when none is."""
     if ctx is not None:
         _identify(ctx)
     with _quiet():
+        agent = dict(workspace.agent or {}, client_label=_label((workspace.agent or {}).get('client')))
         try:
-            return call(*args, **kwargs)
+            return live_client.call(method, args, kwargs, agent)
+        except live_client.Refused as exc:
+            return {'error': str(exc)}
+        except live_client.NotRunning:
+            pass
+        try:
+            return getattr(workspace, method)(*args, **kwargs)
         except GeckoError as exc:
             return {'error': str(exc)}
 
@@ -85,14 +107,14 @@ def open_data(path: str, everything: bool = False, ctx: Context = None) -> dict:
     GeckoPlotter project (.gecko, or a FAIR package .zip; this replaces the workspace). From Agilent export folders
     only the full-scan spectra (*_spectra.cdf) and UV channels (*.dx_VWD*.CSV) are read; everything=True reads the
     small duplicate .cdf/.CSV exports too."""
-    return _run(workspace.open, path, everything, ctx=ctx)
+    return _run('open', path, everything, ctx=ctx)
 
 
 @server.tool()
 def list_samples(ctx: Context = None) -> list:
     """The loaded samples: name, type, channels (name, kind uv/ms+/ms-, wavelength, points, time range, whether it
     holds full mass spectra) and peak count."""
-    return _run(workspace.samples, ctx=ctx)
+    return _run('samples', ctx=ctx)
 
 
 @server.tool()
@@ -100,7 +122,7 @@ def detect_peaks(samples: list[str] | None = None, channel: str | None = None, s
     """Detect peaks as the app's Detect button does. samples: names (default: every run); channel: e.g. 'UV 220',
     'Ch B', '+TIC' (default: the one the app shows); sensitivity 0-100 (minimum height = 100 - sensitivity % of the
     tallest peak). Earlier detected peaks of that channel are replaced, manual ones kept."""
-    return _run(workspace.detect_peaks, samples, channel, sensitivity, ctx=ctx)
+    return _run('detect_peaks', samples, channel, sensitivity, ctx=ctx)
 
 
 @server.tool()
@@ -110,19 +132,19 @@ def integrate(rt_start: float, rt_end: float, samples: list[str] | None = None, 
     the nearest valley (at most 0.5 min), so a rough window around the peak takes the whole peak; snap_to_valleys=
     False uses the exact times. name: compound name (spreads to the same peak in all samples). Check the result with
     figure() when neighbouring peaks are close."""
-    return _run(workspace.integrate, rt_start, rt_end, samples, channel, name, snap_to_valleys, ctx=ctx)
+    return _run('integrate', rt_start, rt_end, samples, channel, name, snap_to_valleys, ctx=ctx)
 
 
 @server.tool()
 def peak_table(samples: list[str] | None = None, ctx: Context = None) -> list:
     """All integrated peaks: sample, channel, name, RT, start, end, area, height, area %, concentration, source."""
-    return _run(workspace.peaks, samples, ctx=ctx)
+    return _run('peaks', samples, ctx=ctx)
 
 
 @server.tool()
 def rename_peak(sample: str, peak: str, new_name: str, ctx: Context = None) -> list:
     """Rename a peak (by its name or id); the same peak in every sample gets the name. Returns the peak table."""
-    return _run(workspace.rename_peak, sample, peak, new_name, ctx=ctx)
+    return _run('rename_peak', sample, peak, new_name, ctx=ctx)
 
 
 @server.tool()
@@ -134,19 +156,19 @@ def calibrate(peak: str, standards: dict[str, float], units: str = 'mM', fit: st
     retention time ± rt_tolerance min) gets a concentration. fit: linear, quadratic or power. Read 'warnings':
     missing standards, low R², standards that back-calculate badly, samples outside the calibrated range or the
     retention-time window. Recalibrating with the same name replaces the curve."""
-    return _run(workspace.calibrate, peak, standards, units, fit, through_zero, channel, rt_tolerance, name, ctx=ctx)
+    return _run('calibrate', peak, standards, units, fit, through_zero, channel, rt_tolerance, name, ctx=ctx)
 
 
 @server.tool()
 def list_calibrations(ctx: Context = None) -> list:
     """The calibrations of the workspace: name, fit, units, R², number of standards, range, retention-time window."""
-    return _run(workspace.list_calibrations, ctx=ctx)
+    return _run('list_calibrations', ctx=ctx)
 
 
 @server.tool()
 def remove_calibration(name: str, ctx: Context = None) -> list:
     """Delete a calibration (its concentrations are cleared); returns the remaining calibrations."""
-    return _run(workspace.remove_calibration, name, ctx=ctx)
+    return _run('remove_calibration', name, ctx=ctx)
 
 
 @server.tool()
@@ -154,14 +176,14 @@ def add_uv_channel(wavelength_nm: float, samples: list[str] | None = None, ctx: 
     """Extract one wavelength from each sample's PDA (3D UV) data as a new channel, like the app's "Add N nm
     channel". Use it when the recorded channels miss the compound (no chromophore: try 200-210 nm); then
     detect_peaks or integrate on that channel (e.g. channel='205 nm')."""
-    return _run(workspace.add_uv_channel, wavelength_nm, samples, ctx=ctx)
+    return _run('add_uv_channel', wavelength_nm, samples, ctx=ctx)
 
 
 @server.tool()
 def uv_spectrum(sample: str, rt: float, top: int = 5, ctx: Context = None) -> dict:
     """UV spectrum at a retention time from the sample's PDA data: absorbance maxima and the absorbance every
     10 nm. Use it to find the wavelength a peak absorbs at."""
-    return _run(workspace.uv_spectrum, sample, rt, top, ctx=ctx)
+    return _run('uv_spectrum', sample, rt, top, ctx=ctx)
 
 
 @server.tool()
@@ -170,7 +192,7 @@ def add_eic_channel(mz: float, tolerance: float = 0.5, polarity: str = '+', samp
     """Add the extracted-ion chromatogram of m/z ± tolerance as a channel in each run with full-scan spectra
     (polarity '+', '-' or 'both'). The channel ('EIC 633.8 ±0.5 (+)') then works like any other: detect_peaks,
     integrate, calibrate, figure and export with channel='EIC 633.8'."""
-    return _run(workspace.add_eic_channel, mz, tolerance, polarity, samples, ctx=ctx)
+    return _run('add_eic_channel', mz, tolerance, polarity, samples, ctx=ctx)
 
 
 @server.tool()
@@ -180,7 +202,7 @@ def extract_ion_chromatogram(mz: float, tolerance: float = 0.5, samples: list[st
     """EIC of m/z ± tolerance in each run, added as a channel and integrated on it: per sample the apex RT, height
     and area of the tallest peak (inside rt_start-rt_end when given; to 5 % of its height or over the window). The
     peaks are in the app, where the user can correct them; running it again replaces the earlier EIC peak."""
-    return _run(workspace.eic, mz, tolerance, samples, polarity, rt_start, rt_end, ctx=ctx)
+    return _run('eic', mz, tolerance, samples, polarity, rt_start, rt_end, ctx=ctx)
 
 
 @server.tool()
@@ -188,7 +210,7 @@ def mass_spectrum(sample: str, rt: float | None = None, rt_start: float | None =
                   peak: str | None = None, polarity: str = '+', top: int = 10, ctx: Context = None) -> dict:
     """Mass spectrum at one time, averaged over rt_start-rt_end, or averaged over a peak's integration window (as
     the app's Peak mass view). Returns the most intense ions with relative intensity (%)."""
-    return _run(workspace.mass_spectrum, sample, rt, rt_start, rt_end, peak, polarity, top, ctx=ctx)
+    return _run('mass_spectrum', sample, rt, rt_start, rt_end, peak, polarity, top, ctx=ctx)
 
 
 @server.tool()
@@ -197,12 +219,10 @@ def figure(samples: list[str] | None = None, channel: str | None = None, rt_star
            polarity: str = '+', ctx: Context = None):
     """Draw the samples overlaid (a channel, or the EIC of eic_mz) with their integrated peaks shaded and named, and
     return the image."""
-    with _quiet():
-        try:
-            target = os.path.join(tempfile.mkdtemp(prefix='gecko-'), 'figure.png')
-            path = workspace.figure(target, samples, channel, rt_start, rt_end, eic_mz, tolerance, polarity)
-        except GeckoError as exc:
-            return {'error': str(exc)}
+    target = os.path.join(tempfile.mkdtemp(prefix='gecko-'), 'figure.png')
+    path = _run('figure', target, samples, channel, rt_start, rt_end, eic_mz, tolerance, polarity, ctx=ctx)
+    if isinstance(path, dict):
+        return path
     return Image(path=path)
 
 
@@ -210,14 +230,16 @@ def figure(samples: list[str] | None = None, channel: str | None = None, rt_star
 def export_results(path: str, ctx: Context = None) -> dict:
     """Write the whole project to one Excel workbook for the user to keep working with: an overview, one sheet per plot
     tab (peak areas per compound and sample, every peak) with its traces, calibrations, samples and history."""
-    return _run(lambda: {'saved': workspace.export_results(path)}, ctx=ctx)
+    saved = _run('export_results', path, ctx=ctx)
+    return saved if isinstance(saved, dict) else {'saved': saved}
 
 
 @server.tool()
 def save_project(path: str, project_name: str | None = None, ctx: Context = None) -> dict:
     """Save the workspace as a GeckoPlotter project (.gecko): it opens in the app with every sample, peak, name and
     calibration, so the user can check and correct the integration by hand."""
-    return _run(lambda: {'saved': workspace.save(path, project_name)}, ctx=ctx)
+    saved = _run('save', path, project_name, ctx=ctx)
+    return saved if isinstance(saved, dict) else {'saved': saved}
 
 
 if __name__ == '__main__':

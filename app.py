@@ -226,6 +226,7 @@ _layout_body = html.Div(
         dcc.Store(id='manual-draw-line-store', data=None),  # Browser-side custom integration line
         dcc.Store(id='interaction-action-store', data=None),  # Last action for future undo/redo
         dcc.Input(id='ms-scan-client-input', type='number', value=None, style={'display': 'none'}),
+        dcc.Store(id='agent-live-version', data=0),  # the app's agent change counter: redraw (callbacks/live_callbacks)
         dcc.Store(id='render-trigger', data=0),  # Counter bumped to trigger master render of main-plot
         dcc.Store(id='zoom-state', data=None),  # Persisted user zoom ranges across figure rebuilds
         dcc.Store(id='main-shape-relayout', data=None),  # relayoutData filtered to shape edits (peak/deconvolution callbacks)
@@ -1433,6 +1434,7 @@ _layout_body = html.Div(
                     children=[
                         html.Span(id='status-text', children='Ready'),
                         html.Div(style={'flex': 1}),
+                        html.Span(id='agent-live', className='agent-live', hidden=True),   # assets/js/agent-live.js
                         create_session_status(),
                         html.Span(id='file-info', children='No files loaded'),
                         html.Button(
@@ -1958,7 +1960,9 @@ register_about_callbacks(app, data_manager)
 from callbacks.ms_polarity_callbacks import register_ms_polarity_callbacks
 register_ms_polarity_callbacks(app, data_manager)
 from callbacks.session_callbacks import register_session_callbacks
+from callbacks.live_callbacks import register_live_callbacks
 register_session_callbacks(app, data_manager)
+register_live_callbacks(app, data_manager)
 
 # Toolbox tabs (DMC) <-> toolbox-tab store, kept in sync both ways.
 # dmc.Tabs owns the visible panel; the store stays the source of truth for
@@ -2274,5 +2278,8 @@ if __name__ == '__main__':
     # Fast and safe by default. GECKO_HOST=0.0.0.0 serves the local network (each browser gets its own workspace,
     # kept in this process's memory, so run a single copy). GECKO_DEBUG=1 is for development only: it makes the browser run
     # Dash's slow development build, polls the server for file changes and exposes the Werkzeug debugger.
+    # Live mode: an agent (gecko_mcp.py) works in this window and the screen redraws (services/live_agent).
+    from services import live_agent as _live_agent
+    _live_agent.install(app.server, _workspace_registry, int(os.environ.get('GECKO_PORT', '8052')))
     app.run(host=os.environ.get('GECKO_HOST', '127.0.0.1'), port=int(os.environ.get('GECKO_PORT', '8052')),
             debug=os.environ.get('GECKO_DEBUG', '0') == '1')
