@@ -330,3 +330,19 @@ def test_runs_sharing_a_sample_name_are_named_by_their_sample_id_in_one_group(tm
     assert sorted(b.name for b in bundles) == ['15mM', '3.25mM']
     assert {ws.store.group_overrides[b.bundle_id][2] for b in bundles} == {'Phenylethylamine'}
     assert all(b.metadata['sample_name'] == 'Phenylethylamine' for b in bundles)        # the Metadata keeps it
+
+
+def test_a_renamed_group_names_its_tab_and_tree_group_and_is_kept_in_the_project(tmp_path):
+    from types import SimpleNamespace
+    from callbacks.viz_callbacks import _tab_id_from_group, _tab_label_from_group
+    from services import session_service
+    from services.data_store import DataStore
+    key = ('folder', 'Time (min)', 'Phenylethylamine')
+    store = DataStore()
+    assert _tab_label_from_group(key, store) == 'Phenylethylamine'
+    store.group_labels = {_tab_id_from_group(key): 'PEA calibration 8 Oct'}
+    assert _tab_label_from_group(key, store) == 'PEA calibration 8 Oct'
+    restored = DataStore()
+    session_service.restore_session(restored, session_service.build_session(store))
+    assert _tab_label_from_group(key, restored) == 'PEA calibration 8 Oct'
+    assert _tab_label_from_group(key, SimpleNamespace()) == 'Phenylethylamine'

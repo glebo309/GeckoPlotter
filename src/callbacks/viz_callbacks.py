@@ -450,7 +450,11 @@ def _tab_id_from_group(group_key):
 
 
 def _tab_label_from_group(group_key, dm=None):
-    """Create a human-readable label for a tab from its overlay group key."""
+    """Create a human-readable label for a tab from its overlay group key; a name the user gave the tab (or its file
+    tree group) wins, so both always show the same name."""
+    named = (getattr(dm, 'group_labels', None) or {}).get(_tab_id_from_group(group_key)) if dm is not None else None
+    if named:
+        return named
     cat, x_axis, *_rest = group_key
     if cat == 'folder' and len(group_key) >= 3:            # runs opened together from one folder (gecko_api)
         return str(group_key[2])
@@ -1103,27 +1107,30 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
 
     # -- Rename a plot tab (kept in plot-tabs, so it is saved with the project) --
     @app.callback(
-        Output('plot-tabs', 'data', allow_duplicate=True),
+        [Output('plot-tabs', 'data', allow_duplicate=True),
+         Output('file-tree', 'children', allow_duplicate=True)],
         Input('tab-rename-event', 'data'),
-        State('plot-tabs', 'data'),
+        [State('plot-tabs', 'data'), State('loaded-files', 'data'), State('active-file', 'data'),
+         State('file-order', 'data')],
         prevent_initial_call=True,
     )
-    def rename_custom_tab(event, tabs):
+    def rename_custom_tab(event, tabs, files, active_file, file_order):
+        """Rename a plot tab, from the tab itself or from its group in the file tree (double-click either). The name
+        is kept with the workspace (``group_labels``, saved in the project) so the tab and the group agree."""
         if not event or not tabs:
-            return dash.no_update
+            raise dash.exceptions.PreventUpdate
         tab_id = event.get('tab_id')
-        new_label = event.get('new_label')
+        new_label = (event.get('new_label') or '').strip()
         if not tab_id or not new_label:
-            return dash.no_update
-        updated = []
-        changed = False
-        for t in tabs:
-            if t['id'] == tab_id and t['label'] != new_label:
-                updated.append({**t, 'label': new_label})
-                changed = True
-            else:
-                updated.append(t)
-        return updated if changed else dash.no_update
+            raise dash.exceptions.PreventUpdate
+        if not isinstance(getattr(data_manager, 'group_labels', None), dict):
+            data_manager.group_labels = {}
+        data_manager.group_labels[tab_id] = new_label
+        updated = [{**t, 'label': new_label} if t['id'] == tab_id else t for t in tabs]
+        from callbacks.upload_callbacks import render_file_tree_with_bundles_selected
+        tree = render_file_tree_with_bundles_selected(files or data_manager.get_loaded_files_list(), data_manager,
+                                                      active_file, active_plot_tab=tab_id, file_order=file_order or {})
+        return updated, tree                            # plot-tabs changing marks the project changed
 
     # -- Create custom plot tab from Plot button --
     @app.callback(

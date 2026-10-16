@@ -785,6 +785,7 @@ def _build_parts(store, client_state, project_name, embed_raw, raw_limit_bytes,
         'bundles': bundles_state,
         'group_overrides': {k: list(v) if isinstance(v, (tuple, list)) else v
                             for k, v in (getattr(store, 'group_overrides', None) or {}).items()},
+        'group_labels': dict(getattr(store, 'group_labels', None) or {}),
         'visibility_state': dict(store.visibility_state),
         'collapse_state': dict(store.collapse_state),
         'file_ui_state': store.file_ui_state,
@@ -1736,6 +1737,9 @@ def _apply_state(store, state: dict, report: SessionReport) -> None:
                  for k, v in (state.get('group_overrides') or {}).items()}
     if overrides:
         store.group_overrides = overrides
+    labels = state.get('group_labels')
+    if isinstance(labels, dict) and labels:
+        store.group_labels = {str(k): str(v) for k, v in labels.items() if v}
     if state.get('hidden_sample_channels'):
         store._hidden_sample_channels = state['hidden_sample_channels']
     if state.get('channel_combine_modes'):

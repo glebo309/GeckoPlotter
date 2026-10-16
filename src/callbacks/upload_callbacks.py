@@ -449,7 +449,8 @@ def _render_group_header(label: str, group_id: str, is_active: bool, sort_dir: s
     arrow = '↑' if sort_dir == 'asc' else '↓'
     return html.Div([
         html.Button([html.Span('▶' if collapsed else '▼', className='group-disclosure-indicator'),
-                     html.Span(label)], id={'type': 'group-collapse-btn', 'index': group_id},
+                     html.Span(label, className='group-label', title='Double-click to rename',
+                               **{'data-group-id': group_id})], id={'type': 'group-collapse-btn', 'index': group_id},
             n_clicks=0, className='group-disclosure-btn',
             **{'aria-expanded': str(not collapsed).lower(), 'aria-label': 'Expand or collapse ' + label},
             style={
