@@ -245,10 +245,16 @@ def compare_wavelengths(peak: str, standards: dict[str, float], wavelengths: lis
                        samples: list[str] | None = None, rt_tolerance: float = 0.2, ctx: Context = None) -> dict:
     """Use before calibrating PDA (3D UV) data, when asked for the best wavelength, or when calibration on the
     default channel is poor. First integrate and name the analyte in the standards ({sample: concentration}).
-    Compares supplied wavelengths or up to eight UV maxima/common wavelengths including the original channel,
-    with fixed bounds and a straight baseline. Returns ranked response, linearity/back-calculation/curvature, saturation, S/N/LOQ,
-    baseline and spectral purity/selectivity diagnostics with warnings. Only an eligible recommended channel is
-    kept in the standards and optional additional samples; existing peaks stay unchanged. Integrate its returned
+    Screens every common recorded PDA wavelength directly with fixed bounds and a straight baseline: areas in
+    all standards, top height, lowest positive standard's flank S/N, R2 and maximum back-calculated error. The
+    screen summary gives points every 10 nm plus candidates, saturation/noise/non-linearity ranges and timing.
+    Detailed evaluation uses supplied wavelengths (up to eight), or selects up to eight from S/N maxima, best
+    linearity/plateaus, absorbance maxima, unsaturated range ends and the original channel. Returns ranked
+    response, linearity/back-calculation/curvature, saturation, S/N/LOQ, baseline and selectivity diagnostics.
+    Spectral purity is a peak-level warning, not a wavelength rejection: it uses >10% apex absorbance and only
+    pixels below 1000 mAU in every spectrum used, reporting the wavelength ranges and whether assessable.
+    Only an eligible recommended channel is kept in the standards and optional additional samples; existing
+    peaks stay unchanged. Integrate its returned
     rt_start/rt_end with snap_to_valleys=False before calibrate(channel=the recommended channel). LOQ is an
     estimate in the supplied concentration units. No recommendation means all candidates failed screening."""
     return _run('compare_wavelengths', peak, standards, wavelengths, samples, rt_tolerance, ctx=ctx)

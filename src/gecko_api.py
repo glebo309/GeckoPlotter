@@ -732,10 +732,12 @@ class Workspace:
     def compare_wavelengths(self, peak: str, standards: dict, wavelengths=None, samples=None,
                            rt_tolerance: float = 0.2) -> dict:
         """Compare PDA calibration wavelengths using the highest standard's named peak window in every standard.
-        Candidates default to UV maxima, the original channel and common wavelengths (up to eight). Reports area,
-        linearity, saturation, S/N, estimated LOQ, baseline and spectral purity; rejects saturation, impurity and S/N < 10
-        before ranking by back-calculation error then slope. Only the recommended channel is retained, in the
-        standards and optional additional samples. Existing peaks are preserved; integrate the returned window
+        Screens every common recorded PDA wavelength for area, height, flank S/N and linearity; returns a compact
+        screen with ranges and timing. Up to eight detailed candidates come from response/S/N/linearity curves
+        and the original channel, or the supplied list. Rejects saturation and S/N < 10 before ranking by
+        back-calculation error then slope. Purity warns at peak level using clear (>10% apex) absorbance below
+        1000 mAU in all spectra used, with the wavelength ranges reported. Only the recommended channel is retained
+        in the standards and optional additional samples. Existing peaks are preserved; integrate the returned window
         with snap_to_valleys=False on the recommended channel before calibrating. LOQ has the standards' units.
         """
         from services.wavelength_comparison import compare_wavelengths

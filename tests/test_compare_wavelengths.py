@@ -162,3 +162,110 @@ def test_automatic_comparison_includes_the_original_peak_channel(workspace):
     workspace.integrate(1.62, 1.92, channel='263', name='Reference', snap_to_valleys=False)
     result = workspace.compare_wavelengths('Reference', standards(workspace))
     assert 263 in {r['wavelength_nm'] for r in result['wavelengths']}
+
+
+def test_full_screen_matches_scalar_areas_and_fits_at_every_recorded_wavelength(workspace):
+    from services.wavelength_comparison import _screen, _trace, _fit
+    from services.pda_service import _arrays
+    bundles = workspace._bundles()
+    arrays = [_arrays(b.primary.metadata['pda']) for b in bundles]
+    concentrations = np.array([float(b.name) for b in bundles])
+    screen = _screen(arrays, concentrations, 1.621, 1.919, 1.75)
+    assert screen['wavelengths'].tolist() == list(np.arange(200., 291.))
+    for j, nm in enumerate(screen['wavelengths']):
+        traces = [_trace(t, z[:, j], 1.621, 1.919) for t, _, z in arrays]
+        areas = np.array([r['area'] for r in traces])
+        fit, _, _ = _fit(concentrations, areas)
+        assert screen['areas'][:, j] == pytest.approx(areas, abs=1e-10)
+        assert screen['height_high'][j] == pytest.approx(traces[-1]['height'])
+        assert screen['r_squared'][j] == pytest.approx(fit['r_squared'], abs=1e-10)
+        assert screen['max_error'][j] == pytest.approx(fit['max_back_calculated_error_percent'], abs=1e-7)
+
+
+def test_screen_finds_quiet_off_maximum_band_and_returns_compact_ranges(workspace):
+    for bundle in workspace._bundles():
+        pda = bundle.primary.metadata['pda']
+        t = pda['time_min']
+        # A narrow quiet band is neither an absorbance maximum nor a fixed benchmark.
+        pda['absorbance_mau'][:, pda['wavelength_nm'] == 247] -= .049 * np.sin(t[:, None] * 179)
+    result = workspace.compare_wavelengths('PEA', standards(workspace))
+    screen = result['screen']
+    candidates = {r['wavelength_nm'] for r in result['wavelengths']}
+    assert 247 in candidates
+    assert screen['wavelength_count'] == 91
+    assert screen['range_nm'] == [200, 290]
+    points = {r['wavelength_nm']: r for r in screen['points']}
+    assert set(range(200, 291, 10)) | candidates <= points.keys()
+    assert len(points) <= 18
+    assert points[247]['candidate_reasons']
+    assert len(points[247]['areas']) == 5
+    assert screen['ranges_nm']['saturated'] == [[205, 205]]
+    assert any(a <= 280 <= b for a, b in screen['ranges_nm']['too_noisy'])
+    assert any(a <= 230 <= b for a, b in screen['ranges_nm']['non_linear'])
+    assert screen['elapsed_seconds'] >= 0
+    json.dumps(result, allow_nan=False)
+
+
+def test_purity_excludes_1000_mau_pixels_and_weak_apex_absorbance(workspace):
+    for bundle in workspace._bundles():
+        pda = bundle.primary.metadata['pda']
+        t, nm = pda['time_min'], pda['wavelength_nm']
+        profile = np.exp(-((t - 1.75) / .045) ** 2)
+        uv = nm <= 220
+        pda['absorbance_mau'][:, uv] = np.minimum(
+            float(bundle.name) * profile[:, None] * np.linspace(400, 250, uv.sum()) + 2, 1200)
+        # Weak wavelength-dependent disturbance must not dominate the correlation.
+        pda['absorbance_mau'][:, nm >= 280] += (
+            20 * np.exp(-((t[:, None] - 1.78) / .02) ** 2) * np.linspace(0, 1, (nm >= 280).sum()))
+    result = workspace.compare_wavelengths('PEA', standards(workspace), [254])
+    purity = result['purity']
+    assert not purity['impure'] and purity['assessed']
+    assert purity['min_correlation'] > .999
+    high = purity['standards'][-1]
+    assert high['excluded_saturated_wavelengths'] >= 21
+    assert high['wavelength_count'] >= 3
+    assert all(220 < a <= b < 280 for a, b in high['wavelength_ranges_nm'])
+    assert high['apex_absorbance_fraction'] == .05 and high['minimum_mau'] == 3.0
+    assert high['saturation_limit_mau'] == 1000
+
+
+def test_purity_insufficient_clear_pixels_is_unassessed(workspace):
+    for bundle in workspace._bundles():
+        bundle.primary.metadata['pda']['absorbance_mau'] += 2000
+    result = workspace.compare_wavelengths('PEA', standards(workspace), [254])
+    purity = result['purity']
+    assert not purity['assessed'] and purity['min_correlation'] is None
+    assert all(r['wavelength_ranges_nm'] == [] for r in purity['standards'])
+    assert any('could not be assessed' in w for w in result['warnings'])
+
+
+def test_purity_requires_all_three_spectral_pairs_to_be_assessable(workspace):
+    from services.wavelength_comparison import _purity
+    for bundle in workspace._bundles():
+        component, peak = workspace._find_peak(bundle, 'PEA')
+        pda = bundle.primary.metadata['pda']
+        row = _purity(workspace, bundle, component, peak, pda, 1.62, 1.92)
+        t, z = pda['time_min'], pda['absorbance_mau']
+        scan = np.argmin(abs(t - row['times_min'][0]))
+        lo, hi = [np.argmin(abs(t - ti)) for ti in (1.62, 1.92)]
+        weight = (t[scan] - t[lo]) / (t[hi] - t[lo])
+        z[scan] = (1 - weight) * z[lo] + weight * z[hi]
+    result = workspace.compare_wavelengths('PEA', standards(workspace), [254])
+    assert not result['purity']['assessed']
+    assert any('could not be assessed' in w for w in result['warnings'])
+
+
+def test_screen_preserves_float32_precision_at_interpolated_endpoints(workspace):
+    from services.wavelength_comparison import _screen, _trace
+    from services.pda_service import _arrays
+    bundles = workspace._bundles()
+    for bundle in bundles:
+        pda = bundle.primary.metadata['pda']
+        pda['absorbance_mau'] = pda['absorbance_mau'].astype(np.float32)
+    arrays = [_arrays(b.primary.metadata['pda']) for b in bundles]
+    concentrations = np.array([float(b.name) for b in bundles])
+    screen = _screen(arrays, concentrations, 1.62131, 1.91971, 1.75)
+    for j in [5, 30, 54]:
+        for i, (t, _, z) in enumerate(arrays):
+            scalar = _trace(t, z[:, j].astype(float), 1.62131, 1.91971)
+            assert screen['areas'][i, j] == pytest.approx(scalar['area'], abs=1e-10)
