@@ -132,7 +132,8 @@ def test_the_mcp_server_offers_the_tools():
     names = {tool.name for tool in asyncio.run(gecko_mcp.server.list_tools())}
     assert {'open_data', 'list_samples', 'detect_peaks', 'integrate', 'peak_table', 'extract_ion_chromatogram',
             'mass_spectrum', 'figure', 'save_project', 'export_results', 'calibrate', 'list_calibrations',
-            'remove_calibration', 'remove_peak', 'identify_agent'} <= names
+            'remove_calibration', 'remove_peak', 'identify_agent', 'analysis_guide'} <= names
+    assert 'analysis_guide' in gecko_mcp.server.instructions
 
 
 def test_an_integration_window_on_the_flanks_takes_the_whole_peak(sequence):
@@ -359,3 +360,10 @@ def test_live_mode_opens_the_tab_of_the_call(sequence):
     model = next(iter(ws.store.calibration_service.get_all_models().values()))
     assert view == {'results': 'calibration', 'calibration': model.model_id}
     assert focus(ws, 'eic', [ION, 0.5], {}, ws.eic(ION, 0.5))['side'] == 'ms-eic'
+
+
+def test_the_analysis_guides_answer_the_judgement_calls():
+    from services.agent_guide import TOPICS, guide
+    assert {'wavelength', 'integration', 'deconvolution', 'calibration', 'identification', 'conversion'} <= set(TOPICS)
+    assert 'saturat' in guide('Wavelength')['guide'] and '15 %' in guide('calibration')['guide']
+    assert 'Topics' in guide('nope')['error']

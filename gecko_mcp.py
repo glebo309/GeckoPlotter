@@ -38,7 +38,9 @@ server = MCPServer(
         'Single-quadrupole m/z values are read about 0.4-0.5 below the exact mass. Samples with PDA data hold the '
         'whole UV range: list_samples shows pda=true; add_uv_channel reads any wavelength, uv_spectrum a spectrum. '
         'When GeckoPlotter is open, the tools work in it and the user sees every step; otherwise in a workspace of '
-        'its own. First call identify_agent with your model name: changes are recorded as made by an MCP agent. To quantify, '
+        'its own. Before a judgement call read analysis_guide(topic): wavelength (choosing the detection wavelength), '
+        'integration, deconvolution, calibration (acceptance and outliers), identification (LC-MS ions), conversion. '
+        'First call identify_agent with your model name: changes are recorded as made by an MCP agent. To quantify, '
         'integrate a peak in the standards and call calibrate with {sample: concentration}; read its warnings.'),
 )
 workspace = Workspace()
@@ -127,6 +129,14 @@ def identify_agent(model: str, ctx: Context = None) -> dict:
     MODEL['model'] = model.strip()[:80]
     _identify(ctx)
     return {'recorded': workspace.agent}
+
+
+@server.tool()
+def analysis_guide(topic: str) -> dict:
+    """How an analytical chemist decides, with the numbers that decide: read it before the judgement call.
+    Topics: wavelength, integration, deconvolution, calibration, identification, conversion."""
+    from services.agent_guide import guide
+    return guide(topic)
 
 
 @server.tool()
