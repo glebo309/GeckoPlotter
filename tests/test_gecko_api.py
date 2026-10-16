@@ -285,7 +285,8 @@ def test_live_mode_follows_the_agent_to_its_channel_and_view(sequence):
     ws.store.visibility_state[ws.store.peak_owner_id(tic.component_id)] = False     # the user shows UV only
     rows = ws.integrate(8.2, 8.6, samples='4', channel='+TIC', name='m634')
     view = focus(ws, 'integrate', [8.2, 8.6, '4', '+TIC', 'm634'], {}, rows)
-    assert view == {'active': tic.component_id, 'results': 'peak-analysis'}
+    assert view['active'] == tic.component_id and view['results'] == 'peak-analysis'
+    assert view['zoom'][0] < rows[0]['rt_start'] and view['zoom'][1] > rows[0]['rt_end']      # the plot zooms there
     assert ws.store.visibility_state[ws.store.peak_owner_id(tic.component_id)] is True
     view = focus(ws, 'mass_spectrum', ['4'], {'rt': 8.4}, ws.mass_spectrum('4', rt=8.4))
     assert view['side'] == 'ms-scan' and abs(TIMES[view['scan']] - 8.4) < 0.03
