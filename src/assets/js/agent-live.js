@@ -48,7 +48,7 @@
     // -- on the plot while the agent works: large drops in its bottom-right corner and a moving band along its top ----
     var stage = null;
     function plotStage() {
-        if (stage) return stage;
+        if (stage || !document.body) return stage;
         stage = document.createElement('div');
         stage.className = 'agent-live-stage';
         stage.setAttribute('aria-hidden', 'true');
@@ -62,11 +62,13 @@
         return stage;
     }
     function placeStage(working) {
-        var gd = (window.geckoActivePlot && window.geckoActivePlot()) || document.getElementById('main-plot');
+        var gd = (window.geckoActivePlot && window.geckoActivePlot()) ||
+            (document.getElementById && document.getElementById('main-plot'));
         var box = gd && gd.querySelector ? (gd.querySelector('.nsewdrag') || gd) : null;
         var rect = box && box.getBoundingClientRect ? box.getBoundingClientRect() : null;
         var on = working && current.here && rect && rect.width > 40 && rect.height > 40;
         var node = plotStage();
+        if (!node) return;
         node.classList.toggle('on', !!on);
         if (!on) return;
         node.style.left = rect.left + 'px'; node.style.top = rect.top + 'px';
@@ -164,7 +166,7 @@
     // detector range, as the screen does; when it is done the view goes to the chosen wavelength.
     var sweeping = null;
     function pdaRange() {                                             // the wavelengths the PDA view's heatmap holds
-        var heat = document.querySelector('#pda-heatmap .js-plotly-plot');
+        var heat = document.querySelector && document.querySelector('#pda-heatmap .js-plotly-plot');
         var ys = heat && heat.data && heat.data[0] && Array.from(heat.data[0].y || []);
         return ys && ys.length ? [Math.min.apply(null, ys), Math.max.apply(null, ys)] : null;
     }
