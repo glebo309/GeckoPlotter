@@ -130,7 +130,8 @@ class LiveAgent:
         if self.stopped:
             raise LiveRefused('Stopped in GeckoPlotter: click Stop again in the status bar to let the agent work.')
         if not self.target:
-            raise LiveRefused('No GeckoPlotter window has been used yet.')
+            raise LiveRefused(f'GeckoPlotter runs but no window is open: ask the user to open http://127.0.0.1:{self.port} '
+                              'in the browser.')
         with self._lock:                                    # one agent call at a time
             workspace = self.workspace(self.target)
             agent = dict(agent or {})
