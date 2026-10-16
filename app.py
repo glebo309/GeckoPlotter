@@ -1434,7 +1434,7 @@ _layout_body = html.Div(
                     children=[
                         html.Span(id='status-text', children='Ready'),
                         html.Div(style={'flex': 1}),
-                        html.Span(id='agent-live', className='agent-live', hidden=True),   # assets/js/agent-live.js
+                        html.Span(id='agent-live', className='agent-live'),   # assets/js/agent-live.js
                         create_session_status(),
                         html.Span(id='file-info', children='No files loaded'),
                         html.Button(

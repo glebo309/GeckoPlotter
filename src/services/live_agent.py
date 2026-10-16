@@ -23,6 +23,7 @@ from typing import Any, Dict, Optional
 log = logging.getLogger(__name__)
 
 CALL, STATE, HERE, STOP = '/_gecko/agent/call', '/_gecko/agent/state', '/_gecko/agent/here', '/_gecko/agent/stop'
+HELLO = '/_gecko/agent/hello'
 LOOPBACK = {'127.0.0.1', '::1', '::ffff:127.0.0.1'}
 
 # The Workspace methods an agent may call: every tool of gecko_mcp.py, nothing else.
@@ -77,6 +78,8 @@ class LiveAgent:
         self.done_at = 0.0
         self._workspaces: Dict[str, Any] = {}
         self._lock = threading.Lock()
+        self._connections: Dict[int, tuple[str, float]] = {}
+        self._connections_lock = threading.Lock()          # heartbeats must not wait for a tool call
 
     # -- the live file ---------------------------------------------------------------------------------------------
 
@@ -110,8 +113,17 @@ class LiveAgent:
         self.write_file()
 
     def state(self, sid: Optional[str]) -> dict:
+        with self._connections_lock:
+            cutoff = time.monotonic() - 30
+            self._connections = {pid: entry for pid, entry in self._connections.items() if entry[1] > cutoff}
+            connected = list(dict.fromkeys(label for label, _seen in self._connections.values()))
         return {'version': self.version, 'busy': self.busy, 'agent': self.agent, 'doing': self.doing,
-                'stopped': self.stopped, 'here': bool(sid and sid == self.target), 'done_at': self.done_at}
+                'stopped': self.stopped, 'here': bool(sid and sid == self.target), 'done_at': self.done_at,
+                'connected': connected}
+
+    def hello(self, pid: int, label: str) -> None:
+        with self._connections_lock:
+            self._connections[pid] = (label, time.monotonic())
 
     # -- a call ----------------------------------------------------------------------------------------------------
 
@@ -168,6 +180,23 @@ def install(server, registry, port: int, folder: Optional[Path] = None) -> LiveA
         sid = request.cookies.get(COOKIE)
         return sid if valid_session_id(sid) else None
 
+    def allowed():
+        return request.remote_addr in LOOPBACK and secrets.compare_digest(
+            request.headers.get('X-Gecko-Key', ''), live.key)
+
+    @server.route(HELLO, methods=['POST'])
+    def _agent_hello():
+        if not allowed():
+            return jsonify({'refused': 'Not allowed'}), 403
+        body = request.get_json(silent=True)
+        if not isinstance(body, dict):
+            return jsonify({'refused': 'Expected process id and agent label'}), 400
+        pid, label = body.get('id'), body.get('agent', 'Agent')
+        if type(pid) is not int or pid <= 0 or not isinstance(label, str):
+            return jsonify({'refused': 'Expected process id and agent label'}), 400
+        live.hello(pid, label.strip() or 'Agent')
+        return ('', 204)
+
     @server.route(STATE, methods=['GET'])
     def _agent_state():
         return jsonify(live.state(page_sid()))
@@ -184,8 +213,7 @@ def install(server, registry, port: int, folder: Optional[Path] = None) -> LiveA
 
     @server.route(CALL, methods=['POST'])
     def _agent_call():
-        if request.remote_addr not in LOOPBACK or not secrets.compare_digest(
-                request.headers.get('X-Gecko-Key', ''), live.key):
+        if not allowed():
             return jsonify({'refused': 'Not allowed'}), 403
         body = request.get_json(silent=True) or {}
         g.gecko_sid = live.target                           # services that use the app's store see the target tab's
