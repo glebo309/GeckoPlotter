@@ -38,7 +38,9 @@ server = MCPServer(
         'Single-quadrupole m/z values are read about 0.4-0.5 below the exact mass. Samples with PDA data hold the '
         'whole UV range: list_samples shows pda=true; add_uv_channel reads any wavelength, uv_spectrum a spectrum. '
         'When GeckoPlotter is open, the tools work in it and the user sees every step; otherwise in a workspace of '
-        'its own. Before a judgement call read analysis_guide(topic): wavelength (choosing the detection wavelength), '
+        'its own. Do the analysis with these tools, not with scripts or by reading the data files yourself: what '
+        'a tool does is what the user sees and can check in the app. If a tool is missing, say so instead of working '
+        'around it. Before a judgement call read analysis_guide(topic): wavelength (choosing the detection wavelength), '
         'integration, deconvolution, calibration (acceptance and outliers), identification (LC-MS ions), conversion. '
         'First call identify_agent with your model name: changes are recorded as made by an MCP agent. To quantify, '
         'integrate a peak in the standards and call calibrate with {sample: concentration}; read its warnings.'),
@@ -242,22 +244,17 @@ def remove_calibration(name: str, ctx: Context = None) -> list:
 
 @server.tool()
 def compare_wavelengths(peak: str, standards: dict[str, float], wavelengths: list[float] | None = None,
-                       samples: list[str] | None = None, rt_tolerance: float = 0.2, ctx: Context = None) -> dict:
-    """Use before calibrating PDA (3D UV) data, when asked for the best wavelength, or when calibration on the
-    default channel is poor. First integrate and name the analyte in the standards ({sample: concentration}).
-    Screens every common recorded PDA wavelength directly with fixed bounds and a straight baseline: areas in
-    all standards, top height, lowest positive standard's flank S/N, R2 and maximum back-calculated error. The
-    screen summary gives points every 10 nm plus candidates, saturation/noise/non-linearity ranges and timing.
-    Detailed evaluation uses supplied wavelengths (up to eight), or selects up to eight from S/N maxima, best
-    linearity/plateaus, absorbance maxima, unsaturated range ends and the original channel. Returns ranked
-    response, linearity/back-calculation/curvature, saturation, S/N/LOQ, baseline and selectivity diagnostics.
-    Spectral purity is a peak-level warning, not a wavelength rejection: it uses >10% apex absorbance and only
-    pixels below 1000 mAU in every spectrum used, reporting the wavelength ranges and whether assessable.
-    Only an eligible recommended channel is kept in the standards and optional additional samples; existing
-    peaks stay unchanged. Integrate its returned
-    rt_start/rt_end with snap_to_valleys=False before calibrate(channel=the recommended channel). LOQ is an
-    estimate in the supplied concentration units. No recommendation means all candidates failed screening."""
-    return _run('compare_wavelengths', peak, standards, wavelengths, samples, rt_tolerance, ctx=ctx)
+                        samples: list[str] | None = None, rt_tolerance: float = 0.2, detail: bool = False,
+                        ctx: Context = None) -> dict:
+    """Choose the detection wavelength for a calibration from PDA data: use it before calibrating PDA data, when asked
+    for the best wavelength, or when a calibration is poor. Integrate and name the analyte in the standards first
+    ({sample: concentration}). Every recorded wavelength is screened with one fixed window and a straight baseline;
+    the best candidates are ranked: saturated or S/N < 10 are rejected, linearity within 3 points is a tie that S/N
+    decides. Returns the recommendation, the top candidates (height of the top standard, S/N and LOQ of the lowest,
+    R2, max back-calculated error), the screen's saturated/noisy/non-linear ranges, peak purity and warnings.
+    Then integrate rt_start-rt_end on the recommended channel with snap_to_valleys=False and calibrate there.
+    detail=True returns everything (long). The user's PDA view sweeps the range and ends on the choice."""
+    return _run('compare_wavelengths', peak, standards, wavelengths, samples, rt_tolerance, detail, ctx=ctx)
 
 
 @server.tool()

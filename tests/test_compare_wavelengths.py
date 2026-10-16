@@ -39,7 +39,7 @@ def test_ranks_linearity_after_saturation_and_noise_and_preserves_workspace(work
     ws = workspace
     old_peaks = ws.peaks()
     old_ids = {c.component_id for b in ws._bundles() for c in b.component_list}
-    result = ws.compare_wavelengths('PEA', standards(ws), [205, 230, 254, 280])
+    result = ws.compare_wavelengths('PEA', standards(ws), [205, 230, 254, 280], detail=True)
     rows = {r['wavelength_nm']: r for r in result['wavelengths']}
     assert result['recommendation']['wavelength_nm'] == 254
     assert result['recommendation']['eligible']
@@ -58,7 +58,7 @@ def test_ranks_linearity_after_saturation_and_noise_and_preserves_workspace(work
     assert ws.peaks() == old_peaks
     new_ids = {c.component_id for b in ws._bundles() for c in b.component_list} - old_ids
     assert len(new_ids) == 5
-    ws.compare_wavelengths('PEA', standards(ws), [205, 230, 254, 280])
+    ws.compare_wavelengths('PEA', standards(ws), [205, 230, 254, 280], detail=True)
     assert {c.component_id for b in ws._bundles() for c in b.component_list} == old_ids | new_ids
     json.dumps(result, allow_nan=False)
 
@@ -69,7 +69,7 @@ def test_automatic_candidates_and_agent_focus(workspace):
         pda['absorbance_mau'] += (float(bundle.name) * 50 *
             np.exp(-((pda['time_min'][:, None] - 1.75) / .045) ** 2) *
             np.exp(-((pda['wavelength_nm'] - 268) / 2) ** 2))
-    result = workspace.compare_wavelengths('PEA', standards(workspace))
+    result = workspace.compare_wavelengths('PEA', standards(workspace), detail=True)
     candidates = {r['wavelength_nm'] for r in result['wavelengths']}
     assert 254 in candidates and 205 in candidates and len(candidates) <= 8
     assert 268 in candidates  # Weaker analyte maxima must not all be crowded out by fixed points.
@@ -88,7 +88,7 @@ def test_spectral_change_and_neighbour_are_reported(workspace):
         contaminant = 300 * np.exp(-((nm - 240) / 8) ** 2)
         pda['absorbance_mau'] += np.exp(-((t[:, None] - 1.79) / .025) ** 2) * contaminant
         pda['absorbance_mau'] += 50 * np.exp(-((t[:, None] - 2.08) / .025) ** 2)
-    result = workspace.compare_wavelengths('PEA', standards(workspace), [254])
+    result = workspace.compare_wavelengths('PEA', standards(workspace), [254], detail=True)
     row = result['wavelengths'][0]
     assert row['purity']['impure']                       # the peak's purity warns; it does not reject a wavelength
     assert row['selectivity']['neighbours'][0]['relative_height'] > 0
@@ -99,23 +99,23 @@ def test_spectral_change_and_neighbour_are_reported(workspace):
 def test_invalid_wavelengths_do_not_mutate(workspace, wavelengths):
     before = workspace.samples()
     with pytest.raises(GeckoError):
-        workspace.compare_wavelengths('PEA', standards(workspace), wavelengths)
+        workspace.compare_wavelengths('PEA', standards(workspace), wavelengths, detail=True)
     assert workspace.samples() == before
 
 
 def test_missing_peak_and_shifted_standards_are_not_silently_dropped(workspace):
     with pytest.raises(GeckoError, match='peak'):
-        workspace.compare_wavelengths('Absent', standards(workspace))
+        workspace.compare_wavelengths('Absent', standards(workspace), detail=True)
     workspace.store.peak_service.get_peaks('1.0-uv')[0].rt += .4
     with pytest.raises(GeckoError, match='tolerance'):
-        workspace.compare_wavelengths('PEA', standards(workspace))
+        workspace.compare_wavelengths('PEA', standards(workspace), detail=True)
 
 
 def test_saturated_spectral_pixels_do_not_reject_an_unsaturated_channel(workspace):
     for bundle in workspace._bundles():
         matrix = bundle.primary.metadata['pda']['absorbance_mau']
         np.minimum(matrix, 1800, out=matrix)
-    result = workspace.compare_wavelengths('PEA', standards(workspace), [205, 254])
+    result = workspace.compare_wavelengths('PEA', standards(workspace), [205, 254], detail=True)
     assert result['recommendation']['wavelength_nm'] == 254
     assert result['wavelengths'][0]['purity']['excluded_saturated_wavelengths'] > 0
 
@@ -124,7 +124,7 @@ def test_neighbour_inside_the_integration_window_is_not_hidden(workspace):
     for bundle in workspace._bundles():
         pda = bundle.primary.metadata['pda']
         pda['absorbance_mau'] += 30 * np.exp(-((pda['time_min'][:, None] - 1.86) / .009) ** 2)
-    result = workspace.compare_wavelengths('PEA', standards(workspace), [254])
+    result = workspace.compare_wavelengths('PEA', standards(workspace), [254], detail=True)
     neighbours = result['wavelengths'][0]['selectivity']['neighbours']
     assert any(abs(n['rt'] - 1.86) < .01 for n in neighbours)
 
@@ -133,7 +133,7 @@ def test_low_wavelength_baseline_warns_of_solvent_absorbance(workspace):
     for bundle in workspace._bundles():
         pda = bundle.primary.metadata['pda']
         pda['absorbance_mau'][:, pda['wavelength_nm'] == 205] += 60
-    row = workspace.compare_wavelengths('PEA', standards(workspace), [205])['wavelengths'][0]
+    row = workspace.compare_wavelengths('PEA', standards(workspace), [205], detail=True)['wavelengths'][0]
     assert row['baseline']['gradient_or_solvent']
 
 
@@ -142,8 +142,8 @@ def test_mcp_forwards_comparison_parameters(monkeypatch):
     from unittest.mock import Mock
     run = Mock(return_value={'recommendation': None})
     monkeypatch.setattr(gecko_mcp, '_run', run)
-    assert gecko_mcp.compare_wavelengths('PEA', {'a': 1, 'b': 2}, [254], ['unknown'], .1) == run.return_value
-    run.assert_called_once_with('compare_wavelengths', 'PEA', {'a': 1, 'b': 2}, [254], ['unknown'], .1, ctx=None)
+    assert gecko_mcp.compare_wavelengths('PEA', {'a': 1, 'b': 2}, [254], ['unknown'], .1, detail=True) == run.return_value
+    run.assert_called_once_with('compare_wavelengths', 'PEA', {'a': 1, 'b': 2}, [254], ['unknown'], .1, True, ctx=None)
 
 
 def test_failure_after_extraction_leaves_no_channels_or_visibility_changes(workspace):
@@ -151,7 +151,7 @@ def test_failure_after_extraction_leaves_no_channels_or_visibility_changes(works
     visibility = dict(workspace.store.visibility_state)
     workspace._bundles()[-1].primary.metadata['pda']['absorbance_mau'][875, 54] = np.nan
     with pytest.raises(GeckoError, match='nonfinite'):
-        workspace.compare_wavelengths('PEA', standards(workspace), [205, 254])
+        workspace.compare_wavelengths('PEA', standards(workspace), [205, 254], detail=True)
     assert workspace.samples() == before
     assert workspace.store.visibility_state == visibility
 
@@ -160,7 +160,7 @@ def test_automatic_comparison_includes_the_original_peak_channel(workspace):
     workspace.remove_peak(None, 'PEA')  # Avoid cross-channel group renaming of the fixture's original peak.
     workspace.add_uv_channel(263)
     workspace.integrate(1.62, 1.92, channel='263', name='Reference', snap_to_valleys=False)
-    result = workspace.compare_wavelengths('Reference', standards(workspace))
+    result = workspace.compare_wavelengths('Reference', standards(workspace), detail=True)
     assert 263 in {r['wavelength_nm'] for r in result['wavelengths']}
 
 
@@ -188,7 +188,7 @@ def test_screen_finds_quiet_off_maximum_band_and_returns_compact_ranges(workspac
         t = pda['time_min']
         # A narrow quiet band is neither an absorbance maximum nor a fixed benchmark.
         pda['absorbance_mau'][:, pda['wavelength_nm'] == 247] -= .049 * np.sin(t[:, None] * 179)
-    result = workspace.compare_wavelengths('PEA', standards(workspace))
+    result = workspace.compare_wavelengths('PEA', standards(workspace), detail=True)
     screen = result['screen']
     candidates = {r['wavelength_nm'] for r in result['wavelengths']}
     assert 247 in candidates
@@ -217,7 +217,7 @@ def test_purity_excludes_1000_mau_pixels_and_weak_apex_absorbance(workspace):
         # Weak wavelength-dependent disturbance must not dominate the correlation.
         pda['absorbance_mau'][:, nm >= 280] += (
             20 * np.exp(-((t[:, None] - 1.78) / .02) ** 2) * np.linspace(0, 1, (nm >= 280).sum()))
-    result = workspace.compare_wavelengths('PEA', standards(workspace), [254])
+    result = workspace.compare_wavelengths('PEA', standards(workspace), [254], detail=True)
     purity = result['purity']
     assert not purity['impure'] and purity['assessed']
     assert purity['min_correlation'] > .999
@@ -232,7 +232,7 @@ def test_purity_excludes_1000_mau_pixels_and_weak_apex_absorbance(workspace):
 def test_purity_insufficient_clear_pixels_is_unassessed(workspace):
     for bundle in workspace._bundles():
         bundle.primary.metadata['pda']['absorbance_mau'] += 2000
-    result = workspace.compare_wavelengths('PEA', standards(workspace), [254])
+    result = workspace.compare_wavelengths('PEA', standards(workspace), [254], detail=True)
     purity = result['purity']
     assert not purity['assessed'] and purity['min_correlation'] is None
     assert all(r['wavelength_ranges_nm'] == [] for r in purity['standards'])
@@ -250,7 +250,7 @@ def test_purity_requires_all_three_spectral_pairs_to_be_assessable(workspace):
         lo, hi = [np.argmin(abs(t - ti)) for ti in (1.62, 1.92)]
         weight = (t[scan] - t[lo]) / (t[hi] - t[lo])
         z[scan] = (1 - weight) * z[lo] + weight * z[hi]
-    result = workspace.compare_wavelengths('PEA', standards(workspace), [254])
+    result = workspace.compare_wavelengths('PEA', standards(workspace), [254], detail=True)
     assert not result['purity']['assessed']
     assert any('could not be assessed' in w for w in result['warnings'])
 
@@ -269,3 +269,13 @@ def test_screen_preserves_float32_precision_at_interpolated_endpoints(workspace)
         for i, (t, _, z) in enumerate(arrays):
             scalar = _trace(t, z[:, j].astype(float), 1.62131, 1.91971)
             assert screen['areas'][i, j] == pytest.approx(scalar['area'], abs=1e-10)
+
+
+def test_the_default_answer_is_short_enough_for_an_agent(workspace):
+    """The full result is tens of thousands of characters: an agent's client saves such an answer to a file and the
+    agent ends up parsing it in a shell. The default is the compact summary."""
+    import json
+    result = workspace.compare_wavelengths('PEA', standards(workspace))
+    assert len(json.dumps(result, default=str)) < 12000
+    assert {'recommendation', 'candidates', 'screen', 'purity', 'warnings'} <= set(result)
+    assert 'standards' not in result['candidates'][0] and result['screen']['ranges_nm'] is not None

@@ -463,3 +463,26 @@ def compare_wavelengths(ws, peak, standards, wavelengths, samples, rt_tolerance)
             'reference_sample': reference[1].name, 'wavelengths': rows, 'recommendation': recommendation,
             'purity': purity, 'screen': _screen_summary(screen, runs, selection, screen_elapsed),
             'warnings': warnings + [f"{r['wavelength_nm']:g} nm: {w}" for r in rows for w in r['warnings']]}
+
+
+def compact(result: dict, top: int = 5) -> dict:
+    """What an agent needs to decide and explain, in a few thousand characters: the recommendation, the best
+    candidates with their deciding numbers, the screen's ranges and a point every 20 nm, purity and warnings. The
+    full result (per-standard tables, every screen point) is detail=True."""
+    keys = ('rank', 'wavelength_nm', 'eligible', 'height_high_mau', 'saturated', 'snr_low', 'loq_estimate',
+            'r_squared', 'max_back_calculated_error_percent', 'slope', 'warnings')
+    screen = result.get('screen') or {}
+    points = [{k: p.get(k) for k in ('wavelength_nm', 'height_high_mau', 'snr_low', 'r_squared',
+                                       'max_back_calculated_error_percent')}
+              for p in screen.get('points', []) if p.get('candidate_reasons') or round(p['wavelength_nm']) % 20 == 0]
+    purity = result.get('purity') or {}
+    return {
+        'peak': result.get('peak'), 'rt_start': result.get('rt_start'), 'rt_end': result.get('rt_end'),
+        'baseline_rule': result.get('baseline_rule'), 'recommendation': result.get('recommendation'),
+        'candidates': [{k: row.get(k) for k in keys} for row in (result.get('wavelengths') or [])[:top]],
+        'screen': {'range_nm': screen.get('range_nm'), 'wavelength_count': screen.get('wavelength_count'),
+                   'ranges_nm': screen.get('ranges_nm'), 'thresholds': screen.get('thresholds'), 'points': points},
+        'purity': {k: purity.get(k) for k in ('min_correlation', 'impure', 'assessed')},
+        'warnings': [w for w in (result.get('warnings') or []) if not w[:1].isdigit()][:8],
+        'more': 'compare_wavelengths(..., detail=True) returns every candidate, per-standard areas and the full screen.',
+    }
