@@ -298,3 +298,12 @@ def test_after_the_agent_only_its_uv_channel_is_shown_in_every_sample(workspace)
              if channel_identity(c) and str(channel_identity(c)[0]).startswith('uv:')
              and store.visibility_state.get(store.peak_owner_id(c.component_id), True)}
     assert len(shown) == 1 and '263' in next(iter(shown))
+
+
+def test_the_pda_view_follows_a_deconvolution_to_its_first_component(workspace):
+    from services.live_focus import focus
+    workspace.add_uv_channel(263)
+    rows = workspace.deconvolve(1.62, 1.92, channel='263', n_peaks=2, names=['Shoulder', 'Main'])
+    view = focus(workspace, 'deconvolve', [1.62, 1.92], {'channel': '263'}, rows)
+    first = next(r for r in rows if not r.get('error'))['components'][0]
+    assert view['pda_follow']['time'] == (first.get('apex_rt') or first.get('rt'))
