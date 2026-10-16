@@ -145,18 +145,11 @@ def test_bundle_visibility_includes_primary_without_selecting(monkeypatch):
     assert set(hidden) == {'sample', 'tic', 'uv'}
 
 
-def test_clear_all_callback_offers_undo(monkeypatch):
+def test_clear_all_callback_is_removed():
     from callbacks.upload_callbacks import register_clear_callbacks
-    store = populated()
     app = dash.Dash(__name__)
-    register_clear_callbacks(app, store)
-    callback = next(cb['callback'].__wrapped__ for cb in app.callback_map.values()
-                    if cb['callback'].__wrapped__.__name__ == 'clear_all_files')
-    result = callback(1, 'tic', 0)
-    assert result[0] == []
-    assert result[7] == {'display': 'flex'}
-    assert result[9] is False
-    assert store.file_removal_service.undo().active_file == 'tic'
+    register_clear_callbacks(app, populated())
+    assert all(dep['id'] != 'clear-files-btn' for cb in app.callback_map.values() for dep in cb['inputs'])
 
 
 def test_tree_rows_are_keyboard_selectable_and_controls_announce_expansion():
