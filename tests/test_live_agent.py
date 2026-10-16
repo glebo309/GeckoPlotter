@@ -80,3 +80,16 @@ def test_status_bar_text():
     assert live_agent.describe('integrate', [10.4, 11.2]) == 'integrating 10.4-11.2 min'
     assert live_agent.describe('open', ['/Users/x/Desktop/run 7']) == 'opening run 7'
     assert live_agent.describe('rename_peak', []) == 'renaming'
+    assert live_agent.describe('remove_peak', [None, 'alanine']) == 'removing alanine'
+
+
+def test_remove_peak_is_a_live_mutation_that_redraws_the_page(app, monkeypatch):
+    _server, _registry, live, client = app
+    client.post(live_agent.HERE)
+    calls = []
+    monkeypatch.setattr(live.workspace(SID), 'remove_peak', lambda *args: calls.append(args) or [])
+    result = _call(client, live, 'remove_peak', None, 'alanine')
+    assert result.status_code == 200 and result.get_json() == {'result': []}
+    assert calls == [(None, 'alanine')]
+    state = client.get(live_agent.STATE).get_json()
+    assert state['version'] == 1 and state['doing'] == 'removing alanine'

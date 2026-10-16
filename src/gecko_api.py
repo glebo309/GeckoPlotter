@@ -68,6 +68,35 @@ def _valleys(x, y, rt_start: float, rt_end: float, reach: float = 0.5):
     return walk(rt_start, -1), walk(rt_end, +1)
 
 
+def _baseline_noise(x, y, rt_start: float, rt_end: float) -> float:
+    """Robust noise of this channel, including slow baseline fluctuations in smoothed detector traces.
+    Use first differences and the flanks (two window widths on either side, excluding the peak). Start the trend
+    at the flank halves' medians, then refit without outliers so neighbouring narrow peaks do not set the slope."""
+    keep = np.isfinite(x) & np.isfinite(y)
+    x, y = x[keep], y[keep]
+    order = np.argsort(x)
+    x, y = x[order], y[order]
+
+    def mad(values):
+        return float(np.median(np.abs(values - np.median(values))) / 0.67448975) if len(values) else 0.0
+
+    noise = mad(np.diff(y)) / np.sqrt(2)
+    width = rt_end - rt_start
+    flank = ((x >= rt_start - 2 * width) & (x < rt_start)) | ((x > rt_end) & (x <= rt_end + 2 * width))
+    bx, by = x[flank], y[flank]
+    if len(bx) >= 6:
+        half = len(bx) // 2
+        x1, x2 = np.median(bx[:half]), np.median(bx[half:])
+        y1, y2 = np.median(by[:half]), np.median(by[half:])
+        if x2 > x1:
+            residual = by - (y1 + (bx - x1) * (y2 - y1) / (x2 - x1))
+            background = np.abs(residual - np.median(residual)) <= 3 * mad(residual)
+            if np.count_nonzero(background) >= 6 and np.ptp(bx[background]) > 0:
+                residual = by - np.polyval(np.polyfit(bx[background], by[background], 1), bx)
+            noise = max(noise, mad(residual))
+    return float(noise)
+
+
 def _ions(mz, intensity, top: int, merge: float = 0.6) -> List[dict]:
     """The ``top`` most intense ions: apices of the spectrum, a weaker apex within ``merge`` m/z of a stronger one
     being the same ion (unit-resolution profile points, isotopes are kept: they are 1 m/z apart)."""
@@ -344,7 +373,8 @@ class Workspace:
                   snap_to_valleys: bool = True) -> List[dict]:
         """Integrate a peak with a straight baseline drawn on the curve, as in the plot. Each end walks down the slope
         to the nearest valley (at most 0.5 min), so a window that starts on the peak's flank still takes the whole
-        peak; ``snap_to_valleys=False`` keeps the given times. Returns the new peaks."""
+        peak; ``snap_to_valleys=False`` keeps the given times. Heights below three times the channel's robust
+        baseline noise are refused. Returns the new peaks or a per-sample error."""
         from callbacks.baseline_callbacks import _area_with_constraints
         if rt_end <= rt_start:
             raise GeckoError('rt_end must be after rt_start.')
@@ -358,6 +388,10 @@ class Workspace:
             if not result:
                 out.append({'sample': bundle.name, 'channel': bundle.component_display_name(component),
                             'error': 'Nothing above the baseline between these times.'})
+                continue
+            if result['height'] < 3 * _baseline_noise(x, y, *times):
+                out.append({'sample': bundle.name, 'channel': bundle.component_display_name(component),
+                            'error': f'No peak above the noise between {rt_start:g} and {rt_end:g} min'})
                 continue
             self.store.peak_service.save_undo()
             peak = self.store.peak_service.add_baseline_peak(
@@ -386,6 +420,24 @@ class Workspace:
         component, found = self._find_peak(bundle, peak)
         self.store.peak_service.rename_peak(component.component_id, found.peak_id, new_name)
         self._record(f'Renamed peak {found.name} to {new_name}')
+        return self.peaks()
+
+    def remove_peak(self, sample, peak: str) -> List[dict]:
+        """Delete a peak by name or id, as in the app; sample=None removes it from every sample that has it.
+        The whole deletion is one undo step. Returns the remaining peak table."""
+        targets = []
+        for bundle in self._bundles() if sample is None else [self._sample(sample)]:
+            try:
+                component, found = self._find_peak(bundle, peak)
+            except GeckoError:
+                if sample is not None:
+                    raise
+                continue
+            targets.append((component.component_id, found.peak_id))
+        if not targets:
+            raise GeckoError(f'No peak "{peak}" in the loaded samples.')
+        self.store.peak_service.delete_peaks(targets, file_overlay_map=self.store.build_file_overlay_map())
+        self._record(f'Removed peak {peak} from {sample if sample is not None else "every sample"}')
         return self.peaks()
 
     def _find_peak(self, bundle, peak):

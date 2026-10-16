@@ -26,7 +26,7 @@ CALL, STATE, HERE, STOP = '/_gecko/agent/call', '/_gecko/agent/state', '/_gecko/
 LOOPBACK = {'127.0.0.1', '::1', '::ffff:127.0.0.1'}
 
 # The Workspace methods an agent may call: every tool of gecko_mcp.py, nothing else.
-METHODS = {'open', 'samples', 'detect_peaks', 'integrate', 'peaks', 'rename_peak', 'calibrate', 'list_calibrations',
+METHODS = {'open', 'samples', 'detect_peaks', 'integrate', 'peaks', 'rename_peak', 'remove_peak', 'calibrate', 'list_calibrations',
            'remove_calibration', 'add_uv_channel', 'uv_spectrum', 'add_eic_channel', 'eic', 'mass_spectrum',
            'figure', 'export_results', 'save'}
 # Calls that only read: the page does not redraw after them.
@@ -35,6 +35,7 @@ READS = {'samples', 'peaks', 'list_calibrations', 'uv_spectrum', 'mass_spectrum'
 # What the status bar says while the agent works ("Claude Code: integrating ...").
 _DOING = {'open': 'opening {0}', 'samples': 'reading the samples', 'detect_peaks': 'detecting peaks',
           'integrate': 'integrating {0}-{1} min', 'peaks': 'reading the peak table', 'rename_peak': 'renaming {1}',
+          'remove_peak': 'removing {1}',
           'calibrate': 'calibrating {0}', 'list_calibrations': 'reading the calibrations',
           'remove_calibration': 'removing calibration {0}', 'add_uv_channel': 'adding {0} nm',
           'uv_spectrum': 'reading the UV spectrum at {1} min', 'add_eic_channel': 'adding EIC {0}',

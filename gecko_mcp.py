@@ -130,8 +130,9 @@ def integrate(rt_start: float, rt_end: float, samples: list[str] | None = None, 
               name: str | None = None, snap_to_valleys: bool = True, ctx: Context = None) -> list:
     """Integrate a peak in each given sample with a straight baseline on the curve. Each end walks down the slope to
     the nearest valley (at most 0.5 min), so a rough window around the peak takes the whole peak; snap_to_valleys=
-    False uses the exact times. name: compound name (spreads to the same peak in all samples). Check the result with
-    figure() when neighbouring peaks are close."""
+    False uses the exact times. name: compound name (spreads to the same peak in all samples). Peaks with height
+    below three times that channel's robust baseline noise are skipped with a per-sample error. Check the result
+    with figure() when neighbouring peaks are close."""
     return _run('integrate', rt_start, rt_end, samples, channel, name, snap_to_valleys, ctx=ctx)
 
 
@@ -145,6 +146,13 @@ def peak_table(samples: list[str] | None = None, ctx: Context = None) -> list:
 def rename_peak(sample: str, peak: str, new_name: str, ctx: Context = None) -> list:
     """Rename a peak (by its name or id); the same peak in every sample gets the name. Returns the peak table."""
     return _run('rename_peak', sample, peak, new_name, ctx=ctx)
+
+
+@server.tool()
+def remove_peak(sample: str | None, peak: str, ctx: Context = None) -> list:
+    """Delete a peak (by its name or id); sample=None removes it from every sample that has it.
+    Returns the remaining peak table."""
+    return _run('remove_peak', sample, peak, ctx=ctx)
 
 
 @server.tool()
