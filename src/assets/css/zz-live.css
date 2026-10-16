@@ -4,7 +4,7 @@
 .agent-live-drops { flex:0 0 auto; overflow:visible; }
 .agent-live-drops circle { fill:#6b716e; transition:fill .6s ease; }
 .agent-live.connected .agent-live-drops circle { fill:#6aa7ff; }
-.agent-live.busy .agent-live-drops circle { fill:#5fd19a; }
+.agent-live.busy .agent-live-drops circle { fill:#5aa877; }          /* the logo's green */
 .agent-live.stopped .agent-live-drops circle { fill:#c9a24a; }
 .agent-live-who { color:#e1e8e3; }
 .agent-live-doing { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; min-width:0; }
