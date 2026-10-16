@@ -45,7 +45,7 @@
         return root;
     }
 
-    // -- on the plot while the agent works: large drops in its top-right corner and a moving band along its top ----
+    // -- on the plot while the agent works: large drops in its bottom-right corner and a moving band along its top ----
     var stage = null;
     function plotStage() {
         if (stage) return stage;
@@ -163,16 +163,23 @@
     // While the agent screens every PDA wavelength (compare_wavelengths), the PDA view's wavelength sweeps across the
     // detector range, as the screen does; when it is done the view goes to the chosen wavelength.
     var sweeping = null;
+    function pdaRange() {                                             // the wavelengths the PDA view's heatmap holds
+        var heat = document.querySelector('#pda-heatmap .js-plotly-plot');
+        var ys = heat && heat.data && heat.data[0] && Array.from(heat.data[0].y || []);
+        return ys && ys.length ? [Math.min.apply(null, ys), Math.max.apply(null, ys)] : null;
+    }
     function sweep(now) {
         var screening = current.busy && current.here && /comparing wavelengths/.test(current.doing || '');
         var set = window.dash_clientside && window.dash_clientside.set_props;
         if (!screening || !set) { sweeping = null; return; }
         if (!sweeping) {
             set('side-tabs', { value: 'pda' });
-            var lo = 200, hi = 400, heat = document.getElementById('pda-heatmap');
-            var ys = heat && heat.data && heat.data[0] && heat.data[0].y;
-            if (ys && ys.length) { lo = Math.ceil(Math.min.apply(null, ys)); hi = Math.floor(Math.max.apply(null, ys)); }
-            sweeping = { lo: lo, hi: hi, nm: lo, last: 0 };
+            sweeping = { last: 0 };
+        }
+        if (sweeping.lo === undefined) {                              // the detector's range, once the view shows it
+            var range = pdaRange();
+            if (!range) return;
+            sweeping.lo = Math.ceil(range[0]); sweeping.hi = Math.floor(range[1]); sweeping.nm = sweeping.lo;
         }
         if (now - sweeping.last < 180) return;                        // the view redraws as fast as it can, no faster
         sweeping.last = now;
@@ -199,7 +206,19 @@
         }
         if (!view.side) return view.version;
         if (view.side === 'pda' && view.wavelength) {
-            whenThere('pda-wavelength', function () { set('pda-wavelength', { value: view.wavelength }); });
+            // The screen went through every wavelength in well under a second: show that pass once, then stop on
+            // the chosen one.
+            whenThere('pda-wavelength', function () {
+                var range = view.sweep_nm || pdaRange();
+                if (!range) { set('pda-wavelength', { value: view.wavelength }); return; }
+                var lo = Math.ceil(range[0]), hi = Math.floor(range[1]), steps = 14, i = 0;
+                (function next() {
+                    if (i > steps) { set('pda-wavelength', { value: view.wavelength }); return; }
+                    set('pda-wavelength', { value: Math.round(lo + (hi - lo) * i / steps) });
+                    i += 1;
+                    window.setTimeout(next, 110);
+                })();
+            });
         }
         set('side-tabs', { value: view.side });
         if (view.side === 'ms-scan' && view.scan != null) {
