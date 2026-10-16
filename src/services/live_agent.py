@@ -75,6 +75,7 @@ class LiveAgent:
         self.agent = ''                          # 'Claude Code'
         self.doing = ''                          # 'integrating 10.4-11.2 min'
         self.done_at = 0.0
+        self.view: Optional[dict] = None         # what the page shows after the last call (services/live_focus)
         self._workspaces: Dict[str, Any] = {}
         self._lock = threading.Lock()
 
@@ -139,15 +140,22 @@ class LiveAgent:
             self.agent = agent.pop('client_label', None) or self.agent or 'Agent'
             workspace.agent = agent or workspace.agent
             self.doing, self.busy = describe(method, args), True
+            view = None
             try:
                 result = getattr(workspace, method)(*(args or []), **(kwargs or {}))
+                from services.live_focus import focus
+                view = focus(workspace, method, args, kwargs, result)
             except GeckoError as exc:
                 result = {'error': str(exc)}
             finally:
                 self.busy, self.done_at = False, time.time()
-                if method not in READS:
+                if method not in READS or view:
                     self.version += 1
+                    self.view = dict(view, version=self.version) if view else None
         return result
+
+
+CURRENT: Optional[LiveAgent] = None                   # this app's live state (install)
 
 
 class LiveRefused(Exception):
@@ -160,7 +168,8 @@ def install(server, registry, port: int, folder: Optional[Path] = None) -> LiveA
     from flask import g, jsonify, request
     from services.workspaces import COOKIE, valid_session_id
 
-    live = LiveAgent(registry, port, folder)
+    global CURRENT
+    live = CURRENT = LiveAgent(registry, port, folder)
     live.write_file()
     atexit.register(live.remove_file)
 

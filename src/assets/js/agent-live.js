@@ -98,6 +98,31 @@
         fetch(HERE, { method: 'POST', cache: 'no-store', keepalive: true }).then(ask).catch(function () {});
     }
 
+    // -- the view the agent's call is about (services/live_focus): open the side view, then point it --------------
+    function whenThere(id, then, tries) {
+        if (document.getElementById(id)) { window.setTimeout(then, 700); return; }   // after the view's own setup
+        if ((tries || 0) < 40) window.setTimeout(function () { whenThere(id, then, (tries || 0) + 1); }, 100);
+    }
+    function applyView(view) {
+        var set = window.dash_clientside && window.dash_clientside.set_props;
+        if (!view || !view.side || !set) return window.dash_clientside.no_update;
+        set('side-tabs', { value: view.side });
+        if (view.side === 'ms-scan' && view.scan != null) {
+            whenThere('ms-scan-slider', function () {
+                set('ms-scan-client-input', { value: null });
+                window.setTimeout(function () { set('ms-scan-client-input', { value: view.scan }); }, 50);
+            });
+        } else if (view.side === 'ms-peak-mass' && view.peak) {
+            whenThere('peak-mass-selector', function () {
+                if (view.polarity) set('peak-mass-polarity-toggle', { value: view.polarity });
+                set('peak-mass-selector', { value: view.peak });
+            });
+        }
+        return view.version;
+    }
+    window.dash_clientside = window.dash_clientside || {};
+    window.dash_clientside.geckoLive = { applyView: applyView };
+
     window.setInterval(function () { if (!document.hidden) ask(); }, 1000);
     window.addEventListener('focus', here);
     document.addEventListener('pointerdown', here, true);

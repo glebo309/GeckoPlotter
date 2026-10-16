@@ -271,3 +271,24 @@ def test_removing_the_ms_channel_removes_its_eics(sequence):
     ws.store.file_removal_service.remove_channels([bundle.bundle_id], 'ms:positive')
     left = [c['key'] for c in channel_controls(ws.store, [bundle.bundle_id])]
     assert 'ms:positive' not in left and not any(k.startswith('eic:') for k in left)
+
+
+def test_live_mode_follows_the_agent_to_its_channel_and_view(sequence):
+    """After an agent call the page shows what it worked on (services/live_focus): the sample and channel of the
+    call, switched on when hidden, and the MS scan or the peak's mass spectrum."""
+    from services.live_focus import focus
+    ws = Workspace()
+    ws.open(str(sequence))
+    bundle = ws._sample('4')
+    tic = ws._channel(bundle, '+TIC')
+    ws.store.visibility_state[ws.store.peak_owner_id(tic.component_id)] = False     # the user shows UV only
+    rows = ws.integrate(8.2, 8.6, samples='4', channel='+TIC', name='m634')
+    view = focus(ws, 'integrate', [8.2, 8.6, '4', '+TIC', 'm634'], {}, rows)
+    assert view == {'active': tic.component_id}
+    assert ws.store.visibility_state[ws.store.peak_owner_id(tic.component_id)] is True
+    view = focus(ws, 'mass_spectrum', ['4'], {'rt': 8.4}, ws.mass_spectrum('4', rt=8.4))
+    assert view['side'] == 'ms-scan' and abs(TIMES[view['scan']] - 8.4) < 0.03
+    view = focus(ws, 'mass_spectrum', ['4'], {'peak': 'm634'}, ws.mass_spectrum('4', peak='m634'))
+    assert view['side'] == 'ms-peak-mass' and view['peak'] == rows[0]['peak_id']
+    assert focus(ws, 'samples', [], {}, ws.samples()) is None                         # reads leave the view
+    assert focus(ws, 'integrate', [1, 2], {}, {'error': 'x'}) is None

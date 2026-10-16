@@ -227,6 +227,8 @@ _layout_body = html.Div(
         dcc.Store(id='interaction-action-store', data=None),  # Last action for future undo/redo
         dcc.Input(id='ms-scan-client-input', type='number', value=None, style={'display': 'none'}),
         dcc.Store(id='agent-live-version', data=0),  # the app's agent change counter: redraw (callbacks/live_callbacks)
+        dcc.Store(id='agent-live-view', data=None),  # the side view the agent's last call is about (agent-live.js)
+        dcc.Store(id='agent-live-applied', data=None),
         dcc.Store(id='render-trigger', data=0),  # Counter bumped to trigger master render of main-plot
         dcc.Store(id='zoom-state', data=None),  # Persisted user zoom ranges across figure rebuilds
         dcc.Store(id='main-shape-relayout', data=None),  # relayoutData filtered to shape edits (peak/deconvolution callbacks)

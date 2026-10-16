@@ -1,14 +1,19 @@
 """Live mode: redraw the screen after an agent changed the workspace (services/live_agent, assets/js/agent-live.js).
 
 The page puts the app's change counter into ``agent-live-version`` when it moves; this rebuilds the file tree, the
-active file's views, the plot and the tables from the store, as after an upload. The file the user looks at stays
-active while it exists.
+active file's views, the plot and the tables from the store, as after an upload. After a call about one sample the
+agent's sample and channel become active and its view opens (services/live_focus; the page opens the side view,
+assets/js/agent-live.js); otherwise the file the user looks at stays active while it exists.
 """
 import dash
-from dash import Input, Output, State, html
+from dash import ClientsideFunction, Input, Output, State, html
 
 
 def register_live_callbacks(app, data_manager):
+
+    app.clientside_callback(ClientsideFunction(namespace='geckoLive', function_name='applyView'),
+                            Output('agent-live-applied', 'data'), Input('agent-live-view', 'data'),
+                            prevent_initial_call=True)
 
     @app.callback(
         [Output('loaded-files', 'data', allow_duplicate=True),
@@ -19,7 +24,8 @@ def register_live_callbacks(app, data_manager):
          Output('pub-data-store', 'data', allow_duplicate=True),
          Output('render-trigger', 'data', allow_duplicate=True),
          Output('peak-change-trigger', 'data', allow_duplicate=True),
-         Output('hidden-files', 'data', allow_duplicate=True)],
+         Output('hidden-files', 'data', allow_duplicate=True),
+         Output('agent-live-view', 'data')],
         Input('agent-live-version', 'data'),
         [State('active-file', 'data'), State('active-plot-tab', 'data'), State('file-order', 'data'),
          State('render-trigger', 'data'), State('peak-change-trigger', 'data')],
@@ -32,7 +38,12 @@ def register_live_callbacks(app, data_manager):
         from components.data_table_editor import create_data_table_editor
         from services.channel_visibility import visible_component_id
         from services.data_store import BundleType
+        from services import live_agent
 
+        live = live_agent.CURRENT
+        view = live.view if live else None                 # always the last call's: a call without one clears it
+        if view and (data_manager.get_data_by_id(view['active']) or data_manager.get_bundle(view['active'])):
+            active = view['active']
         if not (active and (data_manager.get_data_by_id(active) or data_manager.get_bundle(active))):
             active = None
             bundles = list(data_manager.iter_bundles())
@@ -51,4 +62,4 @@ def register_live_callbacks(app, data_manager):
                                                       file_order=file_order or {})
         hidden = [fid for fid, visible in data_manager.visibility_state.items() if not visible]
         return (files, tree, active, table, editor, pub_data, (render_counter or 0) + 1, (peak_counter or 0) + 1,
-                hidden)
+                hidden, view if view and view.get('side') else dash.no_update)
