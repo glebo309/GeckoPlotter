@@ -193,7 +193,12 @@
 
     function applyView(view) {
         var set = window.dash_clientside && window.dash_clientside.set_props;
-        if (!view || !(view.side || view.results) || !set) return window.dash_clientside.no_update;
+        if (!view || !(view.side || view.results || view.pda_follow) || !set) return window.dash_clientside.no_update;
+        var follow = view.pda_follow;
+        if (follow && document.getElementById('pda-wavelength')) {     // only when the PDA view is open: no tab switch
+            set('pda-wavelength', { value: follow.wavelength });
+            if (follow.time != null) set('pda-time', { value: follow.time });
+        }
         if (view.results) {
             set('active-tab', { data: view.results });
             if (view.results === 'calibration' && view.calibration) {

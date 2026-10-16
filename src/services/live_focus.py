@@ -144,6 +144,10 @@ def _focus(workspace, method, params, result) -> Optional[dict]:
 
     _show(store, bundle, component)
     view['active'] = component.component_id
+    # A UV channel: an open PDA view follows it, at the agent's peak when there is one.
+    nm = (component.metadata or {}).get('wavelength_nm')
+    if nm and method in ('add_uv_channel', 'integrate', 'detect_peaks', 'deconvolve', 'figure'):
+        view['pda_follow'] = {'wavelength': nm, 'time': (hit or {}).get('rt')}
     return view
 
 

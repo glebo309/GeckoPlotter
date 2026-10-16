@@ -62,4 +62,4 @@ def register_live_callbacks(app, data_manager):
                                                       file_order=file_order or {})
         hidden = [fid for fid, visible in data_manager.visibility_state.items() if not visible]
         return (files, tree, active, table, editor, pub_data, (render_counter or 0) + 1, (peak_counter or 0) + 1,
-                hidden, view if view and (view.get('side') or view.get('results')) else dash.no_update)
+                hidden, view if view and (view.get('side') or view.get('results') or view.get('pda_follow')) else dash.no_update)
