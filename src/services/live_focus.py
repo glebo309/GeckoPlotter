@@ -46,9 +46,11 @@ def _show(store, bundle, component) -> None:
                                              set_sample_visibility)
     if store.visibility_state.get(bundle.bundle_id, True) is False:
         set_sample_visibility(store, bundle.bundle_id, True)
-    if store.visibility_state.get(store.peak_owner_id(component.component_id), True):
-        return                                          # shown already: the user's choice of channels stays
     identity = channel_identity(component)
+    uv = bool(identity and str(identity[0]).startswith('uv:'))
+    if store.visibility_state.get(store.peak_owner_id(component.component_id), True) and not uv:
+        return                                          # shown already: the user's choice of channels stays
+    # A UV channel is shown alone: one wavelength in the plot when the agent is done, not two half-ticked ones.
     entry = store.get_data_by_id(bundle.bundle_id)
     if identity is None or not entry:
         from services.channel_visibility import show_channel

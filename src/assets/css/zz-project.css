@@ -136,3 +136,9 @@ button.about-status.clickable { cursor: pointer; }
 button.about-status.clickable:hover { background: rgba(245,194,107,.16); }
 /* Ion counts behind a spectrum drawn in % (lcms_callbacks): small, top right of the spectrum */
 .spectrum-ions { text-align: right; font-size: 11px; color: #777b80; min-height: 15px; padding: 0 16px 0 0; font-variant-numeric: tabular-nums; }
+
+/* The unsaved-changes question is a small box: the text above, the choices below. */
+.session-banner.session-confirm { flex-direction:column; align-items:stretch; gap:12px; width:340px; max-width:100%;
+  padding:14px 16px; }
+.session-confirm .session-banner-text { line-height:1.4; }
+.session-confirm .session-banner-btn { width:100%; height:30px; }

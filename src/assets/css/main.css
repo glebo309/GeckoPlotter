@@ -1349,7 +1349,7 @@ button[id*="collapse-btn"]:active {
 .plot-toolbar-group:first-child { border:1px solid #d7dadb; border-radius:6px; padding:2px; background:#eff1f1; }
 .plot-toolbar-group:first-child .plot-tool { height:27px; }
 .plot-tool.active { background:#fff; border-color:#c9cecb; box-shadow:0 1px 2px #0000000c; color:#254d36; }
-#plot-tool-integrate.active, #plot-tool-integrate.momentary-active { background:#e5eee8; box-shadow:inset 0 0 0 1px #69947a; }
+#plot-tool-integrate.active, #plot-tool-integrate.momentary-active, #plot-tool-auto.active, #plot-tool-inspect.active { background:#e5eee8; box-shadow:inset 0 0 0 1px #69947a; }
 .plot-tool.plot-tool-icon { width:32px; height:32px; padding:4px; display:inline-flex; align-items:center; justify-content:center; border:1px solid #cdd1d5; background-color:#fff; flex-shrink:0; }
 /* The icon is inline (not a separate file) so it cannot go missing when the app is copied or served elsewhere. */
 .integration-tool-icon { width:22px; height:22px; background:currentColor; mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M3 19C6 19 7 15 9 8C9.8 5.2 10.5 4 11.5 4C14 4 13.5 12 16.5 16.5C18 18.5 19.5 19 21 19Z' fill='black' fill-opacity='.25'/%3E%3Cpath d='M3 19C6 19 7 15 9 8C9.8 5.2 10.5 4 11.5 4C14 4 13.5 12 16.5 16.5C18 18.5 19.5 19 21 19M3 19H21' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / contain no-repeat; -webkit-mask:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M3 19C6 19 7 15 9 8C9.8 5.2 10.5 4 11.5 4C14 4 13.5 12 16.5 16.5C18 18.5 19.5 19 21 19Z' fill='black' fill-opacity='.25'/%3E%3Cpath d='M3 19C6 19 7 15 9 8C9.8 5.2 10.5 4 11.5 4C14 4 13.5 12 16.5 16.5C18 18.5 19.5 19 21 19M3 19H21' fill='none' stroke='black' stroke-width='1.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / contain no-repeat; }
@@ -1487,3 +1487,6 @@ button[id*="collapse-btn"]:active {
 .gecko-menu-item:hover:not(:disabled), .gecko-menu-item:focus-visible { background: rgba(0,0,0,.06); outline: none; }
 .gecko-menu-item:disabled { color: #a0a4a8; cursor: default; }
 .gecko-menu-divider { height: 1px; margin: 4px 0; background: #e6e8eb; }
+
+/* No focus box after a mouse click (the last clicked control kept a black frame); the keyboard still shows it. */
+:focus:not(:focus-visible) { outline:none; }
