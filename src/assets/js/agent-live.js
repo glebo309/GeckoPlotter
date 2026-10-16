@@ -47,10 +47,10 @@
         if (!el || el.hidden || now - lastFrame < 33) return;          // about 30 frames a second is plenty
         var dt = lastFrame ? Math.min((now - lastFrame) / 1000, 0.1) : 0;
         lastFrame = now;
-        var working = current.busy && !current.stopped;
+        var working = (current.busy || current.working) && !current.stopped;
         spread = Math.max(0, Math.min(1, spread + (working ? dt : -dt) / 0.8));
         var ease = spread * spread * (3 - 2 * spread);                // split / merge over 0.8 seconds
-        if (working) clock += dt * 0.32;
+        if (working) clock += dt * (current.busy ? 0.32 : 0.16);         // quicker while a call runs
         drops.forEach(function (d, i) {
             var x = W / 2 + noise(clock, d.seed) * (W / 2 - d.r - 1.5) * ease;
             var y = H / 2 + noise(clock * 0.8, d.seed + 50) * (H / 2 - d.r - 1) * ease;
@@ -79,7 +79,7 @@
         current = state || {};
         if (!build()) return;
         var connected = current.connected || [];
-        var working = !!current.busy && !current.stopped;
+        var working = !!(current.busy || current.working) && !current.stopped;
         var disconnected = !connected.length && !working && !current.stopped;
         el.hidden = false;
         el.classList.toggle('connected', !!connected.length);
@@ -88,8 +88,8 @@
         who.hidden = doing.hidden = stop.hidden = disconnected;
         if (current.stopped || working) {
             who.textContent = (current.agent || connected.join(', ') || 'Agent') + ':';
-            doing.textContent = current.stopped ? 'stopped' :
-                (current.here ? current.doing : 'works in another GeckoPlotter window');
+            doing.textContent = current.stopped ? 'stopped' : !current.here ? 'works in another GeckoPlotter window' :
+                current.busy ? current.doing : 'working';     // between its calls, until it has answered
         } else {
             who.textContent = connected.join(', ');
             doing.textContent = disconnected ? '' : 'connected';

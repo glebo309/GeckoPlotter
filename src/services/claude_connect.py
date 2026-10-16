@@ -5,6 +5,9 @@ Claude Desktop and Gemini CLI list their MCP servers in a settings file (claude_
 entry, ``geckoplotter``: the Python running this app and gecko_mcp.py next to app.py, so it keeps working after every
 update (the launcher replaces the code in the same folder). Only that entry is added or replaced; a copy of a settings
 file is kept as ``<name>.bak``. Nothing is changed without the user's click.
+
+Claude Code also gets two turn hooks in ~/.claude/settings.json (gecko_hook.py, on a prompt and on the answer), so
+GeckoPlotter's status bar shows it at work for the whole turn (services/live_agent). Any other hook stays.
 """
 from __future__ import annotations
 
@@ -53,6 +56,56 @@ def claude_code_cli() -> Optional[str]:
         if str(candidate) not in ('', '.') and candidate.is_file():
             return str(candidate)
     return None
+
+
+def claude_settings_path() -> Path:
+    return Path.home() / '.claude' / 'settings.json'
+
+
+HOOKS = {'UserPromptSubmit': 'start', 'Stop': 'end'}
+HOOK_SCRIPT = 'gecko_hook.py'
+
+
+def hook_command(state: str) -> str:
+    from services.about import ROOT
+    parts = [sys.executable, str(ROOT / HOOK_SCRIPT), state]
+    if platform.system() == 'Windows':
+        return subprocess.list2cmdline(parts)
+    import shlex
+    return shlex.join(parts)
+
+
+def write_hooks(config: Optional[Path] = None) -> str:
+    """Put GeckoPlotter's turn hooks in Claude Code's settings, replacing earlier ones (another GeckoPlotter
+    folder) and keeping every other hook and setting. Returns '' or why nothing was changed."""
+    config = config or claude_settings_path()
+    data = {}
+    if config.exists():
+        try:
+            data = json.loads(config.read_text(encoding='utf-8'))
+        except ValueError:
+            return f'its settings file could not be read ({config}); the status bar shows it only during its calls'
+    if not isinstance(data, dict):
+        return f'its settings file is not a settings object ({config})'
+    before = json.dumps(data, sort_keys=True)
+    hooks = data.setdefault('hooks', {})
+    for event, state in HOOKS.items():
+        groups = []
+        for group in hooks.get(event) or []:
+            kept = [h for h in (group.get('hooks') or []) if HOOK_SCRIPT not in str(h.get('command', ''))]
+            if kept:
+                groups.append(dict(group, hooks=kept))
+        groups.append({'hooks': [{'type': 'command', 'command': hook_command(state), 'timeout': 5}]})
+        hooks[event] = groups
+    if json.dumps(data, sort_keys=True) == before:
+        return ''
+    if config.exists():
+        shutil.copyfile(config, config.with_name(config.name + '.bak'))
+    config.parent.mkdir(parents=True, exist_ok=True)
+    tmp = config.with_suffix('.tmp')
+    tmp.write_text(json.dumps(data, indent=2), encoding='utf-8')
+    tmp.replace(config)
+    return ''
 
 
 def codex_cli() -> Optional[str]:
@@ -176,7 +229,15 @@ def connect_gemini() -> dict:
 
 def connect_code() -> dict:
     # An older entry added by hand may sit in the local scope (the default) as well as the user scope.
-    return _replace_entry(claude_code_cli(), 'code', [('--scope', 'local'), ('--scope', 'user')], ('--scope', 'user'))
+    done = _replace_entry(claude_code_cli(), 'code', [('--scope', 'local'), ('--scope', 'user')], ('--scope', 'user'))
+    if done['ok']:
+        try:
+            problem = write_hooks()
+        except OSError as exc:
+            problem = str(exc)
+        if problem:
+            done['error'] = 'turn hooks not added: ' + problem
+    return done
 
 
 def connect_codex() -> dict:

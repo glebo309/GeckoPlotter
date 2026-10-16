@@ -727,18 +727,27 @@ class Workspace:
         return rows
 
     def mass_spectrum(self, sample, rt: Optional[float] = None, rt_start: Optional[float] = None,
-                      rt_end: Optional[float] = None, peak: Optional[str] = None, polarity: str = '+',
+                      rt_end: Optional[float] = None, peak: Optional[str] = None, polarity: Optional[str] = None,
                       top: int = 10) -> dict:
         """The mass spectrum at one time (the nearest scan), averaged over a window, or averaged over a peak's
         integration window as the app's Peak mass view does. Returns the ``top`` most intense m/z with intensities
-        relative to the largest (%)."""
+        relative to the largest (%). Without ``polarity``: a peak integrated on −TIC or a negative EIC gives the
+        negative spectrum, anything else the positive one."""
+        from services.data_store import ComponentRole
         from services.lcms_service import LCMSService
         service = LCMSService()
         bundle = self._sample(sample)
+        found = None
+        if peak is not None:
+            owner, found = self._find_peak(bundle, peak)
+            if polarity is None:
+                negative = owner.role == ComponentRole.MS_NEGATIVE or '(−)' in bundle.component_display_name(owner) \
+                    or '(-)' in bundle.component_display_name(owner)
+                polarity = '-' if negative else '+'
+        polarity = polarity or '+'
         _component, entry = self._ms_entry(bundle, polarity)
         what = None
-        if peak is not None:
-            _c, found = self._find_peak(bundle, peak)
+        if found is not None:
             rt_start, rt_end = found.rt_start, found.rt_end
             what = f'average over {found.name}, {rt_start:.2f}-{rt_end:.2f} min'
         if rt_start is not None and rt_end is not None:

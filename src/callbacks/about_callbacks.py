@@ -119,6 +119,8 @@ def register_about_callbacks(app, store=None):
         note = ('Connected. To use it: ' + '; '.join(restarts) + '.') if restarts else 'Connected: ask the agent to open your data.'
         failed = [html.Div(f"{r['app']} could not be connected: {r['error']}", className='about-claude-error')
                   for r in done['results'] if not r['ok']]
+        failed += [html.Div(f"{r['app']}: {r['error']}", className='about-claude-error')
+                   for r in done['results'] if r['ok'] and r['error']]
         return [html.Div(listed + '.'), html.Div(note), *failed]
 
     @app.callback(

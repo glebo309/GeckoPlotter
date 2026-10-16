@@ -23,7 +23,9 @@ from typing import Any, Dict, Optional
 log = logging.getLogger(__name__)
 
 CALL, STATE, HERE, STOP = '/_gecko/agent/call', '/_gecko/agent/state', '/_gecko/agent/here', '/_gecko/agent/stop'
-HELLO = '/_gecko/agent/hello'
+HELLO, TURN = '/_gecko/agent/hello', '/_gecko/agent/turn'
+LINGER = 20.0           # an agent without turn hooks counts as working this long after its last call
+TURN_MAX = 30 * 60.0    # a turn whose end never arrived (agent killed) is over after this
 LOOPBACK = {'127.0.0.1', '::1', '::ffff:127.0.0.1'}
 
 # The Workspace methods an agent may call: every tool of gecko_mcp.py, nothing else.
@@ -80,6 +82,10 @@ class LiveAgent:
         self._workspaces: Dict[str, Any] = {}
         self._lock = threading.Lock()
         self._connections: Dict[int, tuple[str, float]] = {}
+        self._parents: Dict[int, int] = {}                 # MCP process -> its agent's process (heartbeat)
+        self._last_call: Dict[int, float] = {}            # MCP process -> end of its last call
+        self._turns: Dict[int, float] = {}                # MCP process -> start of its agent's turn (turn hooks)
+        self._hooked: set = set()                          # MCP processes whose agent sends turn hooks
         self._connections_lock = threading.Lock()          # heartbeats must not wait for a tool call
 
     # -- the live file ---------------------------------------------------------------------------------------------
@@ -118,13 +124,41 @@ class LiveAgent:
             cutoff = time.monotonic() - 30
             self._connections = {pid: entry for pid, entry in self._connections.items() if entry[1] > cutoff}
             connected = list(dict.fromkeys(label for label, _seen in self._connections.values()))
+            working = self.busy or self._working(time.monotonic())
         return {'version': self.version, 'busy': self.busy, 'agent': self.agent, 'doing': self.doing,
                 'stopped': self.stopped, 'here': bool(sid and sid == self.target), 'done_at': self.done_at,
-                'connected': connected}
+                'connected': connected, 'working': working}
 
-    def hello(self, pid: int, label: str) -> None:
+    def _working(self, now: float) -> bool:
+        """An agent is at work from the user's prompt to its answer: between its turn hooks (Claude Code), or
+        without hooks until LINGER seconds after its last call."""
+        for pid in self._connections:
+            started = self._turns.get(pid)
+            if started is not None and now - started < TURN_MAX:
+                return True
+            if pid not in self._hooked and now - self._last_call.get(pid, -1e9) < LINGER:
+                return True
+        return False
+
+    def hello(self, pid: int, label: str, parent: Optional[int] = None) -> None:
         with self._connections_lock:
             self._connections[pid] = (label, time.monotonic())
+            if parent:
+                self._parents[pid] = parent
+
+    def turn(self, ancestors, started: bool) -> None:
+        """A turn hook of an agent (gecko_hook.py): the user sent a prompt, or the agent answered. ``ancestors`` are
+        the hook's parent processes; the agent is among them, and so is the parent of its GeckoPlotter MCP server.
+        A session without GeckoPlotter has no such server and is ignored."""
+        ancestors = {a for a in ancestors if type(a) is int and a > 1}
+        with self._connections_lock:
+            for pid, parent in self._parents.items():
+                if parent in ancestors:
+                    self._hooked.add(pid)
+                    if started:
+                        self._turns[pid] = time.monotonic()
+                    else:
+                        self._turns.pop(pid, None)
 
     # -- a call ----------------------------------------------------------------------------------------------------
 
@@ -149,6 +183,7 @@ class LiveAgent:
         with self._lock:                                    # one agent call at a time
             workspace = self.workspace(self.target)
             agent = dict(agent or {})
+            caller = agent.pop('pid', None)
             self.agent = agent.pop('client_label', None) or self.agent or 'Agent'
             workspace.agent = agent or workspace.agent
             self.doing, self.busy = describe(method, args), True
@@ -161,6 +196,9 @@ class LiveAgent:
                 result = {'error': str(exc)}
             finally:
                 self.busy, self.done_at = False, time.time()
+                if isinstance(caller, int):
+                    with self._connections_lock:
+                        self._last_call[caller] = time.monotonic()
                 if method not in READS or view:
                     self.version += 1
                     self.view = dict(view, version=self.version) if view else None
@@ -203,7 +241,19 @@ def install(server, registry, port: int, folder: Optional[Path] = None) -> LiveA
         pid, label = body.get('id'), body.get('agent', 'Agent')
         if type(pid) is not int or pid <= 0 or not isinstance(label, str):
             return jsonify({'refused': 'Expected process id and agent label'}), 400
-        live.hello(pid, label.strip() or 'Agent')
+        parent = body.get('parent')
+        live.hello(pid, label.strip() or 'Agent', parent if type(parent) is int else None)
+        return ('', 204)
+
+    @server.route(TURN, methods=['POST'])
+    def _agent_turn():
+        if not allowed():
+            return jsonify({'refused': 'Not allowed'}), 403
+        body = request.get_json(silent=True) or {}
+        ancestors = body.get('ancestors')
+        if not isinstance(ancestors, list) or body.get('state') not in ('start', 'end'):
+            return jsonify({'refused': 'Expected ancestors and state start or end'}), 400
+        live.turn(ancestors, body['state'] == 'start')
         return ('', 204)
 
     @server.route(STATE, methods=['GET'])

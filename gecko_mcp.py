@@ -86,7 +86,7 @@ def _heartbeat_once() -> None:
         return
     client = (workspace.agent or {}).get('client')
     label = _label(client) if client and client != 'unknown client' else 'Agent'
-    body = json.dumps({'id': os.getpid(), 'agent': label}).encode()
+    body = json.dumps({'id': os.getpid(), 'parent': os.getppid(), 'agent': label}).encode()
     request = urllib.request.Request(f"http://127.0.0.1:{info['port']}{HELLO}", data=body, method='POST',
                                      headers={'Content-Type': 'application/json', 'X-Gecko-Key': info['key']})
     with urllib.request.urlopen(request, timeout=3):
@@ -107,7 +107,7 @@ def _run(method, *args, ctx=None, **kwargs):
     if ctx is not None:
         _identify(ctx)
     with _quiet():
-        agent = dict(workspace.agent or {}, client_label=_label((workspace.agent or {}).get('client')))
+        agent = dict(workspace.agent or {}, client_label=_label((workspace.agent or {}).get('client')), pid=os.getpid())
         try:
             return live_client.call(method, args, kwargs, agent)
         except live_client.Refused as exc:
@@ -243,9 +243,10 @@ def extract_ion_chromatogram(mz: float, tolerance: float = 0.5, samples: list[st
 
 @server.tool()
 def mass_spectrum(sample: str, rt: float | None = None, rt_start: float | None = None, rt_end: float | None = None,
-                  peak: str | None = None, polarity: str = '+', top: int = 10, ctx: Context = None) -> dict:
+                  peak: str | None = None, polarity: str | None = None, top: int = 10, ctx: Context = None) -> dict:
     """Mass spectrum at one time, averaged over rt_start-rt_end, or averaged over a peak's integration window (as
-    the app's Peak mass view). Returns the most intense ions with relative intensity (%)."""
+    the app's Peak mass view). polarity '+' or '-' (default: a peak's own, else '+'). Returns the most intense ions
+    with relative intensity (%). The user's screen shows the spectrum too."""
     return _run('mass_spectrum', sample, rt, rt_start, rt_end, peak, polarity, top, ctx=ctx)
 
 

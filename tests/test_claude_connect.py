@@ -15,6 +15,7 @@ def apps(tmp_path, monkeypatch):
     gemini = tmp_path / '.gemini' / 'settings.json'
     monkeypatch.setattr(claude_connect, 'desktop_config_path', lambda: desktop)
     monkeypatch.setattr(claude_connect, 'gemini_config_path', lambda: gemini)
+    monkeypatch.setattr(claude_connect, 'claude_settings_path', lambda: tmp_path / '.claude' / 'settings.json')
     for cli in ('claude_code_cli', 'codex_cli', 'gemini_cli'):
         monkeypatch.setattr(claude_connect, cli, lambda: None)
     monkeypatch.setattr(claude_connect, 'agent_package_ready', lambda: True)
@@ -57,3 +58,22 @@ def test_without_the_agent_package_nothing_is_changed(apps, monkeypatch):
     config.write_text('{}')
     monkeypatch.setattr(claude_connect, 'agent_package_ready', lambda: False)
     assert 'start it again' in claude_connect.connect()['message'] and config.read_text() == '{}'
+
+
+def test_claude_code_gets_turn_hooks_and_keeps_its_other_hooks(tmp_path):
+    settings = tmp_path / 'settings.json'
+    other = {'type': 'command', 'command': 'echo hi'}
+    old = {'type': 'command', 'command': '/old/venv/python /old/app/gecko_hook.py start'}
+    settings.write_text(json.dumps({'model': 'x', 'hooks': {'UserPromptSubmit': [{'hooks': [other, old]}],
+                                                           'SessionStart': [{'hooks': [other]}]}}))
+    assert claude_connect.write_hooks(settings) == ''
+    data = json.loads(settings.read_text())
+    prompt = [h['command'] for g in data['hooks']['UserPromptSubmit'] for h in g['hooks']]
+    assert prompt[0] == 'echo hi' and len(prompt) == 2 and prompt[1].endswith('gecko_hook.py start')
+    assert data['hooks']['Stop'][0]['hooks'][0]['command'].endswith('gecko_hook.py end')
+    assert data['model'] == 'x' and data['hooks']['SessionStart'] == [{'hooks': [other]}]
+    assert (tmp_path / 'settings.json.bak').exists()
+    once = settings.read_text()
+    assert claude_connect.write_hooks(settings) == '' and settings.read_text() == once      # nothing to change
+    settings.write_text('{not json')
+    assert 'could not be read' in claude_connect.write_hooks(settings)

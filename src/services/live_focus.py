@@ -96,11 +96,12 @@ def _focus(workspace, method, params, result) -> Optional[dict]:
     bundle = workspace._sample(name)
     view: dict = {}
     if method == 'mass_spectrum':
-        component = _ms_component(bundle, params.get('polarity') == '-') or workspace._channel(bundle, None)
+        negative = (result.get('polarity') if isinstance(result, dict) else params.get('polarity')) == '-'
+        component = _ms_component(bundle, negative) or workspace._channel(bundle, None)
         if params.get('peak'):
-            _owner, peak = workspace._find_peak(bundle, params['peak'])
-            view.update(side='ms-peak-mass', peak=peak.peak_id,
-                        polarity='negative' if params.get('polarity') == '-' else 'positive')
+            owner, peak = workspace._find_peak(bundle, params['peak'])
+            component = owner                               # the peak's own trace stays in view
+            view.update(side='ms-peak-mass', peak=peak.peak_id, polarity='negative' if negative else 'positive')
         else:
             rt = params.get('rt')
             if rt is None and params.get('rt_start') is not None and params.get('rt_end') is not None:

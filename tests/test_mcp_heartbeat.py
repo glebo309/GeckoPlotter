@@ -23,7 +23,7 @@ def test_heartbeat_announces_pid_then_the_handshake_label(monkeypatch):
         request = call.args[0]
         assert request.full_url == f'http://127.0.0.1:{port}/_gecko/agent/hello'
         assert request.method == 'POST' and request.get_header('X-gecko-key') == key
-        assert json.loads(request.data) == {'id': gecko_mcp.os.getpid(), 'agent': label}
+        assert json.loads(request.data) == {'id': gecko_mcp.os.getpid(), 'parent': gecko_mcp.os.getppid(), 'agent': label}
         assert 0 < call.kwargs['timeout'] < 10
     assert find.call_count == 2
 

@@ -151,3 +151,26 @@ def test_remove_peak_is_a_live_mutation_that_redraws_the_page(app, monkeypatch):
     assert calls == [(None, 'alanine')]
     state = client.get(live_agent.STATE).get_json()
     assert state['version'] == 1 and state['doing'] == 'removing alanine'
+
+
+def test_the_agent_counts_as_working_for_its_whole_turn(app, monkeypatch):
+    _server, _registry, live, client = app
+    clock = [1000.0]
+    monkeypatch.setattr(live_agent.time, 'monotonic', lambda: clock[0])
+    live.hello(501, 'Claude Code', parent=400)          # its MCP server, started by the agent (pid 400)
+    live.hello(601, 'Codex', parent=900)
+    assert not live.state(None)['working']
+    live.turn([7000, 400, 300], started=True)            # the hook runs in a shell under the agent
+    assert live.state(None)['working']
+    clock[0] += 120                                      # still thinking two minutes later (heartbeats go on)
+    live.hello(501, 'Claude Code', parent=400)
+    live.hello(601, 'Codex', parent=900)
+    assert live.state(None)['working']
+    live.turn([7001, 400, 300], started=False)
+    assert not live.state(None)['working']
+    live.turn([8000, 555, 300], started=True)            # a session without GeckoPlotter changes nothing
+    assert not live.state(None)['working']
+    live._last_call[601] = clock[0]                      # an agent without hooks: working shortly after a call
+    assert live.state(None)['working']
+    clock[0] += live_agent.LINGER + 1
+    assert not live.state(None)['working']
