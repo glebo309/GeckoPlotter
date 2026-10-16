@@ -7,20 +7,26 @@ this app can and cannot do. Keep them short: an agent reads one at the moment it
 
 GUIDES = {
     'wavelength': """Choosing the detection wavelength (PDA data: list_samples shows pda=true)
-1. Use compare_wavelengths(peak, standards): it integrates the same window at each candidate wavelength in every
-   standard and ranks them. Do not pick the default channel or the absorbance maximum without checking.
+1. Use compare_wavelengths(peak, standards): it screens every common recorded PDA wavelength directly, using
+   one fixed window and a straight baseline in every standard. Inspect screen.points (every 10 nm plus chosen
+   candidates) and screen.ranges_nm for the full response, flank S/N and linearity picture. It then evaluates
+   up to eight candidates from S/N maxima, best linearity/plateaus, absorbance maxima, unsaturated range ends
+   and the original channel, or your supplied list. Do not pick the default channel or absorbance maximum blindly.
 2. What decides, in this order:
    a. Not saturated: the highest standard's peak height below about 1000 mAU (1 AU); above 1.5 AU most PDA detectors
       are no longer linear. A maximum that saturates the top standard is worse than a weaker wavelength that does not.
-   b. Selective: the analyte spectrum is the same on the upslope, apex and downslope (pure peak), and a neighbouring
-      or co-eluting peak absorbs little there relative to the analyte.
+   b. Selective: purity is a peak-level warning about possible co-elution, not a wavelength rejection. It compares
+      upslope/apex/downslope spectra using >10% of the apex maximum and pixels below 1000 mAU in every spectrum
+      used (including baseline endpoints). Report purity.standards wavelength_ranges_nm; too few clear pixels
+      means unassessed, not pure. Also inspect neighbouring peaks relative to the analyte at each candidate.
    c. Quiet baseline: below about 220 nm mobile-phase absorbance (formic acid, TFA, methanol, acetate) raises noise and
       gradient drift. Prefer a wavelength where the blank is flat at the analyte's retention time.
    d. Sensitive enough: the lowest standard at S/N >= 10 (its LOQ); S/N 3 is only a detection limit.
    e. Most linear: lowest maximum back-calculated error over the standards, no curvature in the residuals. R2 alone
       does not decide (0.999 can hide a curved response).
 3. Tell the user which wavelength you chose and why, with the numbers (height of top standard, S/N of lowest,
-   max back-calculated error), and which candidates you rejected.""",
+   max back-calculated error), which candidates you rejected, and the screen's saturated, noisy and non-linear
+   ranges (non-linear flags R2 < 0.99 or max error >15%, or no positive fit; it is a diagnostic, not a rejection).""",
 
     'integration': """Integrating peaks for quantitation
 1. Use the same rule in every sample that will be compared or calibrated: the same window and the same baseline type.

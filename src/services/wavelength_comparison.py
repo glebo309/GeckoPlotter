@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 from copy import copy
+from time import perf_counter
 
 import numpy as np
 from scipy.integrate import trapezoid
@@ -57,6 +58,180 @@ def _trace(x, y, start, end):
             'apex': float(tx[np.argmax(corrected)])}
 
 
+def _ranges(wavelengths, mask):
+    """Inclusive ranges of consecutive recorded pixels (not interpolated coverage)."""
+    indices = np.flatnonzero(mask)
+    return [[float(wavelengths[g[0]]), float(wavelengths[g[-1]])]
+            for g in np.split(indices, np.flatnonzero(np.diff(indices) > 1) + 1) if len(g)]
+
+
+def _flank_noise(x, matrix, start, end):
+    """Vectorised robust noise, with narrow neighbours removed from the flank trend fit."""
+    width = end - start
+    left = (x >= start - 2 * width) & (x < start)
+    right = (x > end) & (x <= end + 2 * width)
+
+    def mad(y):
+        return np.median(abs(y - np.median(y, axis=0)), axis=0) / .67448975
+
+    # Never difference across the gap containing the peak.
+    differences = np.concatenate([np.diff(matrix[m], axis=0) for m in (left, right)])
+    noise = mad(differences) / np.sqrt(2) if len(differences) else np.zeros(matrix.shape[1])
+    bx, by = x[left | right], matrix[left | right]
+    if len(bx) >= 6:
+        half = len(bx) // 2
+        x1, x2 = np.median(bx[:half]), np.median(bx[half:])
+        y1, y2 = np.median(by[:half], axis=0), np.median(by[half:], axis=0)
+        residual = by - (y1 + (bx[:, None] - x1) * (y2 - y1) / (x2 - x1))
+        background = abs(residual - np.median(residual, axis=0)) <= 3 * mad(residual)
+        count = background.sum(axis=0)
+        # Centring time keeps the masked least-squares calculation well conditioned.
+        tx = (bx - bx.mean())[:, None]
+        denominator = np.maximum(count, 1)
+        mx = (tx * background).sum(axis=0) / denominator
+        my = (by * background).sum(axis=0) / denominator
+        variance = (background * (tx - mx) ** 2).sum(axis=0)
+        slope = (background * (tx - mx) * (by - my)).sum(axis=0) / np.maximum(variance, 1e-30)
+        refit = by - (my + slope * (tx - mx))
+        residual = np.where((count >= 6) & (variance > 0), refit, residual)
+        noise = np.maximum(noise, mad(residual))
+    return noise
+
+
+def _screen(arrays, concentrations, start, end, rt):
+    """Measure all common reference pixels directly; never create a channel or copy a full PDA cube."""
+    from gecko_api import GeckoError
+    low = max(a[1].min() for a in arrays)
+    high = min(a[1].max() for a in arrays)
+    wavelengths = np.unique(arrays[-1][1])
+    wavelengths = wavelengths[(wavelengths >= low) & (wavelengths <= high)]
+    indices = [np.argmin(abs(nm[:, None] - wavelengths), axis=0) for _, nm, _ in arrays]
+    measured = np.array([a[1][i] for a, i in zip(arrays, indices)])
+    matched = np.ptp(measured, axis=0) <= 1
+    excluded = wavelengths[~matched].tolist()
+    wavelengths = wavelengths[matched]
+    if not len(wavelengths):
+        raise GeckoError('The standards have no matching PDA wavelengths (within 1 nm).')
+    areas, heights, raw_heights, noises, apex_spectra = [], [], [], [], []
+    low_index = int(np.flatnonzero(concentrations > 0)[0])
+    for run_index, ((x, _, matrix), columns) in enumerate(zip(arrays, indices)):
+        order = np.argsort(x)
+        x = x[order]
+        if x[0] > start or x[-1] < end:
+            raise GeckoError('A standard does not cover the peak window.')
+        inside = (x > start) & (x < end)
+        if inside.sum() < 3:
+            raise GeckoError('Need at least three measured points inside the peak window.')
+        columns = columns[matched]
+
+        def interpolate(t):
+            hi = int(np.clip(np.searchsorted(x, t, side='right'), 1, len(x) - 1))
+            lo = hi - 1
+            weight = (t - x[lo]) / (x[hi] - x[lo])
+            return (1 - weight) * matrix[order[lo], columns].astype(float) + weight * matrix[order[hi], columns]
+
+        ends = np.array([interpolate(start), interpolate(end)])
+        tx = np.r_[start, x[inside], end]
+        ty = np.vstack([ends[0], matrix[np.ix_(order[inside], columns)], ends[1]])
+        baseline = ends[0] + ((tx - start) / (end - start))[:, None] * (ends[1] - ends[0])
+        corrected = ty - baseline
+        areas.append(trapezoid(corrected, tx, axis=0))
+        heights.append(np.maximum(0, corrected.max(axis=0)))
+        raw_heights.append(ty.max(axis=0))
+        apex_spectra.append(interpolate(rt) - (ends[0] + (rt - start) / (end - start) * (ends[1] - ends[0])))
+        if run_index == low_index:
+            flank_window = (x >= start - 2 * (end - start)) & (x <= end + 2 * (end - start))
+            noises = _flank_noise(x[flank_window], matrix[np.ix_(order[flank_window], columns)].astype(float), start, end)
+    areas = np.asarray(areas)
+    centered = concentrations - concentrations.mean()
+    slope = (centered[:, None] * areas).sum(axis=0) / (centered @ centered)
+    intercept = areas.mean(axis=0) - slope * concentrations.mean()
+    residual = areas - (concentrations[:, None] * slope + intercept)
+    total = ((areas - areas.mean(axis=0)) ** 2).sum(axis=0)
+    positive = concentrations > 0
+    with np.errstate(divide='ignore', invalid='ignore'):
+        r_squared = np.where(total > 0, 1 - (residual ** 2).sum(axis=0) / total, np.nan)
+        errors = abs(100 * residual[positive] / slope / concentrations[positive, None])
+        max_error = np.where(slope > 0, errors.max(axis=0), np.nan)
+        snr = np.where(noises > 0, heights[low_index] / noises, np.nan)
+    saturated = np.maximum(heights[-1], raw_heights[-1]) >= 1500
+    noisy = ~np.isfinite(snr) | (snr < 10)
+    nonlinear = ~np.isfinite(max_error) | (max_error > 15) | ~np.isfinite(r_squared) | (r_squared < .99)
+    return dict(wavelengths=wavelengths, areas=areas, height_high=heights[-1], raw_height_high=raw_heights[-1],
+                snr=snr, slope=slope, r_squared=r_squared, max_error=max_error, apex=apex_spectra[-1],
+                saturated=saturated, too_noisy=noisy, non_linear=nonlinear,
+                eligible=~saturated & ~noisy & (slope > 0) & np.isfinite(max_error),
+                excluded_unmatched_nm=excluded)
+
+
+def _screen_candidates(screen, original):
+    """Bound detailed work to eight diverse candidates drawn from the measured curves."""
+    nm, eligible = screen['wavelengths'], screen['eligible']
+    error = np.where(eligible, screen['max_error'], np.inf)
+    best = [int(i) for i in np.argsort(error) if np.isfinite(error[i])]
+    benchmark = [int(np.argmin(abs(nm - float(original))))] if original is not None and nm[0] <= float(original) <= nm[-1] else []
+
+    def maxima(values, mask):
+        values = np.where(mask & np.isfinite(values), values, -np.inf)
+        peaks, _ = find_peaks(np.r_[-np.inf, values, -np.inf])
+        return sorted((int(i - 1) for i in peaks if np.isfinite(values[i - 1])), key=lambda i: -values[i])
+
+    absorbance = maxima(screen['apex'], screen['apex'] > max(0, np.nanmax(screen['apex']) * .01))
+    snr = maxima(screen['snr'], eligible)
+    plateau = eligible & ~screen['non_linear'] & (error <= (error[best[0]] + 1 if best else 1))
+    groups = np.split(np.flatnonzero(plateau), np.flatnonzero(np.diff(np.flatnonzero(plateau)) > 1) + 1)
+    plateaus = [int(g[len(g) // 2]) for g in sorted(groups, key=len, reverse=True) if len(g)]
+    # Boundaries of usable unsaturated bands, not the noise-only tail of the detector.
+    groups = np.split(np.flatnonzero(eligible), np.flatnonzero(np.diff(np.flatnonzero(eligible)) > 1) + 1)
+    edges = [int(i) for g in sorted(groups, key=len, reverse=True) if len(g) for i in (g[0], g[-1])]
+    queues = [('best_linearity', best[:1]), ('original_channel', benchmark), ('absorbance_maximum', absorbance),
+              ('snr_maximum', snr), ('linearity_plateau', plateaus), ('unsaturated_range_end', edges)]
+    selected = {}
+    # Round robin reserves room for each kind of evidence; deduplicate in physical nm.
+    while any(q for _, q in queues) and len(selected) < 8:
+        for reason, queue in queues:
+            while queue:
+                i = queue.pop(0)
+                if i in selected:
+                    if reason not in selected[i]:
+                        selected[i].append(reason)
+                    continue
+                selected[i] = [reason]
+                break
+            if len(selected) == 8:
+                break
+    if not selected:
+        selected[0] = ['detector_range_end']
+    return {float(nm[i]): reasons for i, reasons in selected.items()}
+
+
+def _screen_summary(screen, runs, candidates, elapsed):
+    nm = screen['wavelengths']
+    chosen = {int(np.argmin(abs(nm - wavelength))): reasons for wavelength, reasons in candidates.items()}
+    ticks = np.arange(np.ceil(nm[0] / 10) * 10, nm[-1] + 1e-9, 10)
+    indices = {0, len(nm) - 1, *chosen, *(int(np.argmin(abs(nm - tick))) for tick in ticks)}
+
+    def number(value):
+        return float(value) if np.isfinite(value) else None
+
+    points = []
+    for i in sorted(indices):
+        points.append(dict(wavelength_nm=float(nm[i]), areas=[number(v) for v in screen['areas'][:, i]],
+                           height_high_mau=number(screen['height_high'][i]),
+                           raw_height_high_mau=number(screen['raw_height_high'][i]), snr_low=number(screen['snr'][i]),
+                           r_squared=number(screen['r_squared'][i]),
+                           max_back_calculated_error_percent=number(screen['max_error'][i]),
+                           candidate_reasons=chosen.get(i, [])))
+    return {'range_nm': [float(nm[0]), float(nm[-1])], 'wavelength_count': len(nm),
+            'sampling': 'every matching recorded wavelength of the highest standard; nearest pixels within 1 nm',
+            'standards': [{'sample': r[1].name, 'concentration': r[0]} for r in runs],
+            'points': points, 'ranges_nm': {key: _ranges(nm, screen[key])
+                for key in ('saturated', 'too_noisy', 'non_linear')},
+            'thresholds': {'saturation_mau': 1500, 'snr_min': 10, 'r_squared_min': .99, 'max_error_percent': 15},
+            'noise_method': 'robust first differences within flanks and outlier-detrended flanks',
+            'excluded_unmatched_nm': screen['excluded_unmatched_nm'], 'elapsed_seconds': elapsed}
+
+
 def _purity(ws, bundle, component, peak, payload, start, end):
     """Baseline-subtracted spectra at the reference trace's half-height flanks and apex."""
     x, y = ws._xy(component.component_id)
@@ -66,9 +241,10 @@ def _purity(ws, bundle, component, peak, payload, start, end):
     apex = int(np.argmin(abs(x - peak.rt)))
     left = np.flatnonzero((x > start) & (x < x[apex]))
     right = np.flatnonzero((x > x[apex]) & (x < end))
-    times, _, matrix = _arrays(payload)
+    times, wavelengths, matrix = _arrays(payload)
     if not len(left) or not len(right) or corrected[apex] <= 0:
-        return {'sample': bundle.name, 'correlations': [], 'min_correlation': None}
+        return {'sample': bundle.name, 'correlations': [], 'min_correlation': None,
+                'wavelength_ranges_nm': [], 'wavelength_count': 0}
     half = corrected[apex] / 2
     scans = [left[np.argmin(abs(corrected[left] - half))], apex,
              right[np.argmin(abs(corrected[right] - half))]]
@@ -80,17 +256,21 @@ def _purity(ws, bundle, component, peak, payload, start, end):
         weight = (times[ti] - times[lo]) / (times[hi] - times[lo]) if hi != lo else 0
         spectra.append(matrix[ti].astype(float) - ((1 - weight) * matrix[lo] + weight * matrix[hi]))
     spectra = np.asarray(spectra)
-    saturated = np.max(raw_spectra, axis=0) >= 1500
+    saturated = np.max([*raw_spectra, matrix[lo], matrix[hi]], axis=0) >= 1000
     finite = np.isfinite(spectra).all(axis=0) & ~saturated
-    strength = np.max(abs(spectra[:, finite])) if finite.any() else 0
-    keep = finite & (np.max(abs(spectra), axis=0) > max(strength * .01, 1e-9))
+    # Where the analyte clearly absorbs: 5 % of its strongest unsaturated absorbance and at least 3 mAU, so a band
+    # far weaker than a saturated maximum (PEA near 257 nm against ~2000 mAU at 200 nm) still counts.
+    strength = np.max(spectra[1, finite]) if finite.any() else 0
+    keep = finite & (spectra[1] > max(strength * .05, 3.0))
     correlations = []
     for a, b in [(0, 1), (1, 2), (0, 2)]:
         if keep.sum() >= 3 and min(np.std(spectra[a, keep]), np.std(spectra[b, keep])) > 1e-12:
             correlations.append(float(np.corrcoef(spectra[a, keep], spectra[b, keep])[0, 1]))
     return {'sample': bundle.name, 'times_min': [float(x[i]) for i in scans],
             'correlations': correlations, 'min_correlation': min(correlations) if correlations else None,
-            'excluded_saturated_wavelengths': int(saturated.sum())}
+            'excluded_saturated_wavelengths': int(saturated.sum()),
+            'wavelength_ranges_nm': _ranges(wavelengths[np.argsort(wavelengths)], keep[np.argsort(wavelengths)]),
+            'wavelength_count': int(keep.sum()), 'apex_absorbance_fraction': .05, 'minimum_mau': 3.0, 'saturation_limit_mau': 1000}
 
 
 def _neighbours(x, y, start, end, rt, height, noise):
@@ -141,15 +321,14 @@ def compare_wavelengths(ws, peak, standards, wavelengths, samples, rt_tolerance)
     if low_nm > high_nm:
         raise GeckoError('The standards have no common PDA wavelength range.')
     warnings = []
+    screen_started = perf_counter()
+    screen = _screen(arrays, concentrations, start, end, rt)
+    selection = _screen_candidates(screen, (reference[2].metadata or {}).get('wavelength_nm'))
+    screen_elapsed = perf_counter() - screen_started
     if wavelengths is None:
-        maxima = ws.uv_spectrum(reference[1].name, rt, top=8)['maxima']
-        maxima.sort(key=lambda m: -m['mAU'])
-        # Reserve room for weaker analyte bands. The strongest UV maximum may already be saturated.
-        fixed = [nm for nm in (205, 220, 254, 280, 210, 230) if low_nm <= nm <= high_nm]
-        maxima = [m['nm'] for m in maxima if low_nm <= m['nm'] <= high_nm]
-        original = (reference[2].metadata or {}).get('wavelength_nm')
-        benchmark = [float(original)] if original is not None and low_nm <= float(original) <= high_nm else []
-        wavelengths = list(dict.fromkeys(benchmark + maxima[:4] + fixed))[:8]
+        wavelengths = list(selection)
+    else:
+        selection = {}  # The caller controls the detailed shortlist; the full screen is still returned.
     try:
         requested = [float(nm) for nm in wavelengths]
     except (TypeError, ValueError):
@@ -164,6 +343,7 @@ def compare_wavelengths(ws, peak, standards, wavelengths, samples, rt_tolerance)
             raise GeckoError(f'{nm:g} nm maps to different detector wavelengths across standards (over 1 nm).')
         if actual not in seen:
             candidates.append((nm, views[-1]['wavelength_nm']))
+            selection.setdefault(actual[-1], ['requested'])
             seen.add(actual)
     if len(candidates) > 8:
         raise GeckoError('Compare at most eight distinct wavelengths at a time.')
@@ -176,7 +356,7 @@ def compare_wavelengths(ws, peak, standards, wavelengths, samples, rt_tolerance)
     correlations = [r['min_correlation'] for r in purity_rows if r['min_correlation'] is not None]
     purity = {'min_correlation': min(correlations) if correlations else None,
               'impure': any(c < .99 for c in correlations),
-              'assessed': len(correlations) == len(purity_rows), 'standards': purity_rows,
+              'assessed': all(len(r['correlations']) == 3 for r in purity_rows), 'standards': purity_rows,
               'excluded_saturated_wavelengths': max((r.get('excluded_saturated_wavelengths', 0)
                                                     for r in purity_rows), default=0),
               'threshold': .99}
@@ -240,6 +420,14 @@ def compare_wavelengths(ws, peak, standards, wavelengths, samples, rt_tolerance)
                          standards=measurements, eligible=not reasons, warnings=reasons + notes))
     rows.sort(key=lambda r: (not r['eligible'], round(r['max_back_calculated_error_percent'], 6)
                              if r['max_back_calculated_error_percent'] is not None else float('inf'), -r['slope']))
+    # Linearity within 3 percentage points of the best is a tie (a few % is integration noise): then the better
+    # S/N at the lowest standard wins.
+    eligible = [r for r in rows if r['eligible'] and r['max_back_calculated_error_percent'] is not None]
+    if eligible:
+        limit = eligible[0]['max_back_calculated_error_percent'] + 3
+        tied = [r for r in eligible if r['max_back_calculated_error_percent'] <= limit]
+        tied.sort(key=lambda r: -(r['snr_low'] or 0))
+        rows = tied + [r for r in rows if r not in tied]
     for rank, row in enumerate(rows, 1):
         row['rank'] = rank
     recommendation = None
@@ -249,8 +437,9 @@ def compare_wavelengths(ws, peak, standards, wavelengths, samples, rt_tolerance)
         shown = next(r for r in added if r['sample'] == reference[1].name)
         recommendation = {'wavelength_nm': best['wavelength_nm'], 'channel': shown['channel'],
                           'sample': shown['sample'], 'eligible': True,
-                          'reason': f"Lowest maximum back-calculated error among eligible wavelengths "
-                                    f"({best['max_back_calculated_error_percent']:.2f}%); sensitivity breaks ties."}
+                          'reason': f"Best S/N ({best['snr_low']:.0f} at the lowest standard) among the most linear "
+                                    f"wavelengths (max back-calculated error {best['max_back_calculated_error_percent']:.1f}%, "
+                                    f"within 3 points of the best)."}
     else:
         warnings.append('No wavelength passes the saturation and S/N screening; inspect the ranked results.')
     # Purity is the peak's, not a wavelength's: it does not choose between them, it qualifies the whole calibration.
@@ -265,10 +454,12 @@ def compare_wavelengths(ws, peak, standards, wavelengths, samples, rt_tolerance)
     if concentrations[0] == 0:
         warnings.append('Blank included in the fit; percentage error is undefined at zero. S/N and LOQ use the lowest positive standard.')
     if purity['excluded_saturated_wavelengths']:
-        warnings.append('Spectral purity excludes pixels reaching 1500 mAU; their distorted spectra cannot establish coelution.')
+        warnings.append('Spectral purity uses clear apex absorbance (>10% of its maximum) and excludes pixels reaching '
+                        '1000 mAU in any spectrum used, including baseline endpoints; see its wavelength_ranges_nm.')
     warnings.append('LOQ is a single-level S/N=10 estimate, not a validated quantitation limit; spectral correlation is a purity screen.')
     ws._record(f'Compared wavelengths for {peak} in {_names([r[1] for r in runs])}')
     return {'peak': peak, 'rt_start': start, 'rt_end': end,
             'baseline_rule': 'straight line between signal at fixed endpoints; signed area; no valley snapping',
             'reference_sample': reference[1].name, 'wavelengths': rows, 'recommendation': recommendation,
+            'purity': purity, 'screen': _screen_summary(screen, runs, selection, screen_elapsed),
             'warnings': warnings + [f"{r['wavelength_nm']:g} nm: {w}" for r in rows for w in r['warnings']]}
