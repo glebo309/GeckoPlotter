@@ -1,9 +1,15 @@
 """Metadata panel grouping: curated groups, readable labels, raw keys hidden."""
 from pathlib import Path
 
+import netCDF4 as nc
+import numpy as np
+import pytest
+
 from callbacks.viz_callbacks import build_metadata_panel, create_data_table
 from components.workspace_layout import walk
 from services.metadata_display import group_metadata
+from src.ingestion.presets.lcms_cdf import LCMSCDFPreset
+from src.ingestion.presets.lcms_vwd_cdf import LCMSVWDCDFPreset
 from src.ingestion.presets.shimadzu_ascii import ShimadzuASCIIPreset
 
 FIXTURE = Path(__file__).parent / 'ingestion' / 'fixtures' / 'shimadzu_ascii.txt'
@@ -83,3 +89,84 @@ def test_data_table_uses_curated_panel(tmp_path):
     panel = create_data_table({'record': {'name': 'run', 'type': 'primary'}, 'metadata': meta})
     text = ' '.join(str(n.children) for n in walk(panel) if isinstance(getattr(n, 'children', None), str))
     assert 'Synthetic LC-PDA' in text and 'Raw Sections' not in text and 'Source Sections' not in text
+
+
+def _cdf_metadata(tmp_path, kind='ms', instrument='Gas Chromatograph', separation='No Chromatography'):
+    path = tmp_path / ('run_VWD1A.cdf' if kind == 'vwd' else f'run_MS1 {kind}.cdf')
+    with nc.Dataset(path, 'w', format='NETCDF3_CLASSIC') as ds:
+        ds.setncatts({
+            'ms_template_revision' if kind == 'ms' else 'aia_template_revision': '1.0',
+            'sample_name': 'Synthetic standard', 'operator_name': 'Analyst',
+            'injection_date_time_stamp': '20250506142319+0200',
+            'experiment_date_time_stamp': '00000000000000+0000',
+            'dataset_date_time_stamp': '20250506143725+0200',
+            'detection_method_name': 'gradient.amx', 'company_method_name': 'gradient.amx/process.pmx',
+            'peak_processing_method_name': 'process.pmx',
+            'detector_name': 'VWD1A,Wavelength=280 nm' if kind == 'vwd' else f'MS1 {kind} SCAN ESI',
+            'detector_unit': 'mAU' if kind == 'vwd' else 'Counts',
+            'test_separation_type': separation, 'dataset_completeness': 'C1+C2',
+            'netcdf_revision': '3.4', 'languages': 'English', 'dataset_owner': '',
+            'sample_id': '  UnKnOwN  ', 'pre_experiment_program_name': 'none',
+            'raw_data_table_name': 'RawDataTable', 'test_ionization_polarity': 'unknown',
+        })
+        ds.createDimension('point', 3)
+        if kind == 'ms':
+            ds.createVariable('scan_acquisition_time', 'f8', ('point',))[:] = [1, 2, 3]
+            ds.createVariable('total_intensity', 'f8', ('point',))[:] = [10, 30, 20]
+            ds.createVariable('mass_range_min', 'f8', ('point',))[:] = [100, 100, 100]
+            ds.createVariable('mass_range_max', 'f8', ('point',))[:] = [1000, 1000, 1000]
+            if instrument is not None:
+                ds.createDimension('text', 64)
+                ds.createVariable('instrument_name', 'S1', ('text',))[:] = np.frombuffer(
+                    instrument.ljust(64).encode(), dtype='S1')
+        else:
+            ds.createVariable('raw_data_retention', 'f8', ('point',))[:] = [1, 2, 3]
+            ds.createVariable('ordinate_values', 'f8', ('point',))[:] = [10, 30, 20]
+    preset = LCMSVWDCDFPreset() if kind == 'vwd' else LCMSCDFPreset()
+    return preset.parse(str(path))['metadata']
+
+
+@pytest.mark.parametrize('separation', ['No Chromatography', 'LiquidChromatography', 'unknown'])
+def test_cdf_generic_gc_name_requires_supporting_separation_metadata(tmp_path, separation):
+    meta = _cdf_metadata(tmp_path, separation=separation)
+    assert meta['instrument_name'].strip() == 'Gas Chromatograph'  # retain the source for inspection
+    panel = build_metadata_panel(meta)
+    text = ' '.join(str(n.children) for n in walk(panel) if isinstance(getattr(n, 'children', None), str))
+    assert 'Gas Chromatograph' not in text
+
+
+@pytest.mark.parametrize('instrument,separation,expected', [
+    ('Agilent 6130', 'No Chromatography', 'Agilent 6130'),
+    ('Gas Chromatograph', 'Gas-Liquid Chromatography', 'Gas Chromatograph'),
+    (None, 'No Chromatography', None),
+    (' Unknown ', 'No Chromatography', None),
+])
+def test_cdf_instrument_is_only_shown_when_reported_and_supported(tmp_path, instrument, separation, expected):
+    groups = _as_dict(group_metadata(_cdf_metadata(tmp_path, instrument=instrument, separation=separation)))
+    assert groups.get('Instrument', {}).get('Instrument') == expected
+
+
+@pytest.mark.parametrize('kind', ['ms', '+TIC', '-TIC', 'vwd'])
+def test_cdf_panel_curates_global_attributes_and_reader_fields(tmp_path, kind):
+    meta = _cdf_metadata(tmp_path, kind=kind)
+    groups = group_metadata(meta)
+    d = _as_dict(groups)
+    assert d['Sample']['Name'] == 'Synthetic standard'
+    assert d['Sample']['Operator'] == 'Analyst'
+    assert 'Sample ID' not in d['Sample']
+    assert d['Acquisition']['Injected'] == '2025-05-06 14:23:19 +02:00'
+    assert d['Acquisition']['Exported'] == '2025-05-06 14:37:25 +02:00'
+    assert 'Acquired' not in d['Acquisition']
+    assert d['Method']['Instrument method'] == 'gradient.amx'
+    assert d['Method']['Processing method'] == 'process.pmx'
+    assert d['Detector']['Detector'] == meta.get('detector_name', meta.get('global_detector_name'))
+    assert d['Channels']['Signal unit'] == ('mAU' if kind == 'vwd' else 'Counts')
+    if kind == 'ms':
+        assert d['Detector']['Mass range'] == '100 – 1,000 m/z'
+    if kind == 'vwd':
+        assert d['Channels']['Wavelength'] == '280 nm'
+    if kind in ('+TIC', '-TIC'):
+        assert d['Detector']['Polarity'] == ('positive' if kind == '+TIC' else 'negative')
+    assert 'Other' not in d
+    assert not any(label.startswith('Global ') or value.strip().lower() in ('unknown', 'none', '')
+                   for _, rows in groups for label, value in rows)

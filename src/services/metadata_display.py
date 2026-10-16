@@ -52,6 +52,13 @@ def _with_unit(unit: str) -> Callable[[Any], str]:
 
 def fmt_datetime(value: Any) -> str:
     text = str(value).strip()
+    if re.fullmatch(r'\d{14}(?:[+-]\d{4})?', text):
+        try:
+            stamp = datetime.strptime(text, '%Y%m%d%H%M%S%z' if len(text) > 14 else '%Y%m%d%H%M%S')
+            offset = stamp.strftime('%z')
+            return stamp.strftime('%Y-%m-%d %H:%M:%S') + (f' {offset[:3]}:{offset[3:]}' if offset else '')
+        except ValueError:
+            return ''  # ANDI exports can contain an all-zero, unset timestamp.
     try:
         return datetime.fromisoformat(text).strftime('%Y-%m-%d %H:%M:%S')
     except ValueError:
@@ -74,6 +81,15 @@ def _range(low: str, high: str, unit: str) -> Callable[[Dict[str, Any]], Optiona
 def _injected(meta):
     parts = [str(meta[k]).strip() for k in ('injection_date', 'injection_time') if _present(meta.get(k))]
     return ' '.join(parts) or None
+
+
+def _mass_range(meta):
+    bounds = meta.get('mass_range')
+    if isinstance(bounds, (list, tuple)) and len(bounds) == 2:
+        if any(float(v) for v in bounds):
+            return f'{fmt_number(bounds[0])} – {fmt_number(bounds[1])} m/z'
+        return None
+    return _single('mass_range_str')(meta)
 
 
 def _summarise(key: str) -> Callable[[Dict[str, Any]], Optional[str]]:
@@ -132,6 +148,7 @@ _SPEC = [
     ('Acquisition', 'Injected', ('injection_date', 'injection_time'), _injected),
     ('Acquisition', 'Exported', ('exported',), _single('exported', fmt_datetime)),
     ('Acquisition', 'Status', ('status',), _single('status')),
+    ('Acquisition', 'Experiment', ('experiment_title',), _single('experiment_title')),
     ('Acquisition', 'Time range', ('time_range',), _single('time_range')),
     ('Acquisition', 'Time range', ('time_start_min', 'time_end_min'), _range('time_start_min', 'time_end_min', 'min')),
     ('Acquisition', 'Time range', ('time_min_min', 'time_max_min'), _range('time_min_min', 'time_max_min', 'min')),
@@ -142,6 +159,8 @@ _SPEC = [
      lambda m: next((str(m[k]).strip() for k in ('instrument', 'instrument_name')
                      if _present(m.get(k)) and not isinstance(m[k], (dict, list))), None)),
     ('Instrument', 'Manufacturer', ('manufacturer',), _single('manufacturer')),
+    ('Instrument', 'Model', ('instrument_model',), _single('instrument_model')),
+    ('Instrument', 'Serial number', ('instrument_serial_no',), _single('instrument_serial_no')),
     ('Instrument', 'Software', ('software', 'software_version'),
      lambda m: ' '.join(str(m[k]).strip() for k in ('software', 'software_version') if _present(m.get(k))) or None),
     ('Instrument', 'Data system', ('exporting_data_system',), _single('exporting_data_system')),
@@ -156,6 +175,8 @@ _SPEC = [
     ('Method', 'Source path', ('file_path',), _single('file_path')),
 
     ('Detector', 'Detector', ('detector',), _single('detector')),
+    ('Detector', 'Polarity', ('ionization_mode',), _single('ionization_mode')),
+    ('Detector', 'Mass range', ('mass_range', 'mass_range_str'), _mass_range),
     ('Detector', 'Wavelength range', ('wavelength_min_nm', 'wavelength_max_nm'),
      _range('wavelength_min_nm', 'wavelength_max_nm', 'nm')),
     ('Detector', 'Wavelength resolution', ('wavelength_resolution_nm',), _single('wavelength_resolution_nm', _with_unit('nm'))),
@@ -188,6 +209,59 @@ _SPEC.append(('Channels', 'Signal min / max', ('signal_min', 'signal_max'),
 _KNOWN_KEYS = frozenset(k for _, _, keys, _ in _SPEC for k in keys) | {'channels', 'method_details'}
 
 
+# Both readers retain raw attributes: ANDI-MS prefixes them, AIA leaves them bare.
+_NETCDF_ALIASES = {
+    'operator': ('operator_name',),
+    'injection_date': ('injection_date_time_stamp',),
+    'acquired': ('experiment_date_time_stamp',),
+    'exported': ('dataset_date_time_stamp', 'netcdf_file_date_time_stamp'),
+    'instrument_method': ('detection_method_name', 'company_method_name', 'company_method_id'),
+    'processing_method': ('peak_processing_method_name',),
+    'manufacturer': ('instrument_mfr',),
+    'detector': ('detector_name', 'test_detector_type'),
+    'ionization_mode': ('test_ionization_polarity',),
+    'wavelength_nm': ('wavelength',),
+    'signal_unit': ('detector_unit',),
+    'time_range': ('retention_time_range',),
+    'data_points': ('scan_count',),
+}
+
+
+def _netcdf_metadata(meta: Dict[str, Any]) -> Dict[str, Any]:
+    """Curate a display copy; leave raw source attributes available to other consumers."""
+    if not (any(k.startswith('global_') for k in meta) or
+            any(k in meta for k in ('aia_template_revision', 'ms_template_revision', 'netcdf_revision'))):
+        return meta
+    raw = {k.removeprefix('global_'): v for k, v in meta.items() if k.startswith('global_')}
+    raw.update({k: v for k, v in meta.items() if not k.startswith('global_')})
+    raw = {k: v for k, v in raw.items()
+           if _present(v) and not (isinstance(v, str) and v.strip().lower() in {'unknown', 'none', 'n/a'})}
+
+    # Agilent ANDI-MS exports use this generic name even with "No Chromatography".
+    # Require an explicit GC separation before presenting it as an instrument.
+    separation = str(raw.get('test_separation_type', raw.get('separation_experiment_type', '')))
+    is_gc = re.sub(r'[^a-z]', '', separation.lower()) in {
+        'gc', 'gaschromatography', 'gasliquidchromatography', 'gassolidchromatography',
+    }
+    for key in ('instrument', 'instrument_name'):
+        if str(raw.get(key, '')).strip().lower() == 'gas chromatograph' and not is_gc:
+            raw.pop(key)
+
+    # Only recognised scientific fields reach the panel, never format revisions,
+    # table identifiers, placeholder instrument settings or reader bookkeeping.
+    curated = {k: v for k, v in raw.items() if k in _KNOWN_KEYS}
+    for key, aliases in _NETCDF_ALIASES.items():
+        if key not in curated:
+            value = next((raw[a] for a in aliases if a in raw), None)
+            if _present(value):
+                curated[key] = value
+    if 'injection_date_time_stamp' in raw and 'injection_date' not in raw:
+        curated['injection_date'] = fmt_datetime(raw['injection_date_time_stamp'])
+    if 'aia_template_revision' in raw and 'dataset_origin' in raw:
+        curated.setdefault('exporting_data_system', raw['dataset_origin'])
+    return curated
+
+
 def _label_for(key: str) -> str:
     return key.replace('_', ' ').strip().capitalize()
 
@@ -212,7 +286,7 @@ def _printable(value: Any) -> Optional[str]:
 
 def group_metadata(metadata: Optional[Dict[str, Any]]) -> List[Tuple[str, Rows]]:
     """Return ``[(group, [(label, text), ...]), ...]`` for the non-empty groups, in display order."""
-    meta = {str(k).lstrip('﻿'): v for k, v in (metadata or {}).items()}
+    meta = _netcdf_metadata({str(k).lstrip('﻿'): v for k, v in (metadata or {}).items()})
     groups: Dict[str, Rows] = {name: [] for name in GROUP_ORDER}
     seen = set()
 
