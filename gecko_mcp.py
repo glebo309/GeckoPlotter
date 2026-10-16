@@ -165,6 +165,21 @@ def integrate(rt_start: float, rt_end: float, samples: list[str] | None = None, 
 
 
 @server.tool()
+def deconvolve(rt_start: float, rt_end: float, samples: list[str] | None = None, channel: str | None = None,
+               n_peaks: int | None = None, names: list[str] | None = None, centers: list[float] | None = None,
+               prominence: float = .05, center_tolerance: float | None = None, ctx: Context = None) -> list:
+    """Use for a shoulder or overlapping peaks that integrate() cannot separate; check the result with figure().
+    Fits the GUI's EMG model in the exact RT window, saving editable deconvolved peaks with undo. samples defaults
+    to every run, channel to the shown channel. n_peaks=None auto-detects shoulders; an integer forces the count.
+    names labels components in RT order. centers supplies seed RTs; center_tolerance optionally bounds actual
+    apex RTs around those seeds (minutes), useful when a weak shoulder drifts into the main peak. Returns per sample
+    components (name, apex_rt, area, height, area % of this fit), R², residual RMSE, redchi and poor-fit warnings.
+    Existing peaks with stored RT in the window are replaced. A high R² alone does not identify the shoulder."""
+    return _run('deconvolve', rt_start, rt_end, samples, channel, n_peaks, names, centers, prominence,
+                center_tolerance, ctx=ctx)
+
+
+@server.tool()
 def peak_table(samples: list[str] | None = None, ctx: Context = None) -> list:
     """All integrated peaks: sample, channel, name, RT, start, end, area, height, area %, concentration, source."""
     return _run('peaks', samples, ctx=ctx)

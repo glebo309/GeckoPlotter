@@ -405,6 +405,120 @@ class Workspace:
                      f' on {channel or "the shown channel"} in {_names(self._samples(samples))}')
         return out
 
+    def deconvolve(self, rt_start: float, rt_end: float, samples=None, channel=None,
+                   n_peaks: Optional[int] = None, names=None, centers=None, prominence: float = .05,
+                   center_tolerance: Optional[float] = None) -> List[dict]:
+        """Resolve a shoulder or overlapping peaks with the GUI's composite EMG model in the exact window.
+        Auto-detects centers unless supplied (RTs in minutes); n_peaks overrides the detected count. When detection
+        finds too few, seeds are spaced across the signal above 5% height. For a weak shoulder, supply centers and
+        optionally center_tolerance to bound the actual fitted apexes within that many minutes of each marker.
+        names labels components in apex RT order. Replaces peaks whose stored RT lies in the window; the whole
+        call is one undo step. Returns components (apex_rt is the fitted maximum, rt the GUI's stored EMG center),
+        R², residual RMSE, reduced chi-square and warnings (R² < .99, collapsed components or apexes at a bound).
+        Area % is relative to the fitted window. Check with figure(); a high R² alone does not establish identity."""
+        from services.deconvolution_service import DeconvolutionService, _emg_mode_offset
+        if not np.isfinite([rt_start, rt_end]).all() or rt_end <= rt_start:
+            raise GeckoError('rt_end must be after rt_start; both must be finite.')
+        if n_peaks is not None and (isinstance(n_peaks, bool) or not isinstance(n_peaks, int) or n_peaks < 1):
+            raise GeckoError('n_peaks must be a positive integer.')
+        if not np.isfinite(prominence) or not 0 < prominence <= 1:
+            raise GeckoError('prominence must be between 0 (exclusive) and 1.')
+        if centers is not None:
+            centers = sorted(float(c) for c in centers)
+            if (not centers or not np.isfinite(centers).all() or len(set(centers)) != len(centers)
+                    or centers[0] < rt_start or centers[-1] > rt_end):
+                raise GeckoError('centers must be distinct finite RTs inside the window.')
+            if n_peaks is not None and len(centers) != n_peaks:
+                raise GeckoError('centers must contain n_peaks RTs.')
+        if center_tolerance is not None and (centers is None or not np.isfinite(center_tolerance)
+                                             or center_tolerance <= 0):
+            raise GeckoError('center_tolerance must be positive and requires explicit centers.')
+        count = len(centers) if centers is not None else n_peaks
+        if names is not None and (isinstance(names, str) or not names or any(not str(n).strip() for n in names)
+                                  or (count is not None and len(names) != count)):
+            raise GeckoError('names must contain one nonempty name per component in RT order.')
+        bundles = self._samples(samples)
+        targets = [(b, self._channel(b, channel)) for b in bundles]
+        svc, ps = DeconvolutionService(), self.store.peak_service
+        out, added = [], []
+        for bundle, component in targets:
+            fid = component.component_id
+            row = {'sample': bundle.name, 'channel': bundle.component_display_name(component)}
+            out.append(row)
+            try:
+                x, y = self._xy(fid)
+                inside = (x >= rt_start) & (x <= rt_end)
+                x, y = x[inside], y[inside]
+                if len(x) < max(10, 4 * (count or 2) + 1) or not np.isfinite(y).all():
+                    raise GeckoError('Region too narrow or contains nonfinite signal; widen the window.')
+                seeds = ([(c, float(np.interp(c, x, y))) for c in centers] if centers is not None
+                         else svc.auto_detect_centers(x, y, prominence=prominence))
+                if centers is None and n_peaks is not None:
+                    if len(seeds) >= n_peaks:
+                        seeds = sorted(sorted(seeds, key=lambda c: c[1], reverse=True)[:n_peaks])
+                    else:
+                        above = x[y > y.min() + .05 * np.ptp(y)]
+                        if len(above) < n_peaks:
+                            raise GeckoError('Not enough signal to seed the requested components.')
+                        positions = np.linspace(above[0], above[-1], n_peaks + 2)[1:-1]
+                        seeds = [(float(c), float(np.interp(c, x, y))) for c in positions]
+                if not seeds or (count is None and len(seeds) < 2):
+                    raise GeckoError('No second maximum or shoulder found. Widen the window or supply n_peaks/centers.')
+                if names is not None and len(names) != len(seeds):
+                    raise GeckoError(f'Detected {len(seeds)} components but received {len(names)} names.')
+                options = {}
+                if center_tolerance is not None:
+                    options = {'apex_mode': True,
+                               'center_bounds': [(c - center_tolerance, c + center_tolerance) for c in centers]}
+                result = svc.fit_peaks(x, y, seeds, **options)
+                if result is None or not np.isfinite(result.r_squared):
+                    raise GeckoError('Fit failed; try a wider window or explicit centers.')
+                apex = lambda c: c.center + _emg_mode_offset(c.sigma, c.gamma)
+                result.components.sort(key=apex)
+                for i, comp in enumerate(result.components):
+                    comp.index = i
+                fitted = svc.result_to_peaks(result, fid, float(np.mean([c.center for c in result.components])))
+            except Exception as exc:
+                row['error'] = str(exc)
+                continue
+            if not added:
+                ps.save_undo()
+            for old in list(ps.get_peaks(fid) or []):
+                if rt_start <= old.rt <= rt_end:
+                    ps.remove_peak(fid, old.peak_id)
+            stored = []
+            for i, p in enumerate(fitted):
+                peak = ps.add_baseline_peak(fid, area=p.area, height=p.height, apex_x=p.rt,
+                    poly_x=p.poly_x, poly_y=p.poly_y, p_line=p.p_line, q1=p.q1, q2=p.q2,
+                    source='deconvolved', deconv_group=p.deconv_group, fit_params=p.fit_params)
+                if names is not None:
+                    peak.name = peak.label = str(names[i])
+                stored.append(peak)
+            total = sum(p.area for p in stored)
+            warnings = []
+            if result.r_squared < .99:
+                warnings.append('Poor fit (R² < 0.99); check figure() and adjust the window or centers.')
+            if total <= 0 or any(p.area < .005 * total for p in stored):
+                warnings.append('A component has collapsed below 0.5% of fitted area; check the component count.')
+            if center_tolerance is not None and any(
+                    min(abs(apex(c) - lo), abs(apex(c) - hi)) < .01 * center_tolerance
+                    for c, (lo, hi) in zip(result.components, options['center_bounds'])):
+                warnings.append('A fitted apex is at its marker bound; the component area may depend on the constraint.')
+            row.update(r_squared=result.r_squared, redchi=result.redchi,
+                       residual_rmse=float(np.sqrt(np.mean(result.residuals ** 2))), warnings=warnings)
+            added.append((row, bundle, component, stored, [apex(c) for c in result.components]))
+        if added:
+            ps.group_peaks_across_samples(file_overlay_map=self.store.build_file_overlay_map())
+            for row, bundle, component, stored, apexes in added:
+                rows = {r['peak_id']: r for r in self._peak_rows(bundle, component)}
+                total = sum(p.area for p in stored)
+                row['components'] = [dict(rows[p.peak_id], apex_rt=float(rt),
+                    area_percent=100 * p.area / total if total > 0 else None) for p, rt in zip(stored, apexes)]
+            self._record(f'Deconvolved {rt_start:g}-{rt_end:g} min on {channel or "the shown channel"} in '
+                         f'{_names(bundles)} (n_peaks={n_peaks}, centers={centers}, '
+                         f'center_tolerance={center_tolerance}, prominence={prominence:g})')
+        return out
+
     def peaks(self, samples=None) -> List[dict]:
         """The peak table of every channel that has peaks."""
         self._refresh_concentrations()

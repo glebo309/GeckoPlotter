@@ -14,7 +14,7 @@ log = logging.getLogger(__name__)
 
 # Calls that are about one place in the data; 'open' and the reads of the whole workspace leave the view alone.
 FOLLOWED = {'detect_peaks', 'integrate', 'rename_peak', 'remove_peak', 'calibrate', 'add_uv_channel', 'uv_spectrum',
-            'add_eic_channel', 'eic', 'mass_spectrum', 'figure'}
+            'add_eic_channel', 'eic', 'mass_spectrum', 'figure', 'deconvolve'}
 
 
 def _params(workspace, method, args, kwargs) -> dict:
