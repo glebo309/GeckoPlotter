@@ -96,8 +96,13 @@ def _focus(workspace, method, params, result) -> Optional[dict]:
         _show(store, bundle, component)
         # The PDA view ends on the chosen wavelength after sweeping through the range during the screen.
         screened = (result.get('screen') or {}).get('range_nm')
+        apex = None
+        try:
+            apex = workspace._find_peak(bundle, params.get('peak'))[1].rt     # the PDA view ends on the peak's apex
+        except Exception:                                   # noqa: BLE001  no such peak in that sample: leave the time
+            pass
         return {'active': component.component_id, 'side': 'pda', 'wavelength': chosen.get('wavelength_nm'),
-                'sweep_nm': screened}
+                'sweep_nm': screened, 'time': apex}
     hit = _first_hit(result)
     name = (hit or {}).get('sample') or params.get('sample')
     samples = params.get('samples')

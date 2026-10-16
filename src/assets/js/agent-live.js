@@ -24,8 +24,6 @@
     var drops = [{ r: 3.4, seed: 1.3 }, { r: 3.0, seed: 4.7 }, { r: 2.6, seed: 9.1 }];
     var clock = Math.random() * 100, lastFrame = 0, spread = 0;
 
-    // The same drops are drawn twice: small in the status bar, and large on the plot while the agent works (the
-    // viewBox scales them; the filter id differs per copy).
     function svg(scale, id) {
         var root = document.createElementNS(NS, 'svg');
         root.setAttribute('width', W * scale); root.setAttribute('height', H * scale);
@@ -45,41 +43,25 @@
         return root;
     }
 
-    // -- on the plot while the agent works: large drops in its bottom-right corner and a moving band along its top ----
-    var stage = null;
-    function plotStage() {
-        if (stage || !document.body) return stage;
-        stage = document.createElement('div');
-        stage.className = 'agent-live-stage';
-        stage.setAttribute('aria-hidden', 'true');
-        var band = document.createElement('div');
-        band.className = 'agent-live-band';
-        stage.appendChild(band);
-        var big = svg(3, 'agent-live-goo-big');
-        big.setAttribute('class', 'agent-live-drops agent-live-big');
-        stage.appendChild(big);
-        document.body.appendChild(stage);
-        return stage;
-    }
-    function placeStage(working) {
-        var gd = (window.geckoActivePlot && window.geckoActivePlot()) ||
-            (document.getElementById && document.getElementById('main-plot'));
-        var box = gd && gd.querySelector ? (gd.querySelector('.nsewdrag') || gd) : null;
-        var rect = box && box.getBoundingClientRect ? box.getBoundingClientRect() : null;
-        var on = working && current.here && rect && rect.width > 40 && rect.height > 40;
-        var node = plotStage();
-        if (!node) return;
-        node.classList.toggle('on', !!on);
-        if (!on) return;
-        node.style.left = rect.left + 'px'; node.style.top = rect.top + 'px';
-        node.style.width = rect.width + 'px'; node.style.height = rect.height + 'px';
+    // -- the status bar while the agent works: a band in the logo green sweeps along its top edge ----------------
+    var band = null;
+    function placeBand(working) {
+        if (!band) {
+            var bar = document.querySelector && document.querySelector('.status-bar');
+            if (!bar) return;
+            band = document.createElement('div');
+            band.className = 'agent-live-band';
+            band.setAttribute('aria-hidden', 'true');
+            bar.appendChild(band);
+        }
+        band.classList.toggle('on', !!working);
     }
 
     function frame(now) {
         window.requestAnimationFrame(frame);
         if (!el) show(current);                                      // Dash may mount after the first poll
         if (!el || el.hidden || now - lastFrame < 33) return;          // about 30 frames a second is plenty
-        placeStage((current.busy || current.working) && !current.stopped);
+        placeBand((current.busy || current.working) && !current.stopped);
         sweep(now);
         var dt = lastFrame ? Math.min((now - lastFrame) / 1000, 0.1) : 0;
         lastFrame = now;
@@ -207,6 +189,9 @@
             }
         }
         if (!view.side) return view.version;
+        if (view.side === 'pda' && view.time != null) {
+            whenThere('pda-time', function () { set('pda-time', { value: view.time }); });
+        }
         if (view.side === 'pda' && view.wavelength) {
             // The screen went through every wavelength in well under a second: show that pass once, then stop on
             // the chosen one.

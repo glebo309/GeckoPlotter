@@ -12,15 +12,14 @@
                    padding:1px 8px; border-radius:4px; cursor:pointer; margin-left:2px; }
 .agent-live-stop:hover { color:#fff; border-color:rgba(255,255,255,.45); }
 
-/* On the plot while the agent works: large drops in the bottom-right corner (the legend is usually top right) and a band moving along the top edge. */
-.agent-live-stage { position:fixed; pointer-events:none; z-index:55; opacity:0; transition:opacity .5s ease; }
-.agent-live-stage.on { opacity:1; }
-.agent-live-big { position:absolute; right:14px; bottom:12px; filter:drop-shadow(0 2px 6px rgba(53,95,73,.25)); }
-.agent-live-big circle { fill:#5aa877; }
-.agent-live-band { position:absolute; left:0; right:0; top:0; height:3px; overflow:hidden; border-radius:2px;
-  background:linear-gradient(90deg, transparent 0%, #5aa877 35%, #2c5240 50%, #5aa877 65%, transparent 100%);
-  background-size:40% 100%; background-repeat:no-repeat; animation:agent-live-band 1.8s ease-in-out infinite; }
-@keyframes agent-live-band { from { background-position:-60% 0; } to { background-position:160% 0; } }
+/* While the agent works a band in the logo green sweeps along the top edge of the status bar. */
+.status-bar { position:relative; }
+.agent-live-band { position:absolute; left:0; right:0; top:0; height:3px; overflow:hidden; pointer-events:none;
+  opacity:0; transition:opacity .5s ease;
+  background:linear-gradient(90deg, transparent 0%, #5aa877 18%, #9fe0b7 50%, #5aa877 82%, transparent 100%);
+  background-size:28% 100%; background-repeat:no-repeat; animation:agent-live-band 2.2s ease-in-out infinite; }
+.agent-live-band.on { opacity:1; }
+@keyframes agent-live-band { from { background-position:-40% 0; } to { background-position:140% 0; } }
 @media (prefers-reduced-motion: reduce) { .agent-live-band { animation:none; background-size:100% 100%; } }
 
 /* A scan time the agent chose glides: the cursor on the plot and the slider handle move instead of jumping. */
