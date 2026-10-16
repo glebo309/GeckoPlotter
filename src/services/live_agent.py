@@ -30,7 +30,7 @@ LOOPBACK = {'127.0.0.1', '::1', '::ffff:127.0.0.1'}
 
 # The Workspace methods an agent may call: every tool of gecko_mcp.py, nothing else.
 METHODS = {'open', 'samples', 'detect_peaks', 'integrate', 'peaks', 'rename_peak', 'remove_peak', 'calibrate', 'list_calibrations',
-           'remove_calibration', 'add_uv_channel', 'uv_spectrum', 'add_eic_channel', 'eic', 'mass_spectrum',
+           'remove_calibration', 'add_uv_channel', 'compare_wavelengths', 'uv_spectrum', 'add_eic_channel', 'eic', 'mass_spectrum',
            'figure', 'export_results', 'save', 'deconvolve'}
 # Calls that only read: the page does not redraw after them.
 READS = {'samples', 'peaks', 'list_calibrations', 'uv_spectrum', 'mass_spectrum', 'figure', 'export_results', 'save'}
@@ -39,7 +39,8 @@ READS = {'samples', 'peaks', 'list_calibrations', 'uv_spectrum', 'mass_spectrum'
 _DOING = {'open': 'opening {0}', 'samples': 'reading the samples', 'detect_peaks': 'detecting peaks',
           'integrate': 'integrating {0}-{1} min', 'peaks': 'reading the peak table', 'rename_peak': 'renaming {1}',
           'remove_peak': 'removing {1}', 'deconvolve': 'deconvolving {0}-{1} min',
-          'calibrate': 'calibrating {0}', 'list_calibrations': 'reading the calibrations',
+          'calibrate': 'calibrating {0}', 'compare_wavelengths': 'comparing wavelengths',
+          'list_calibrations': 'reading the calibrations',
           'remove_calibration': 'removing calibration {0}', 'add_uv_channel': 'adding {0} nm',
           'uv_spectrum': 'reading the UV spectrum at {1} min', 'add_eic_channel': 'adding EIC {0}',
           'eic': 'extracting EIC {0}', 'mass_spectrum': 'reading the mass spectrum', 'figure': 'drawing a figure',
