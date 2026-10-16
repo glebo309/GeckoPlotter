@@ -215,3 +215,35 @@ def test_candidate_uses_file_explorer_sample_name_instead_of_generic_instrument_
     dm, add = fixture(); add('channel')
     dm.get_data_by_id('channel')['metadata'].update(sample_name=header, parent_bundle_name='Control - 10 mM')
     assert peak_candidates(dm)[0]['sample'] == 'Control - 10 mM'
+
+
+@pytest.mark.parametrize('named_rt,other_rt,expected', [
+    (5.08, 5.01, 'named'),       # name wins even when another peak is nearer
+    (5.2, 5.01, None),          # an out-of-window named peak blocks RT fallback
+    (None, 5.01, 'ambiguous'),  # without the name, two peaks in the window: neither is quantified
+])
+def test_matching_prefers_the_name_then_the_window(named_rt, other_rt, expected):
+    dm, add = fixture(); first = add('unknown', position=5.08)
+    first.name = 'Target' if named_rt is not None else 'unassigned'
+    if named_rt is not None:
+        first.rt = named_rt
+    second = NS(**vars(first)); second.peak_id = 'other'; second.name = 'main peak'; second.rt = other_rt
+    dm.peak_service.get_all_peaks()['unknown'].append(second)
+    row = peak_candidates(dm)[0]; row['position'] = 5.
+    model(dm, row, name='Target')
+    result = apply_calibrations(dm)
+    assert first.concentration == (pytest.approx(2.) if expected == 'named' else None)
+    assert second.concentration is None
+    assert any('Ambiguous' in r['status'] for r in result.values()) == (expected == 'ambiguous')
+
+
+def test_standard_sample_stays_excluded_after_its_calibrated_peak_is_removed():
+    dm, add = fixture(); standard = add('standard'); add('unknown')
+    cal = model(dm, peak_candidates(dm)[0], name='Analyte')
+    cal.standards[0].source_id = 'standard:peak'
+    other = NS(**vars(standard)); other.peak_id = 'other'; other.name = 'main peak'
+    dm.peak_service.get_all_peaks()['standard'] = [other]
+    result = apply_calibrations(dm)
+    assert other.concentration is None
+    assert result['standard:other']['model_id'] is None
+    assert result['unknown:peak']['concentration'] == pytest.approx(2.)

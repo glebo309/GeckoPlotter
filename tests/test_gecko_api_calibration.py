@@ -99,3 +99,34 @@ def test_calibration_works_on_samples_read_from_files(tmp_path, monkeypatch):
     ws.integrate(2.8, 3.2, name='Product')
     result = ws.calibrate('Product', {k: v for k, v in levels.items() if k.startswith('Std')})
     assert {c['sample']: c['concentration'] for c in result['concentrations']}['Unknown'] == pytest.approx(3.0, rel=0.01)
+
+
+def test_other_standard_peaks_are_not_unknowns_and_named_unknown_wins(workspace, tmp_path):
+    from copy import deepcopy
+    for name in [*STANDARDS, 'Unknown A']:
+        peaks = workspace.store.peak_service.get_peaks(name + '-uv')
+        other = deepcopy(peaks[0])
+        other.peak_id += '-other'
+        other.name = other.label = 'main peak'
+        other.rt += .03
+        owner = workspace.store.peak_owner_id(name + '-uv')
+        workspace.store.peak_service._peaks[owner].append(other)
+    result = workspace.calibrate('Ala', STANDARDS, name='Alanine curve')
+    assert {r['sample'] for r in result['concentrations']} == {'Unknown A', 'Unknown B'}
+    assert all(r['concentration'] is not None for r in result['concentrations'])
+    assert not any('Ambiguous' in w for w in result['warnings'])
+    # The same shared matching is used when a project is reopened and refreshed.
+    again = Workspace()
+    again.open(workspace.save(str(tmp_path / 'named')))
+    again._refresh_concentrations()
+    assert all(r['concentration'] is None for r in again.peaks() if r['name'] == 'main peak')
+    assert next(r for r in again.peaks('Unknown A') if r['name'] == 'Ala')['concentration'] == pytest.approx(1.5, rel=.01)
+
+
+def test_below_intercept_standard_explains_missing_back_calculation(workspace):
+    for name, area in zip(STANDARDS, [0.01, 0.08, 0.28, 0.36, 1.26, 0.39]):
+        workspace.store.peak_service.get_peaks(name + '-uv')[0].area = area
+    result = workspace.calibrate('Ala', STANDARDS)
+    for row in result['standards'][:2]:
+        assert row['back_calculated'] is None
+        assert row['note'] == 'area below the intercept'

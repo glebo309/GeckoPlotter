@@ -270,7 +270,8 @@ def register_calibration_callbacks(app: dash.Dash, data_manager) -> None:
             if matching_signal and values['position'] not in (None,''):
                 center, tolerance = float(values['position']), float(values['tolerance'])
                 match_text = (f"Find a peak between {center-tolerance:.4g} and {center+tolerance:.4g} {matching_units} "
-                              'in other samples, using the same signal. Its response is converted to concentration using this curve.')
+                              'in other samples, using the same signal; a peak with the calibrated peak\'s name is taken first, and two '
+                              'other peaks there are ambiguous. Peaks in the standards are not unknowns. Its response is converted to concentration using this curve.')
             result = [options,model_id,rows,included] + [values[n] for n in field_names]
             result += [figure,feedback,match_text,(revision or 0)+1 if changed else dash.no_update,model.coefficients is None]
             if not hydrate and trigger in {'cal-standards-table', *(cid for cid, _ in field_ids)} and trigger != 'cal-response-type':

@@ -137,7 +137,8 @@ class Workspace:
     def open(self, path: str, everything: bool = False) -> dict:
         """Open a file, a run folder, a folder of run folders (one sample per run, named by the folder) or a project
         (.gecko / FAIR package .zip, which replaces the workspace). From Agilent export folders only the full-scan
-        spectra and the UV channels are read, unless ``everything``."""
+        spectra and the UV channels are read, unless ``everything``. Projects inside a data folder are listed
+        separately under ``projects``; open the project file itself to restore it."""
         from services.workspace_loader import load_files
         path = Path(path).expanduser()
         if not path.exists():
@@ -148,17 +149,24 @@ class Workspace:
             return {'opened': str(path), 'samples': [s['name'] for s in self.samples()],
                     'warnings': list(report.warnings) + list(report.errors),
                     'missing_files': list(report.missing_files)}
+        projects = []
+
+        def data_files(folder):
+            files = _files_in(folder)
+            projects.extend(str(f) for f in files if f.suffix.lower() in ('.gecko', '.zip'))
+            return [f for f in files if f.suffix.lower() not in ('.gecko', '.zip')]
+
         if path.is_file():
             runs = [(None, [path])]
         else:
-            subfolders = sorted(p for p in path.iterdir() if p.is_dir() and _files_in(p))
+            subfolders = {p: files for p in sorted(path.iterdir()) if p.is_dir() and (files := data_files(p))}
+            loose = data_files(path)
             if subfolders:
-                runs = list(zip(_run_names(subfolders), [_files_in(f) for f in subfolders]))
-                loose = _files_in(path)
+                runs = list(zip(_run_names(list(subfolders)), subfolders.values()))
                 if loose:
                     runs.append((None, loose))
             else:
-                runs = [(None, _files_in(path))]
+                runs = [(None, loose)] if loose else []
         added, failed, bundles = [], [], []
         for name, files in runs:
             result = load_files(self.store, [(f.name, f.read_bytes()) for f in files], skip_duplicate_exports=not everything)
@@ -171,7 +179,10 @@ class Workspace:
             label = re.sub(r'^[\d.\-]+[_ ]+', '', path.name) or path.name     # '2026-...-..._HalB scope' -> 'HalB scope'
             self._group_folder(bundles, label)
         self._record(f'Opened {path.name}: {len(added)} sample(s)')
-        return {'added': added, 'not_readable': failed, 'samples': len(self.samples())}
+        report = {'added': added, 'not_readable': failed, 'samples': len(self.samples()), 'projects': sorted(projects)}
+        if projects:
+            report['note'] = 'Project files were left out of the data import; open_data(<project path>) opens one instead.'
+        return report
 
     def _group_folder(self, bundles, folder: str) -> None:
         """Runs opened together from one folder are one group in the file tree and one plot tab named after the
@@ -505,6 +516,12 @@ class Workspace:
                 warnings.append('Poor fit (R² < 0.99); check figure() and adjust the window or centers.')
             if total <= 0 or any(p.area < .005 * total for p in stored):
                 warnings.append('A component has collapsed below 0.5% of fitted area; check the component count.')
+            widest = max(widths.values())
+            for peak, comp in zip(stored, result.components):
+                if widths[id(comp)] < widest / 3:
+                    warnings.append(f'{peak.label or peak.name}: FWHM {widths[id(comp)]:.4g} min is below 1/3 of '
+                                    f'the widest component ({widest:.4g} min); too narrow for a chromatographic '
+                                    'peak. Check the component count.')
             if at_bound:
                 warnings.append('A fitted apex is at its marker bound; the component area may depend on the constraint.')
             if any(widths[id(c)] > 2 * main_width or max(c.curve[0], c.curve[-1]) > .1 * c.curve.max()
@@ -579,9 +596,10 @@ class Workspace:
                   through_zero: bool = False, channel=None, rt_tolerance: float = 0.2,
                   name: Optional[str] = None) -> dict:
         """Fit a calibration of ``peak`` from standard samples ({sample: concentration}) as the app's calibration editor
-        does, and quantify that peak in every other sample (matched by retention time ± ``rt_tolerance`` on the same
-        channel). Recalibrating under the same name replaces the curve. Returns the fit, the standards back-calculated,
-        the concentrations and warnings to read."""
+        does, and quantify that peak in every other sample on the same channel within ± ``rt_tolerance``.
+        Prefer the calibrated peak's name; only without that name, use the nearest RT (equal distances are ambiguous).
+        Other peaks in standard samples are not unknowns. Recalibrating under the same name replaces the curve.
+        Returns the fit, standards back-calculated (with a note when unavailable), concentrations and warnings."""
         from services.calibration_workflow import add_peak_rows, apply_calibrations, fit_calibration_form, \
             peak_candidates
         if fit not in ('linear', 'quadratic', 'power'):
@@ -650,6 +668,11 @@ class Workspace:
                                   'area': point.area, 'back_calculated': back,
                                   'error_percent': round(error, 2) if error is not None else None,
                                   'used': point.included})
+            if back is None:
+                below_intercept = fit in ('linear', 'quadratic') and point.area < coefficients[-1]
+                note = 'area below the intercept' if below_intercept else 'no nonnegative concentration could be calculated'
+                standard_rows[-1]['note'] = note
+                warnings.append(f'{point.sample_name}: {note}.')
         standard_ids = set(ids)
         candidates = {c['id']: c for c in peak_candidates(self.store)}
         quantified = []

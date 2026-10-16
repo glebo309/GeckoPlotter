@@ -134,7 +134,9 @@ def open_data(path: str, everything: bool = False, ctx: Context = None) -> dict:
     """Open a data file, a run folder, a folder of run folders (one sample per run, named after its folder) or a
     GeckoPlotter project (.gecko, or a FAIR package .zip; this replaces the workspace). From Agilent export folders
     only the full-scan spectra (*_spectra.cdf) and UV channels (*.dx_VWD*.CSV) are read; everything=True reads the
-    small duplicate .cdf/.CSV exports too."""
+    small duplicate .cdf/.CSV exports too. Project files (.gecko / .zip) found inside a data folder are not read
+    as data: their paths are returned under projects, separately from not_readable. Use open_data(<project path>)
+    to open one instead."""
     return _run('open', path, everything, ctx=ctx)
 
 
@@ -175,7 +177,8 @@ def deconvolve(rt_start: float, rt_end: float, samples: list[str] | None = None,
     component's tailing to the main peak's. Include baseline on both sides (and the full main-peak tail).
     names labels components in RT order. centers supplies seed RTs; center_tolerance optionally bounds actual
     apex RTs around those seeds (minutes), useful when a weak shoulder drifts into the main peak. Returns per sample
-    components (name, apex_rt, area, height, area % of this fit, FWHM), R², residual RMSE, redchi and shape/fit warnings.
+    components (name, apex_rt, area, height, area % of this fit, FWHM), R², residual RMSE, redchi and shape/fit warnings,
+    including components narrower than 1/3 of the widest component's FWHM.
     Existing peaks with stored RT in the window are replaced. A high R² alone does not identify the shoulder."""
     return _run('deconvolve', rt_start, rt_end, samples, channel, n_peaks, names, centers, prominence,
                 center_tolerance, ctx=ctx)
@@ -206,7 +209,10 @@ def calibrate(peak: str, standards: dict[str, float], units: str = 'mM', fit: st
               name: str | None = None, ctx: Context = None) -> dict:
     """Calibrate a peak from standards: standards maps sample name -> concentration (e.g. {"Ala 1 mM": 1.0, ...}).
     The peak (by its name) must be integrated in the standards first. Every other sample with that peak (same channel,
-    retention time ± rt_tolerance min) gets a concentration. fit: linear, quadratic or power. Read 'warnings':
+    retention time ± rt_tolerance min) gets a concentration. Matching prefers the calibrated peak's name; only if
+    absent does it use the nearest RT in the window, with ambiguity only for equal distances. Other peaks in
+    standard samples are not unknowns. fit: linear, quadratic or power. Standard rows with unavailable
+    back_calculated values include a note (e.g. area below the intercept). Read 'warnings':
     missing standards, low R², standards that back-calculate badly, samples outside the calibrated range or the
     retention-time window. Recalibrating with the same name replaces the curve."""
     return _run('calibrate', peak, standards, units, fit, through_zero, channel, rt_tolerance, name, ctx=ctx)

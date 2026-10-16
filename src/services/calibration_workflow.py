@@ -3,7 +3,7 @@ import copy
 import json
 import math
 import re
-from collections import Counter
+from collections import Counter, defaultdict
 
 from services.calibration_service import CalibrationPoint
 
@@ -108,7 +108,8 @@ def peak_candidates(data_manager):
                 position = (start + end) / 2 if start is not None and end is not None else None
                 position_source = 'midpoint' if position is not None else 'unavailable'
             rows.append(dict(id=f'{file_id}:{peak.peak_id}', file_id=file_id, peak_id=peak.peak_id,
-                             sample=sample, peak_name=getattr(peak, 'label', '') or peak.name,
+                             sample=sample, sample_id=metadata.get('parent_bundle_id') or file_id,
+                             peak_name=getattr(peak, 'label', '') or peak.name,
                              position=position, position_source=position_source,
                              response=_number(peak.area), height=_number(peak.height), signal_key=key,
                              x_units=x_units, height_units=height_units,
@@ -133,13 +134,38 @@ def _matches(model, row):
 def apply_calibrations(data_manager):
     """Refresh predictions; never leave obsolete concentration on an unmatched peak.
 
-    Returns display values keyed by candidate ID. Multiple models, or multiple
-    peaks in one signal matching a model, require user resolution.
+    Returns display values keyed by candidate ID. A peak with the calibrated peak's name is taken first; otherwise
+    every peak in the window is a match, and two in one signal are ambiguous (no concentration rather than the
+    wrong peak's). A standard sample's other peaks are never candidate unknowns for that model.
     """
     rows = peak_candidates(data_manager)
     service = data_manager.calibration_service
     models = list(service.get_all_models().values())
-    matches = {row['id']: [model for model in models if _matches(model, row)] for row in rows}
+    by_id = {row['id']: row for row in rows}
+    signals = defaultdict(list)
+    for row in rows:
+        signals[row['file_id']].append(row)
+    matches = {row['id']: [] for row in rows}
+    for model in models:
+        source_ids = {point.source_id for point in model.standards if point.source_id}
+        standards = [by_id[key] for key in source_ids if key in by_id]
+        # Removing the selected peak must not turn its sample's other peaks into unknowns.
+        standard_files = {key.rsplit(':', 1)[0] for key in source_ids}
+        standard_samples = {row['sample_id'] for row in rows if row['file_id'] in standard_files}
+        names = {row['peak_name'] for row in standards}
+        # Portable calibrations retain the selected peak name even without its source file loaded.
+        if not names:
+            names = {point.sample_name.rsplit(' / ', 1)[1] for point in model.standards
+                     if point.source_id and ' / ' in point.sample_name}
+        names = names or {model.analyte_name}
+        for candidates in signals.values():
+            if candidates[0]['sample_id'] in standard_samples:
+                selected = [row for row in candidates if row['id'] in source_ids and _matches(model, row)]
+            else:
+                named = [row for row in candidates if row['peak_name'] in names]
+                selected = [row for row in (named or candidates) if _matches(model, row)]   # named, if there is one
+            for row in selected:
+                matches[row['id']].append(model)
     counts = Counter((row['file_id'], model.model_id) for row in rows for model in matches[row['id']])
     peaks = {f'{fid}:{peak.peak_id}': peak for fid, items in data_manager.peak_service.get_all_peaks().items() for peak in items}
     results = {}

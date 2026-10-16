@@ -292,3 +292,24 @@ def test_live_mode_follows_the_agent_to_its_channel_and_view(sequence):
     assert view['side'] == 'ms-peak-mass' and view['peak'] == rows[0]['peak_id']
     assert focus(ws, 'samples', [], {}, ws.samples()) is None                         # reads leave the view
     assert focus(ws, 'integrate', [1, 2], {}, {'error': 'x'}) is None
+
+
+@pytest.mark.parametrize('nested', [False, True])
+def test_data_folder_reports_projects_without_sending_them_to_ingestion(sequence, nested):
+    folder = sorted(sequence.iterdir())[0] if nested else sequence
+    projects = [folder / 'analysis.gecko', folder / 'fair.ZIP']
+    for project in projects:
+        project.write_bytes(b'not raw data')
+    result = Workspace().open(str(sequence))
+    assert result['not_readable'] == []
+    assert result['projects'] == [str(p) for p in projects]
+    assert 'open_data' in result['note']
+    assert result['samples'] == 2
+
+
+def test_folder_containing_only_a_project_leaves_the_workspace_empty(tmp_path):
+    project = tmp_path / 'analysis.gecko'
+    project.write_bytes(b'not raw data')
+    result = Workspace().open(str(tmp_path))
+    assert result['added'] == [] and result['not_readable'] == []
+    assert result['projects'] == [str(project)]

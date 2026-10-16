@@ -266,3 +266,16 @@ def test_editor_has_no_diagnostic_outputs_or_calculation_but_curve_keeps_r_squar
     register_calibration_callbacks(app, editor.dm)
     assert not any(name in key for key in app.callback_map
                    for name in ('cal-residual-graph','cal-results-info','cal-fit-summary'))
+
+
+def test_editor_fit_prefers_named_peak_and_excludes_other_standard_peaks(monkeypatch):
+    editor = Editor(monkeypatch)
+    peaks = editor.dm.peak_service.get_all_peaks()
+    for items in peaks.values():
+        items[0].rt = 5.04
+        other = copy.deepcopy(items[0])
+        other.peak_id = 'other'; other.name = 'main peak'; other.rt = 5.
+        items.append(other)
+    result = editor.fitted()
+    assert all(items[0].concentration is not None and items[1].concentration is None for items in peaks.values())
+    assert '3 matching peak(s)' in result[-4]

@@ -207,3 +207,16 @@ def test_mcp_and_live_agent_deconvolution(shoulder, monkeypatch):
     ws = shoulder[0]
     rows = ws.deconvolve(.6, 1.5, samples=['sample'])
     assert focus(ws, 'deconvolve', [.6, 1.5], {'samples': ['sample']}, rows)['active'] == 'sample-uv'
+
+
+@pytest.mark.parametrize('sigma,warn', [(.008, True), (.025, False)])
+def test_narrow_component_warns_relative_to_widest_component(sigma, warn):
+    ws = Workspace()
+    x = np.linspace(.6, 1.5, 1801)
+    model = ExponentialGaussianModel()
+    y = model.eval(x=x, amplitude=2, center=.88, sigma=sigma, gamma=300)
+    y += model.eval(x=x, amplitude=10, center=1, sigma=.04, gamma=40)
+    _sample(ws, 'synthetic', x, y)
+    row = ws.deconvolve(.6, 1.5, centers=[.88, 1.02], names=['shoulder', 'main'])[0]
+    assert not any('collapsed' in w for w in row['warnings'])
+    assert any('FWHM' in w and '1/3' in w and 'shoulder' in w for w in row['warnings']) is warn
