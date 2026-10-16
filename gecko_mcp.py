@@ -241,6 +241,20 @@ def remove_calibration(name: str, ctx: Context = None) -> list:
 
 
 @server.tool()
+def compare_wavelengths(peak: str, standards: dict[str, float], wavelengths: list[float] | None = None,
+                       samples: list[str] | None = None, rt_tolerance: float = 0.2, ctx: Context = None) -> dict:
+    """Use before calibrating PDA (3D UV) data, when asked for the best wavelength, or when calibration on the
+    default channel is poor. First integrate and name the analyte in the standards ({sample: concentration}).
+    Compares supplied wavelengths or up to eight UV maxima/common wavelengths including the original channel,
+    with fixed bounds and a straight baseline. Returns ranked response, linearity/back-calculation/curvature, saturation, S/N/LOQ,
+    baseline and spectral purity/selectivity diagnostics with warnings. Only an eligible recommended channel is
+    kept in the standards and optional additional samples; existing peaks stay unchanged. Integrate its returned
+    rt_start/rt_end with snap_to_valleys=False before calibrate(channel=the recommended channel). LOQ is an
+    estimate in the supplied concentration units. No recommendation means all candidates failed screening."""
+    return _run('compare_wavelengths', peak, standards, wavelengths, samples, rt_tolerance, ctx=ctx)
+
+
+@server.tool()
 def add_uv_channel(wavelength_nm: float, samples: list[str] | None = None, ctx: Context = None) -> list:
     """Extract one wavelength from each sample's PDA (3D UV) data as a new channel, like the app's "Add N nm
     channel". Use it when the recorded channels miss the compound (no chromophore: try 200-210 nm); then

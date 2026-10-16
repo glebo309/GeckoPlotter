@@ -729,6 +729,18 @@ class Workspace:
 
     # -- PDA (3D UV) ----------------------------------------------------------------------------------------------
 
+    def compare_wavelengths(self, peak: str, standards: dict, wavelengths=None, samples=None,
+                           rt_tolerance: float = 0.2) -> dict:
+        """Compare PDA calibration wavelengths using the highest standard's named peak window in every standard.
+        Candidates default to UV maxima, the original channel and common wavelengths (up to eight). Reports area,
+        linearity, saturation, S/N, estimated LOQ, baseline and spectral purity; rejects saturation, impurity and S/N < 10
+        before ranking by back-calculation error then slope. Only the recommended channel is retained, in the
+        standards and optional additional samples. Existing peaks are preserved; integrate the returned window
+        with snap_to_valleys=False on the recommended channel before calibrating. LOQ has the standards' units.
+        """
+        from services.wavelength_comparison import compare_wavelengths
+        return compare_wavelengths(self, peak, standards, wavelengths, samples, rt_tolerance)
+
     def _pda_source(self, bundle):
         from services.pda_service import resolve_pda_source
         for component in bundle.component_list:

@@ -14,7 +14,7 @@ log = logging.getLogger(__name__)
 
 # Calls that are about one place in the data; 'open' and the reads of the whole workspace leave the view alone.
 FOLLOWED = {'detect_peaks', 'integrate', 'rename_peak', 'remove_peak', 'calibrate', 'add_uv_channel', 'uv_spectrum',
-            'add_eic_channel', 'eic', 'mass_spectrum', 'figure', 'list_calibrations', 'deconvolve'}
+            'add_eic_channel', 'eic', 'mass_spectrum', 'figure', 'list_calibrations', 'deconvolve', 'compare_wavelengths'}
 
 
 def _params(workspace, method, args, kwargs) -> dict:
@@ -85,6 +85,14 @@ def _focus(workspace, method, params, result) -> Optional[dict]:
     store = workspace.store
     if method in ('calibrate', 'list_calibrations'):
         return _calibration_view(store, params, result)
+    if method == 'compare_wavelengths':
+        chosen = result.get('recommendation')
+        if not chosen:
+            return None
+        bundle = workspace._sample(chosen['sample'])
+        component = workspace._channel(bundle, chosen['channel'])
+        _show(store, bundle, component)
+        return {'active': component.component_id}
     hit = _first_hit(result)
     name = (hit or {}).get('sample') or params.get('sample')
     samples = params.get('samples')
