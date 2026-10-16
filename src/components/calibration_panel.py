@@ -1,15 +1,7 @@
 """Editable calibration standards, fitted curve and saved model controls."""
 from dash import html, dcc, dash_table
 import dash_mantine_components as dmc
-
-
-def _empty_graph(message):
-    return {'data':[], 'layout':{
-        'template':'plotly_white', 'autosize':True,
-        'margin':{'l':42,'r':12,'t':16,'b':38},
-        'xaxis':{'visible':False}, 'yaxis':{'visible':False},
-        'annotations':[{'text':message,'xref':'paper','yref':'paper','x':.5,'y':.5,
-                        'showarrow':False,'font':{'size':12,'color':'#777'}}]}}
+from services.calibration_service import empty_calibration_figure
 
 
 def create_calibration_panel():
@@ -94,7 +86,7 @@ def create_calibration_panel():
                 html.Div([
                     html.Section([
                         html.H4('Calibration curve',className='cal-heading'),
-                        dcc.Graph(id='cal-curve-graph',figure=_empty_graph('Fit standards to view the calibration curve.'),
+                        dcc.Graph(id='cal-curve-graph',figure=empty_calibration_figure('Select standards and fit calibration'),
                             responsive=True,config={'displaylogo':False,'responsive':True},className='cal-curve',
                             style={'minHeight':'360px'}),
                     ],className='cal-section cal-curve-section'),

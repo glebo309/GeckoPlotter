@@ -17,6 +17,19 @@ import numpy as np
 import plotly.graph_objects as go
 from scipy.optimize import curve_fit
 
+from services.plot_settings_service import DEFAULT_PLOT_SETTINGS, PlotSettingsService
+
+
+def empty_calibration_figure(message):
+    """Use the plot theme without implying an unfitted measurement range."""
+    settings = PlotSettingsService.from_dict(DEFAULT_PLOT_SETTINGS)
+    fig = PlotSettingsService.apply_to_figure(go.Figure(), settings)
+    fig.update_xaxes(visible=False)
+    fig.update_yaxes(visible=False)
+    fig.update_layout(showlegend=False, autosize=True)
+    fig.add_annotation(text=message, xref='paper', yref='paper', x=.5, y=.5, showarrow=False)
+    return fig
+
 
 # =============================================================================
 # Data classes
@@ -299,6 +312,13 @@ class CalibrationService:
         model = self._require_model(model_id)
         fig = go.Figure()
 
+        settings = PlotSettingsService.from_dict(DEFAULT_PLOT_SETTINGS)
+        settings.title = f"Calibration — {model.analyte_name}"
+        settings.x_label = f"Concentration ({model.units})" if model.units else "Concentration"
+        settings.y_label = f"Peak {model.response_type}" + (f" ({model.response_units})" if model.response_units else "")
+        # Style the canvas first: the traces carry semantic colours and symbols.
+        PlotSettingsService.apply_to_figure(fig, settings)
+
         # Included points
         inc = [s for s in model.standards if s.included]
         exc = [s for s in model.standards if not s.included]
@@ -361,20 +381,15 @@ class CalibrationService:
             annotation_text += f"<br>R² = {model.r_squared:.6f}"
 
         fig.update_layout(
-            title=f"Calibration — {model.analyte_name}",
-            xaxis_title=f"Concentration ({model.units})" if model.units else "Concentration",
-            yaxis_title=f"Peak {model.response_type}" + (f" ({model.response_units})" if model.response_units else ""),
-            template="plotly_white",
             annotations=[
                 dict(
                     xref="paper", yref="paper",
                     x=0.05, y=0.95,
                     text=annotation_text,
                     showarrow=False,
-                    font=dict(size=12),
                     align="left",
-                    bgcolor="rgba(255,255,255,0.8)",
-                    bordercolor="#ccc",
+                    bgcolor=fig.layout.legend.bgcolor,
+                    bordercolor=fig.layout.xaxis.linecolor,
                     borderwidth=1,
                     borderpad=6,
                 ),

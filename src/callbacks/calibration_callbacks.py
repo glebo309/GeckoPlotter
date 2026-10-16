@@ -7,8 +7,7 @@ import uuid
 
 import dash
 from dash import Input, Output, State, dcc
-import plotly.graph_objects as go
-from services.calibration_service import CalibrationPoint
+from services.calibration_service import empty_calibration_figure
 
 
 def _number(value, label):
@@ -26,16 +25,9 @@ from services.calibration_workflow import add_peak_rows, fit_calibration_form  #
 
 def _form_signature(form):
     rows, included, values = form
-    return ([{k:r.get(k) for k in ('id','sample_name','position','concentration','area','signal_key','x_units','response_units')} for r in rows], included, values)
-
-
-def _empty_figure(title):
-    fig = go.Figure()
-    fig.update_layout(template='plotly_white', title=dict(text=title, font=dict(size=14)),
-                      margin=dict(l=55,r=20,t=45,b=45), font=dict(size=12))
-    fig.update_xaxes(showline=True, mirror=True, linecolor='#555')
-    fig.update_yaxes(showline=True, mirror=True, linecolor='#555')
-    return fig
+    # Labels are saved independently; browser echoes may still contain untrimmed text.
+    fit_values = {k:v for k,v in values.items() if k not in ('name','units')}
+    return ([{k:r.get(k) for k in ('id','sample_name','position','concentration','area','signal_key','x_units','response_units')} for r in rows], included, fit_values)
 
 
 def register_calibration_callbacks(app: dash.Dash, data_manager) -> None:
@@ -104,6 +96,7 @@ def register_calibration_callbacks(app: dash.Dash, data_manager) -> None:
         feedback = ''
         hydrate = False
         changed = False
+        labels_only = False
         try:
             if trigger == 'cal-new-btn':
                 model = service.create_model('New calibration', '')
@@ -125,6 +118,20 @@ def register_calibration_callbacks(app: dash.Dash, data_manager) -> None:
                 if not model:
                     return result
                 hydrate = True
+            elif trigger in ('cal-analyte-name', 'cal-units') and model:
+                # Labels do not change the regression. In particular, replace_model
+                # imports/refits standards, which could resurrect a pending fit.
+                field, attribute = ('name', 'analyte_name') if trigger == 'cal-analyte-name' else ('units', 'units')
+                label = str(values[field] or '').strip()
+                if field == 'name' and not label:
+                    raise ValueError('Give the calibration an analyte name.')
+                if label == getattr(model, attribute):
+                    return result
+                setattr(model, attribute, label)
+                if model_id in drafts:
+                    drafts[model_id][2][field] = label
+                labels_only = changed = True
+                feedback = 'Calibration label updated.'
             elif trigger in ('cal-match-position', 'cal-match-tolerance', 'cal-auto-apply') and model and model.coefficients is not None:
                 # Matching does not alter the fitted response curve.
                 proposed_position = None if values['position'] in (None,'') else _number(values['position'],'Peak position')
@@ -233,7 +240,8 @@ def register_calibration_callbacks(app: dash.Dash, data_manager) -> None:
                         position=model.match_position,tolerance=model.match_tolerance,auto_apply=model.auto_apply)
                     if not model.standards and not model.signal_key:
                         values['auto_apply'] = True
-            else:
+            elif not labels_only:
+                new_model = model is None
                 if model is None:
                     model = service.create_model(values['name'] or 'New calibration','')
                     model_id = model.model_id
@@ -248,7 +256,7 @@ def register_calibration_callbacks(app: dash.Dash, data_manager) -> None:
                     force_zero=model.force_zero,response_type=model.response_type,position=model.match_position,
                     tolerance=model.match_tolerance,auto_apply=model.auto_apply)
                 baseline = (baseline_rows,[i for i,s in enumerate(model.standards) if s.included],baseline_values)
-                if _form_signature(signature) == _form_signature(previous if previous is not None else baseline):
+                if not new_model and _form_signature(signature) == _form_signature(previous if previous is not None else baseline):
                     return result
                 drafts[model_id] = copy.deepcopy(signature)
                 service._invalidate_fit(model)
@@ -258,11 +266,8 @@ def register_calibration_callbacks(app: dash.Dash, data_manager) -> None:
             if changed:
                 apply_calibrations(data_manager)
             options = [{'value':m.model_id,'label':m.analyte_name} for m in service.get_all_models().values()]
-            figure = service.create_calibration_figure(model_id) if model.coefficients is not None else _empty_figure('Select standards and fit calibration')
-            figure.update_layout(margin=dict(l=65,r=24,t=48,b=50),font=dict(size=12),
-                legend=dict(orientation='h',y=1.02,yanchor='bottom',x=1,xanchor='right'),autosize=True)
-            figure.update_xaxes(showline=True,mirror=True,linecolor='#555')
-            figure.update_yaxes(showline=True,mirror=True,linecolor='#555')
+            figure = service.create_calibration_figure(model_id) if model.coefficients is not None else empty_calibration_figure('Select standards and fit calibration')
+            figure.update_layout(margin=dict(l=65,r=24,t=48,b=50),autosize=True)
             signal_rows = [r for r in rows if r.get('signal_key')]
             matching_signal = bool(signal_rows or model.signal_key)
             matching_units = signal_rows[0].get('x_units', '') if signal_rows else model.x_units
