@@ -146,6 +146,7 @@
 .about-claude[hidden] { display: none; }
 .about-claude-title { font-size: 12.5px; font-weight: 600; color: #d5e3da; }
 .about-claude-status { font-size: 12px; color: #8aa395; margin-top: 2px; line-height: 1.45; }
+.about-claude-error { color: #f5c26b; margin-top: 2px; }
 button.about-status { font-family: inherit; cursor: default; background: none; }
 button.about-status.clickable { cursor: pointer; }
 button.about-status.clickable:hover { background: rgba(245,194,107,.16); }

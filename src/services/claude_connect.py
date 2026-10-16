@@ -1,9 +1,10 @@
 """Connect GeckoPlotter's agent interface (gecko_mcp.py) to the AI apps on this computer, on request (About window).
 
-Claude Desktop lists its MCP servers in claude_desktop_config.json; Claude Code and Codex are told with ``claude mcp add``
-and ``codex mcp add``. All get the same entry, ``geckoplotter``: the Python running this app and gecko_mcp.py next to app.py, so it keeps working after
-every update (the launcher replaces the code in the same folder). Only that entry is added or replaced; a copy of the
-Desktop file is kept as ``claude_desktop_config.json.bak``. Nothing is changed without the user's click.
+Claude Desktop and Gemini CLI list their MCP servers in a settings file (claude_desktop_config.json,
+~/.gemini/settings.json); Claude Code and Codex are told with ``claude mcp add`` and ``codex mcp add``. All get the same
+entry, ``geckoplotter``: the Python running this app and gecko_mcp.py next to app.py, so it keeps working after every
+update (the launcher replaces the code in the same folder). Only that entry is added or replaced; a copy of a settings
+file is kept as ``<name>.bak``. Nothing is changed without the user's click.
 """
 from __future__ import annotations
 
@@ -65,6 +66,21 @@ def codex_cli() -> Optional[str]:
     return None
 
 
+def gemini_cli() -> Optional[str]:
+    found = shutil.which('gemini')
+    if found:
+        return found
+    for candidate in (Path('/opt/homebrew/bin/gemini'), Path('/usr/local/bin/gemini'), Path.home() / '.local' / 'bin' / 'gemini',
+                      Path(os.environ.get('APPDATA') or '') / 'npm' / 'gemini.cmd'):
+        if str(candidate) not in ('', '.') and candidate.is_file():
+            return str(candidate)
+    return None
+
+
+def gemini_config_path() -> Path:
+    return Path.home() / '.gemini' / 'settings.json'
+
+
 def _run(cli: str, *args: str, timeout: float = 60) -> subprocess.CompletedProcess:
     """Run an AI app's command line. Started from the Dock or Finder, the app's PATH lacks the folder of the CLI, so
     a CLI that is a Node script (codex: ``#!/usr/bin/env node``) would not find node; its own folder comes first."""
@@ -85,87 +101,96 @@ def _cli_has_entry(cli: Optional[str]) -> bool:
     return done.returncode == 0 and server_command()[1] in (done.stdout or '')
 
 
+# (key, name shown, what to do so the app sees the new entry)
+APPS = [('desktop', 'Claude Desktop', 'quit and reopen Claude Desktop'),
+        ('code', 'Claude Code', 'start a new Claude Code session'),
+        ('codex', 'Codex', 'start a new Codex session'),
+        ('gemini', 'Gemini CLI', 'start a new Gemini CLI session')]
+
+
+def _file_has_entry(config: Path) -> bool:
+    try:
+        entry = (json.loads(config.read_text(encoding='utf-8')).get('mcpServers') or {}).get(NAME)
+    except (OSError, ValueError, AttributeError):
+        return False
+    return bool(entry) and [entry.get('command'), *entry.get('args', [])] == server_command()
+
+
 def status() -> dict:
-    """Which Claude apps are here and whether GeckoPlotter is connected to them already."""
-    command = server_command()
-    config = desktop_config_path()
-    desktop = None
-    if config.parent.exists():
-        try:
-            entry = (json.loads(config.read_text(encoding='utf-8')).get('mcpServers') or {}).get(NAME)
-        except (OSError, ValueError):
-            entry = None
-        desktop = 'connected' if entry and [entry.get('command'), *entry.get('args', [])] == command else 'available'
-    code, codex = claude_code_cli(), codex_cli()
-    return {'desktop': desktop,
+    """Which AI apps are here: None (not installed), 'available' or 'connected' (to this GeckoPlotter)."""
+    desktop, code, codex, gemini = desktop_config_path(), claude_code_cli(), codex_cli(), gemini_cli()
+    return {'desktop': ('connected' if _file_has_entry(desktop) else 'available') if desktop.parent.exists() else None,
             'code': ('connected' if _cli_has_entry(code) else 'available') if code else None,
             'codex': ('connected' if _cli_has_entry(codex) else 'available') if codex else None,
-            'ready': agent_package_ready(), 'command': command}
+            'gemini': ('connected' if _file_has_entry(gemini_config_path()) else 'available') if gemini else None,
+            'ready': agent_package_ready(), 'command': server_command()}
 
 
-def _replace_entry(cli: str, app: str, remove_scopes, add_args) -> str:
+def _result(key: str, ok: bool, already: bool = False, error: str = '') -> dict:
+    name, restart = next((n, r) for k, n, r in APPS if k == key)
+    return {'app': name, 'ok': ok, 'restart': '' if already or not ok else restart, 'error': error}
+
+
+def _replace_entry(cli: str, key: str, remove_scopes, add_args) -> dict:
     """Remove the old entry and add this GeckoPlotter's; tried twice, because a running session of the app can write
     its settings file back between the two steps."""
     if _cli_has_entry(cli):
-        return f'{app}: connected.'
+        return _result(key, True, already=True)
     done = None
     for _attempt in range(2):
         for scope in remove_scopes:
             _run(cli, 'mcp', 'remove', *scope, NAME)
         done = _run(cli, 'mcp', 'add', *add_args, NAME, '--', *server_command())
         if done.returncode == 0 or _cli_has_entry(cli):
-            return f'{app}: connected. Start a new {app} session to use it.'
-    return f'{app}: could not add GeckoPlotter (' + (done.stderr or done.stdout).strip()[:200] + ').'
+            return _result(key, True)
+    return _result(key, False, error=(done.stderr or done.stdout).strip()[:200])
 
 
-def connect_codex() -> str:
-    cli = codex_cli()
-    if not cli:
-        return 'Codex is not installed.'
-    return _replace_entry(cli, 'Codex', [()], ())
-
-
-def connect_desktop() -> str:
-    config = desktop_config_path()
-    if not config.parent.exists():
-        return 'Claude Desktop is not installed.'
+def _write_entry(config: Path, key: str) -> dict:
+    """Add or replace the entry in a JSON settings file, keeping everything else (and a .bak copy)."""
+    if _file_has_entry(config):
+        return _result(key, True, already=True)
     data = {}
     if config.exists():
         try:
             data = json.loads(config.read_text(encoding='utf-8'))
         except ValueError:
-            return f'Claude Desktop: its settings file could not be read ({config}); nothing was changed.'
+            return _result(key, False, error=f'its settings file could not be read ({config}); nothing was changed')
         shutil.copyfile(config, config.with_name(config.name + '.bak'))
+    config.parent.mkdir(parents=True, exist_ok=True)
     command = server_command()
     data.setdefault('mcpServers', {})[NAME] = {'command': command[0], 'args': command[1:]}
     tmp = config.with_suffix('.tmp')
     tmp.write_text(json.dumps(data, indent=2), encoding='utf-8')
     tmp.replace(config)
-    return 'Claude Desktop: connected. Quit and reopen Claude Desktop to use it.'
+    return _result(key, True)
 
 
-def connect_code() -> str:
-    cli = claude_code_cli()
-    if not cli:
-        return 'Claude Code is not installed.'
+def connect_desktop() -> dict:
+    return _write_entry(desktop_config_path(), 'desktop')
+
+
+def connect_gemini() -> dict:
+    return _write_entry(gemini_config_path(), 'gemini')
+
+
+def connect_code() -> dict:
     # An older entry added by hand may sit in the local scope (the default) as well as the user scope.
-    return _replace_entry(cli, 'Claude Code', [('--scope', 'local'), ('--scope', 'user')], ('--scope', 'user'))
+    return _replace_entry(claude_code_cli(), 'code', [('--scope', 'local'), ('--scope', 'user')], ('--scope', 'user'))
 
 
-def connect() -> List[str]:
-    """Connect every Claude app found; one message per app."""
+def connect_codex() -> dict:
+    return _replace_entry(codex_cli(), 'codex', [()], ())
+
+
+def connect() -> dict:
+    """Connect every AI app found: {'results': [{app, ok, restart, error}], 'message': text when nothing was done}."""
     if not agent_package_ready():
-        return ['The agent interface is not installed in this GeckoPlotter yet: close GeckoPlotter and start it '
-                'again so it updates, then try again.']
+        return {'results': [], 'message': 'The agent interface is not installed in this GeckoPlotter yet: close '
+                                          'GeckoPlotter and start it again so it updates, then try again.'}
     found = status()
-    messages = []
-    if found['desktop']:
-        messages.append(connect_desktop())
-    if found['code']:
-        messages.append(connect_code())
-    if found['codex']:
-        messages.append(connect_codex())
-    if not messages:
-        messages.append('No AI app found on this computer (Claude Desktop, Claude Code or Codex). Install one, then '
-                        'connect again.')
-    return messages
+    steps = {'desktop': connect_desktop, 'code': connect_code, 'codex': connect_codex, 'gemini': connect_gemini}
+    results = [steps[key]() for key, _name, _restart in APPS if found[key]]
+    return {'results': results, 'message': '' if results else
+            'No AI app found on this computer (Claude Desktop, Claude Code, Codex or Gemini CLI). Install one, then '
+            'connect again.'}

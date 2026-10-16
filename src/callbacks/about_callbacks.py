@@ -90,10 +90,9 @@ def register_about_callbacks(app, store=None):
             raise dash.exceptions.PreventUpdate
         from services import claude_connect
         found = claude_connect.status()
-        apps = [(name, found[key]) for name, key in (('Claude Desktop', 'desktop'), ('Claude Code', 'code'),
-                                                     ('Codex', 'codex')) if found[key]]
+        apps = [(name, found[key]) for key, name, _restart in claude_connect.APPS if found[key]]
         if not apps:
-            return 'No AI app found on this computer (Claude Desktop, Claude Code or Codex).'
+            return 'No AI app found on this computer (Claude Desktop, Claude Code, Codex or Gemini CLI).'
         listed = ' · '.join(name + (' ✓' if state == 'connected' else '') for name, state in apps)
         if all(state == 'connected' for _name, state in apps):
             return listed + '. Connected: ask the agent to open your data.'
@@ -111,7 +110,16 @@ def register_about_callbacks(app, store=None):
         if not clicks:
             raise dash.exceptions.PreventUpdate
         from services import claude_connect
-        return [html.Div(message) for message in claude_connect.connect()]
+        done = claude_connect.connect()
+        if not done['results']:
+            return done['message']
+        # The same line as before connecting, then what to do so each app sees it, then any failure on its own line.
+        listed = ' · '.join(r['app'] + (' ✓' if r['ok'] else ' ✗') for r in done['results'])
+        restarts = [r['restart'] for r in done['results'] if r['restart']]
+        note = ('Connected. To use it: ' + '; '.join(restarts) + '.') if restarts else 'Connected: ask the agent to open your data.'
+        failed = [html.Div(f"{r['app']} could not be connected: {r['error']}", className='about-claude-error')
+                  for r in done['results'] if not r['ok']]
+        return [html.Div(listed + '.'), html.Div(note), *failed]
 
     @app.callback(
         Output('about-modal', 'opened', allow_duplicate=True),
