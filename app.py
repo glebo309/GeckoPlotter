@@ -935,6 +935,10 @@ _layout_body = html.Div(
                                                         title='Auto-integrate: rest the pointer on a peak and drag to integrate it, '
                                                               'no need to press Integrate or Shift. Over the baseline, drag still zooms. Click to switch off.',
                                                         **{'aria-pressed': 'false', 'aria-label': 'Auto-integrate near peaks'}),
+                                            html.Button(_icon('tabler:search', width=19, height=19), id='plot-tool-inspect',
+                                                        className='plot-tool plot-tool-icon',
+                                                        title='Inspect: show the values under the pointer. Click to switch off.',
+                                                        **{'aria-pressed': 'false', 'aria-label': 'Inspect values'}),
                                             html.Button(_icon('tabler:pencil', width=20, height=20),
                                                         id='plot-tool-edit-text', className='plot-tool plot-tool-icon',
                                                         title='Edit text — click a name, title, axis label, or legend. Esc to finish.',

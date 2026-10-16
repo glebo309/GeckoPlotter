@@ -83,4 +83,11 @@
 .integration-recipe .recipe-apply-upload { display: inline-block; }
 
 /* Auto-integrate (experimental): the pointer rests on a peak, drag integrates. */
-.gecko-auto-near .nsewdrag { cursor: crosshair !important; }
+
+/* What a drag over the plot does, from plot-cursor.js (data-gecko-cursor on the plot). */
+.js-plotly-plot[data-gecko-cursor="integrate"] .nsewdrag { cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='32' height='32' viewBox='0 0 32 32'%3E%3Cpath d='M7 1V13M1 7H13' stroke='white' stroke-width='3.2' stroke-linecap='round'/%3E%3Cpath d='M7 1V13M1 7H13' stroke='%231f2a24' stroke-width='1.4' stroke-linecap='round'/%3E%3Cpath d='M12 27C15 27 15.5 24 17 18C17.6 15.6 18.2 14 19 14C21 14 20.6 21 23 24.5C24 26 25.5 27 28 27Z' fill='%232f8f57' fill-opacity='.3' stroke='white' stroke-width='3' stroke-linejoin='round'/%3E%3Cpath d='M12 27C15 27 15.5 24 17 18C17.6 15.6 18.2 14 19 14C21 14 20.6 21 23 24.5C24 26 25.5 27 28 27M12 27H28' fill='%232f8f57' fill-opacity='.3' stroke='%231f2a24' stroke-width='1.4' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") 7 7, crosshair !important; }
+.js-plotly-plot[data-gecko-cursor="inspect"] .nsewdrag { cursor: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='32' height='32' viewBox='0 0 32 32'%3E%3Cpath d='M7 1V13M1 7H13' stroke='white' stroke-width='3.2' stroke-linecap='round'/%3E%3Cpath d='M7 1V13M1 7H13' stroke='%231f2a24' stroke-width='1.4' stroke-linecap='round'/%3E%3Ccircle cx='20' cy='20' r='5.5' fill='white' fill-opacity='.85' stroke='white' stroke-width='3.4'/%3E%3Cpath d='M24 24L29 29' stroke='white' stroke-width='4' stroke-linecap='round'/%3E%3Ccircle cx='20' cy='20' r='5.5' fill='none' stroke='%231f2a24' stroke-width='1.6'/%3E%3Cpath d='M24 24L29 29' stroke='%231f2a24' stroke-width='2' stroke-linecap='round'/%3E%3C/svg%3E") 7 7, crosshair !important; }
+.js-plotly-plot[data-gecko-cursor="pan"] .nsewdrag { cursor: grab !important; }
+.js-plotly-plot[data-gecko-cursor="text"] .nsewdrag { cursor: text !important; }
+/* The values under the pointer show only with the Inspect tool. */
+body:not(.gecko-inspect-mode) .js-plotly-plot[data-workspace-plot] .hoverlayer .hovertext { display: none; }
