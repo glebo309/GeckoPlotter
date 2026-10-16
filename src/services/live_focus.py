@@ -50,14 +50,36 @@ def _show(store, bundle, component) -> None:
     uv = bool(identity and str(identity[0]).startswith('uv:'))
     if store.visibility_state.get(store.peak_owner_id(component.component_id), True) and not uv:
         return                                          # shown already: the user's choice of channels stays
-    # A UV channel is shown alone: one wavelength in the plot when the agent is done, not two half-ticked ones.
     entry = store.get_data_by_id(bundle.bundle_id)
     if identity is None or not entry:
         from services.channel_visibility import show_channel
         show_channel(store, component.component_id)
         return
+    if uv:
+        _only_uv(store, identity[0])
+        return
     group = _tab_id_from_group(_get_overlay_group(entry['metadata'], entry, bundle.bundle_id, store))
     choose_channel(store, group_bundle_ids(store, group), identity[0])
+
+
+def _only_uv(store, key) -> None:
+    """One UV wavelength on screen when the agent is done: in every sample that has it, this UV channel is shown and
+    its other UV channels hidden; MS and other channels stay as they are. A sample hidden with its eye stays hidden
+    (its channel mask changes, as the toolbar's switch does)."""
+    from services.channel_visibility import channel_identity
+    masks = getattr(store, '_hidden_sample_channels', {}) or {}
+    for bundle in store.iter_bundles():
+        uv = [(c, channel_identity(c)[0]) for c in bundle.component_list
+              if channel_identity(c) and str(channel_identity(c)[0]).startswith('uv:')]
+        if not any(k == key for _c, k in uv):
+            continue
+        for component, k in uv:
+            source = store.peak_owner_id(component.component_id)
+            if bundle.bundle_id in masks:
+                masks[bundle.bundle_id][source] = k == key
+                store.visibility_state[source] = False
+            else:
+                store.visibility_state[source] = k == key
 
 
 def _scan(store, component_id, rt) -> Optional[int]:

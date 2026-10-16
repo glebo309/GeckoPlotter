@@ -375,3 +375,4 @@ def test_a_project_saved_by_name_goes_to_the_projects_folder(sequence, tmp_path,
     ws.open(str(sequence))
     saved = ws.save('PEA calibration')
     assert saved == str(tmp_path / 'settings' / 'Projects' / 'PEA calibration.gecko') and os.path.exists(saved)
+

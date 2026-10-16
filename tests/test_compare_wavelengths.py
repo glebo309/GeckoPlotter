@@ -279,3 +279,22 @@ def test_the_default_answer_is_short_enough_for_an_agent(workspace):
     assert len(json.dumps(result, default=str)) < 12000
     assert {'recommendation', 'candidates', 'screen', 'purity', 'warnings'} <= set(result)
     assert 'standards' not in result['candidates'][0] and result['screen']['ranges_nm'] is not None
+
+
+def test_after_the_agent_only_its_uv_channel_is_shown_in_every_sample(workspace):
+    """Extra wavelengths the agent added, and some samples left at another one, end as one UV channel on screen: the
+    one of the agent's last step, in every sample (live mode, services/live_focus)."""
+    from services.channel_visibility import channel_identity
+    from services.live_focus import focus
+    workspace.add_uv_channel(239)
+    workspace.add_uv_channel(263)
+    store = workspace.store
+    for b in store.iter_bundles():                      # every channel ticked, as the user's screen had it
+        for c in b.component_list:
+            store.visibility_state[store.peak_owner_id(c.component_id)] = True
+    rows = workspace.integrate(1.62, 1.92, channel='263', name='PEA 263', snap_to_valleys=False)
+    focus(workspace, 'integrate', [1.62, 1.92], {'channel': '263'}, rows)
+    shown = {channel_identity(c)[0] for b in store.iter_bundles() for c in b.component_list
+             if channel_identity(c) and str(channel_identity(c)[0]).startswith('uv:')
+             and store.visibility_state.get(store.peak_owner_id(c.component_id), True)}
+    assert len(shown) == 1 and '263' in next(iter(shown))

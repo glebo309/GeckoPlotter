@@ -40,7 +40,8 @@ server = MCPServer(
         'When GeckoPlotter is open, the tools work in it and the user sees every step; otherwise in a workspace of '
         'its own. Do the analysis with these tools, not with scripts or by reading the data files yourself: what '
         'a tool does is what the user sees and can check in the app. If a tool is missing, say so instead of working '
-        'around it. Save projects where the user says; without a place pass just a file name: it goes to '
+        'around it. To choose a wavelength call compare_wavelengths (it screens every PDA wavelength); do not add '
+        'channels and integrate them one by one to compare. Save projects where the user says; without a place pass just a file name: it goes to '
         'GeckoPlotter\'s Projects folder (never a temporary folder), and tell the user the path. Before a judgement call read analysis_guide(topic): wavelength (choosing the detection wavelength), '
         'integration, deconvolution, calibration (acceptance and outliers), identification (LC-MS ions), conversion. '
         'First call identify_agent with your model name: changes are recorded as made by an MCP agent. To quantify, '
@@ -261,7 +262,7 @@ def compare_wavelengths(peak: str, standards: dict[str, float], wavelengths: lis
 @server.tool()
 def add_uv_channel(wavelength_nm: float, samples: list[str] | None = None, ctx: Context = None) -> list:
     """Extract one wavelength from each sample's PDA (3D UV) data as a new channel, like the app's "Add N nm
-    channel". Use it when the recorded channels miss the compound (no chromophore: try 200-210 nm); then
+    channel". To find the best wavelength use compare_wavelengths instead of adding channels to compare. Use it when the recorded channels miss the compound (no chromophore: try 200-210 nm); then
     detect_peaks or integrate on that channel (e.g. channel='205 nm')."""
     return _run('add_uv_channel', wavelength_nm, samples, ctx=ctx)
 
