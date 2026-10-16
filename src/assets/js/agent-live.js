@@ -1,6 +1,6 @@
 // Live mode in the status bar (services/live_agent.py): what the agent is doing, drawn as three drops that drift
-// apart and flow together again. Their paths come from smooth noise, so the motion never repeats: slow and grey while
-// the agent waits, quicker and green while it works. The page asks the app once a second; when the app's change
+// apart and flow together again. Their paths come from smooth noise while working; otherwise they settle into one
+// dot: grey without a connection, blue when connected, amber when stopped. The page asks the app once a second; when its change
 // counter moves, it hands it to Dash (agent-live-version) and the screen redraws (callbacks/live_callbacks.py).
 (function () {
     'use strict';
@@ -22,7 +22,7 @@
     // -- the drops --------------------------------------------------------------------------------------------------
     var W = 44, H = 16, NS = 'http://www.w3.org/2000/svg';
     var drops = [{ r: 3.4, seed: 1.3 }, { r: 3.0, seed: 4.7 }, { r: 2.6, seed: 9.1 }];
-    var clock = Math.random() * 100, lastFrame = 0;
+    var clock = Math.random() * 100, lastFrame = 0, spread = 0;
 
     function svg() {
         var root = document.createElementNS(NS, 'svg');
@@ -33,20 +33,30 @@
             '<feColorMatrix in="b" mode="matrix" values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 16 -6.5"/></filter></defs>' +
             '<g filter="url(#agent-live-goo)"></g>';
         var group = root.querySelector('g');
-        drops.forEach(function (d) { d.node = document.createElementNS(NS, 'circle'); d.node.setAttribute('r', d.r); group.appendChild(d.node); });
+        drops.forEach(function (d, i) {
+            d.node = document.createElementNS(NS, 'circle');
+            d.node.setAttribute('cx', W / 2); d.node.setAttribute('cy', H / 2);
+            d.node.setAttribute('r', i === 0 ? d.r : 0); group.appendChild(d.node);
+        });
         return root;
     }
 
     function frame(now) {
         window.requestAnimationFrame(frame);
+        if (!el) show(current);                                      // Dash may mount after the first poll
         if (!el || el.hidden || now - lastFrame < 33) return;          // about 30 frames a second is plenty
         var dt = lastFrame ? Math.min((now - lastFrame) / 1000, 0.1) : 0;
         lastFrame = now;
-        clock += dt * (current.busy ? 0.32 : 0.07);                      // working: quicker; waiting: barely drifting
-        drops.forEach(function (d) {
-            var x = W / 2 + noise(clock, d.seed) * (W / 2 - d.r - 1.5);
-            var y = H / 2 + noise(clock * 0.8, d.seed + 50) * (H / 2 - d.r - 1);
+        var working = current.busy && !current.stopped;
+        spread = Math.max(0, Math.min(1, spread + (working ? dt : -dt) / 0.8));
+        var ease = spread * spread * (3 - 2 * spread);                // split / merge over 0.8 seconds
+        if (working) clock += dt * 0.32;
+        drops.forEach(function (d, i) {
+            var x = W / 2 + noise(clock, d.seed) * (W / 2 - d.r - 1.5) * ease;
+            var y = H / 2 + noise(clock * 0.8, d.seed + 50) * (H / 2 - d.r - 1) * ease;
+            var r = i === 0 ? d.r : d.r * ease;
             d.node.setAttribute('cx', x.toFixed(2)); d.node.setAttribute('cy', y.toFixed(2));
+            d.node.setAttribute('r', r.toFixed(2));
         });
     }
 
@@ -68,16 +78,27 @@
     function show(state) {
         current = state || {};
         if (!build()) return;
-        el.hidden = !current.agent && !current.stopped;                 // nothing until an agent has called
-        el.classList.toggle('busy', !!current.busy);
+        var connected = current.connected || [];
+        var working = !!current.busy && !current.stopped;
+        var disconnected = !connected.length && !working && !current.stopped;
+        el.hidden = false;
+        el.classList.toggle('connected', !!connected.length);
+        el.classList.toggle('busy', working);
         el.classList.toggle('stopped', !!current.stopped);
-        who.textContent = (current.agent || 'Agent') + ':';
-        if (current.stopped) doing.textContent = 'stopped';
-        else if (!current.here) doing.textContent = 'works in another GeckoPlotter window';
-        else doing.textContent = current.busy ? current.doing : 'ready';
-        el.title = current.busy || !current.doing ? '' : 'Last: ' + current.doing;
+        who.hidden = doing.hidden = stop.hidden = disconnected;
+        if (current.stopped || working) {
+            who.textContent = (current.agent || connected.join(', ') || 'Agent') + ':';
+            doing.textContent = current.stopped ? 'stopped' :
+                (current.here ? current.doing : 'works in another GeckoPlotter window');
+        } else {
+            who.textContent = connected.join(', ');
+            doing.textContent = disconnected ? '' : 'connected';
+        }
+        el.title = disconnected ? 'No agent connected: connect one in About (click the logo)' :
+            (working || !current.doing ? '' : 'Last: ' + current.doing);
         stop.textContent = current.stopped ? 'Let it work' : 'Stop';
         stop.title = current.stopped ? 'Let the agent work in GeckoPlotter again' : 'Refuse the agent’s calls until clicked again';
+        if (typeof current.version !== 'number') return;
         if (seen === null) seen = current.version;                        // the page was drawn after these changes
         else if (current.version !== seen && window.dash_clientside && window.dash_clientside.set_props) {
             seen = current.version;
@@ -127,6 +148,7 @@
     window.addEventListener('focus', here);
     document.addEventListener('pointerdown', here, true);
     document.addEventListener('visibilitychange', function () { if (!document.hidden) here(); });
+    show(current);
     here();
     window.requestAnimationFrame(frame);
 })();

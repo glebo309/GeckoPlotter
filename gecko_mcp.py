@@ -11,9 +11,13 @@ window used last and the screen redraws (live mode, services/live_agent); otherw
 lives as long as the agent's session.
 """
 import contextlib
+import json
 import os
 import sys
 import tempfile
+import threading
+import time
+import urllib.request
 
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), 'src'))
 
@@ -21,6 +25,7 @@ from mcp.server.mcpserver import Context, Image, MCPServer  # noqa: E402
 
 from gecko_api import GeckoError, Workspace  # noqa: E402
 from services import live_client  # noqa: E402
+from services.live_agent import HELLO  # noqa: E402
 
 server = MCPServer(
     name='geckoplotter',
@@ -72,6 +77,29 @@ def _label(client: str) -> str:
         if part in name:
             return label
     return client or 'Agent'
+
+
+def _heartbeat_once() -> None:
+    """Announce this MCP process even before it has made a tool call; follow the app used last."""
+    info = live_client.find()
+    if not info:
+        return
+    client = (workspace.agent or {}).get('client')
+    label = _label(client) if client and client != 'unknown client' else 'Agent'
+    body = json.dumps({'id': os.getpid(), 'agent': label}).encode()
+    request = urllib.request.Request(f"http://127.0.0.1:{info['port']}{HELLO}", data=body, method='POST',
+                                     headers={'Content-Type': 'application/json', 'X-Gecko-Key': info['key']})
+    with urllib.request.urlopen(request, timeout=3):
+        pass
+
+
+def _heartbeat() -> None:
+    while True:
+        try:
+            _heartbeat_once()
+        except Exception:                                  # noqa: BLE001  no app, stale file, etc.: try next time
+            pass                                           # stdout belongs to the MCP protocol
+        time.sleep(10)
 
 
 def _run(method, *args, ctx=None, **kwargs):
@@ -251,4 +279,5 @@ def save_project(path: str, project_name: str | None = None, ctx: Context = None
 
 
 if __name__ == '__main__':
+    threading.Thread(target=_heartbeat, name='gecko-heartbeat', daemon=True).start()
     server.run()

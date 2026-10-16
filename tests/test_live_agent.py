@@ -83,6 +83,64 @@ def test_status_bar_text():
     assert live_agent.describe('remove_peak', [None, 'alanine']) == 'removing alanine'
 
 
+def test_hello_tracks_processes_and_updates_the_handshake_label(app):
+    _server, _registry, live, client = app
+    assert client.get(live_agent.STATE).get_json()['connected'] == []
+    for pid, label in [(101, 'Agent'), (102, 'Codex'), (101, 'Claude Code'), (103, 'Claude Code')]:
+        response = client.post('/_gecko/agent/hello', json={'id': pid, 'agent': label},
+                               headers={'X-Gecko-Key': live.key})
+        assert response.status_code == 204
+    state = client.get(live_agent.STATE).get_json()
+    assert state['connected'] == ['Claude Code', 'Codex']
+    assert not state['busy'] and state['version'] == 0
+    assert live.target is None                            # no tool call or browser tab needed
+
+
+def test_hello_expires_each_process_after_30_seconds(app, monkeypatch):
+    _server, _registry, live, client = app
+    now = [100.0]
+    monkeypatch.setattr(live_agent.time, 'monotonic', lambda: now[0])
+    for pid in (101, 102):
+        client.post('/_gecko/agent/hello', json={'id': pid, 'agent': 'Claude Code'},
+                    headers={'X-Gecko-Key': live.key})
+    now[0] += 20
+    client.post('/_gecko/agent/hello', json={'id': 102, 'agent': 'Claude Code'},
+                headers={'X-Gecko-Key': live.key})
+    now[0] += 11
+    assert live.state(None)['connected'] == ['Claude Code']
+    now[0] += 20
+    assert live.state(None)['connected'] == []
+
+
+@pytest.mark.parametrize('key, address', [(None, '127.0.0.1'), ('wrong', '127.0.0.1'),
+                                        ('valid', '192.168.1.20')])
+def test_hello_requires_the_key_and_loopback(app, key, address):
+    _server, _registry, live, client = app
+    headers = {'X-Gecko-Key': live.key if key == 'valid' else key} if key else {}
+    response = client.post('/_gecko/agent/hello', json={'id': 101, 'agent': 'Codex'}, headers=headers,
+                           environ_base={'REMOTE_ADDR': address})
+    assert response.status_code == 403
+    assert live.state(None)['connected'] == []
+
+
+@pytest.mark.parametrize('body', [{}, {'id': []}, {'id': True}, {'id': 0}, {'id': 101, 'agent': []}])
+def test_hello_refuses_invalid_process_details(app, body):
+    _server, _registry, live, client = app
+    response = client.post('/_gecko/agent/hello', json=body, headers={'X-Gecko-Key': live.key})
+    assert response.status_code == 400
+
+
+def test_hello_continues_while_stopped_or_a_call_holds_the_work_lock(app):
+    _server, _registry, live, client = app
+    client.post(live_agent.STOP)
+    with live._lock:
+        response = client.post('/_gecko/agent/hello', json={'id': 101, 'agent': 'Codex'},
+                               headers={'X-Gecko-Key': live.key})
+        assert response.status_code == 204
+        assert live.state(None)['connected'] == ['Codex']
+    assert live.stopped
+
+
 def test_remove_peak_is_a_live_mutation_that_redraws_the_page(app, monkeypatch):
     _server, _registry, live, client = app
     client.post(live_agent.HERE)
