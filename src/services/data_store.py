@@ -804,8 +804,16 @@ class DataStore:
         group = _get_overlay_group(entry.get('metadata', {}), entry,
                                    file_id=file_id, dm=self)
         # Source and axis distinguish, for example, chromatograms from spectra.
-        # Acquisition duration and the LC-MS run ID must not split compounds.
-        return repr(group[:2])
+        # Acquisition duration and the LC-MS run ID must not split compounds, nor the detector: the UV and TIC peaks of
+        # one compound at one time are the same compound. An extracted ion does split: a peak on the EIC of m/z 337.1
+        # is not the 282.2 ion's peak because both elute at 9.7 min, so names and colours stay with their ion.
+        from .channel_visibility import channel_identity
+        bundle = self.get_bundle_for_component(file_id)
+        component = next((c for c in (bundle.component_list if bundle else [])
+                          if c.component_id == file_id), None)
+        identity = channel_identity(component) if component is not None else None
+        ion = identity[0] if identity and str(identity[0]).startswith('eic:') else None
+        return repr(group[:2] + ((ion,) if ion else ()))
 
     def build_file_overlay_map(self) -> Dict[str, str]:
         """Build {file_id: overlay_group_key_string} for peak color scoping."""

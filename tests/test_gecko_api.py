@@ -440,3 +440,16 @@ def test_a_run_file_opened_on_its_own_later_is_a_sample_of_its_own_name(sequence
     ws.open(str(copy / spectra.name))
     names = [s['name'] for s in ws.samples()]
     assert len(names) == 2 and len(set(names)) == 2 and names[1].endswith('(+TIC)')
+
+
+def test_a_peak_name_stays_with_its_ion(sequence):
+    """Naming the 633.8 ion's peak must not name the 634.8 ion's peak at the same time in the other run."""
+    ws = Workspace()
+    ws.open(str(sequence))
+    ws.add_eic_channel(ION, 0.4)
+    ws.add_eic_channel(ION + 1, 0.4)
+    ws.integrate(8.2, 8.6, samples='4', channel=f'EIC {ION}', name='m634 compound', snap_to_valleys=False)
+    other = ws.integrate(8.2, 8.6, samples='CONTROL 4', channel=f'EIC {round(ION + 1, 1)}', snap_to_valleys=False)
+    assert other and not other[0].get('error')
+    names = {r['channel']: r['name'] for r in ws.peaks()}
+    assert names[next(c for c in names if '634.8' in c)] != 'm634 compound'
