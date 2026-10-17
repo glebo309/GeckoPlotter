@@ -313,7 +313,7 @@ class CalibrationService:
         fig = go.Figure()
 
         settings = PlotSettingsService.from_dict(DEFAULT_PLOT_SETTINGS)
-        settings.title = f"Calibration — {model.analyte_name}"
+        settings.title = f"Calibration: {model.analyte_name}"
         settings.x_label = f"Concentration ({model.units})" if model.units else "Concentration"
         settings.y_label = f"Peak {model.response_type}" + (f" ({model.response_units})" if model.response_units else "")
         # Style the canvas first: the traces carry semantic colours and symbols.
