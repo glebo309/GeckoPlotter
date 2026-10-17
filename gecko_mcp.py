@@ -42,8 +42,8 @@ server = MCPServer(
         'a tool does is what the user sees and can check in the app. If a tool is missing, say so instead of working '
         'around it. To choose a wavelength call compare_wavelengths (it screens every PDA wavelength); do not add '
         'channels and integrate them one by one to compare. Save projects where the user says; without a place pass just a file name: it goes to '
-        'GeckoPlotter\'s Projects folder (never a temporary folder), and tell the user the path. Before a judgement call read analysis_guide(topic): wavelength (choosing the detection wavelength), '
-        'integration, deconvolution, calibration (acceptance and outliers), identification (LC-MS ions), conversion. '
+        'GeckoPlotter\'s Projects folder (never a temporary folder), and tell the user the path. Before a judgement call read analysis_guide(topic): analyte (which peak it is), wavelength (choosing the detection '
+        'wavelength), integration, deconvolution, calibration (acceptance and outliers), identification (LC-MS ions), conversion. '
         'First call identify_agent with your model name: changes are recorded as made by an MCP agent. To quantify, '
         'integrate a peak in the standards and call calibrate with {sample: concentration}; read its warnings.'),
 )
@@ -138,7 +138,7 @@ def identify_agent(model: str, ctx: Context = None) -> dict:
 @server.tool()
 def analysis_guide(topic: str) -> dict:
     """How an analytical chemist decides, with the numbers that decide: read it before the judgement call.
-    Topics: wavelength, integration, deconvolution, calibration, identification, conversion."""
+    Topics: analyte, wavelength, integration, deconvolution, calibration, identification, conversion."""
     from services.agent_guide import guide
     return guide(topic)
 

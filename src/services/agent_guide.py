@@ -40,6 +40,18 @@ GUIDES = {
    to ignore it (carry-over: was the blank injected after the highest standard?).
 5. Never delete or exclude a peak the user made by hand without saying so.""",
 
+    'analyte': """Finding which peak is the analyte in a calibration series
+1. The analyte's peak grows with the concentration in the standards and is absent (or far smaller) in the blank.
+   detect_peaks in every sample on one channel, then peak_table: line up the peaks by retention time and compare
+   their areas with the concentrations (a steady rise, roughly proportional). Report the candidates with their areas.
+2. A peak that SHRINKS as the concentration rises is often a reagent being used up (derivatisation) or a matrix
+   peak: not the analyte, but a sign the analyte is derivatised and elutes nearby.
+3. Nothing scales? Look for shoulders and small peaks on the flanks of big ones (figure of the region at two
+   concentrations): the analyte may co-elute; deconvolve and compare the components' areas with concentration.
+4. Check the candidate's UV spectrum (uv_spectrum at its apex) against what the compound or its derivative should
+   absorb, and that it is the same in every standard. Underivatised amino acids absorb only below ~210 nm.
+5. Say how sure you are and why (scaling, blank, spectrum); if two peaks fit, name both and let the user decide.""",
+
     'deconvolution': """Overlapping peaks and shoulders
 1. Deconvolve when the valley between two peaks is above about 10 % of the smaller peak's height (resolution below
    about 1.5), or a shoulder or tail kink is visible; otherwise integrate normally.
