@@ -12,8 +12,8 @@ from typing import Any, Optional
 
 log = logging.getLogger(__name__)
 
-# Calls that are about one place in the data; 'open' and the reads of the whole workspace leave the view alone.
-FOLLOWED = {'detect_peaks', 'integrate', 'rename_peak', 'remove_peak', 'calibrate', 'add_uv_channel', 'uv_spectrum',
+# Calls the screen follows; the reads of the whole workspace leave the view alone ('open' zooms to the peaks).
+FOLLOWED = {'open', 'detect_peaks', 'integrate', 'rename_peak', 'remove_peak', 'calibrate', 'add_uv_channel', 'uv_spectrum',
             'add_eic_channel', 'eic', 'mass_spectrum', 'figure', 'list_calibrations', 'deconvolve', 'compare_wavelengths'}
 
 
@@ -109,6 +109,8 @@ def _focus(workspace, method, params, result) -> Optional[dict]:
     store = workspace.store
     if method in ('calibrate', 'list_calibrations'):
         return _calibration_view(store, params, result)
+    if method == 'open':
+        return {'zoom': 'peaks'}                        # the page zooms to the peaks of what was opened
     if method == 'compare_wavelengths':
         chosen = result.get('recommendation')
         if not chosen:
@@ -197,7 +199,7 @@ def _window(params, result):
     if not starts:
         return None
     a, b = float(min(starts)), float(max(ends))
-    pad = max(1.5 * (b - a), 0.15)                      # the peak and its neighbourhood, as one would zoom by hand
+    pad = max(0.5 * (b - a), 0.05)                      # the page widens it to all the peaks shown
     return [round(max(0.0, a - pad), 4), round(b + pad, 4)]
 
 

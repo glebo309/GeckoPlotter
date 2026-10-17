@@ -184,17 +184,59 @@
         set('pda-wavelength', { value: sweeping.nm });
     }
 
-    // The plot zooms to the agent's time window, each y axis to the traces inside it (as one would zoom by hand).
-    // Plotly reports the new ranges like a user's zoom, so the next redraw keeps them.
+    // The plot zooms to its peaks: from the first to the last place where a shown trace rises clearly above its
+    // baseline (3 % of its height), with a small margin, and always including the agent's window; each y axis to the
+    // traces inside. Plotly reports the new ranges like a user's zoom, so the next redraw keeps them.
+    function plotDiv() {                                              // the Plotly element, not its Dash wrapper
+        var g = (window.geckoActivePlot && window.geckoActivePlot()) || document.getElementById('main-plot');
+        if (g && !g._fullData && g.querySelector) g = g.querySelector('.js-plotly-plot') || g;
+        return g;
+    }
+    // Plotly keeps the figure's arrays as sent (binary-encoded objects); the decoded ones are in _fullData.
+    function traces(gd) { return gd._fullData || gd.data || []; }
+    function contentRange(gd) {
+        // Per trace: its baseline (median) and its points; per y axis: the tallest rise above a baseline. A point is
+        // part of a peak when it rises 3 % of that tallest rise above its own trace's baseline, so a flat trace's
+        // noise (a blank) does not count.
+        var rows = [], tallest = {}, full = [Infinity, -Infinity];
+        traces(gd).forEach(function (trace) {
+            if (trace.visible !== true || (trace.fill && trace.fill !== 'none') || !trace.x || !trace.y) return;
+            var ys = Array.from(trace.y, Number), sorted = ys.filter(isFinite).sort(function (p, q) { return p - q; });
+            if (sorted.length < 10) return;
+            var axis = String(trace.yaxis || 'y'), base = sorted[Math.floor(sorted.length / 2)];
+            tallest[axis] = Math.max(tallest[axis] || 0, sorted[sorted.length - 1] - base);
+            rows.push({ xs: trace.x, ys: ys, base: base, axis: axis });
+        });
+        var lo = Infinity, hi = -Infinity;
+        rows.forEach(function (row) {
+            var level = row.base + 0.03 * tallest[row.axis];
+            for (var i = 0; i < row.xs.length; i++) {
+                var x = Number(row.xs[i]);
+                if (x < full[0]) full[0] = x;
+                if (x > full[1]) full[1] = x;
+                if (row.ys[i] > level) { if (x < lo) lo = x; if (x > hi) hi = x; }
+            }
+        });
+        if (!(hi > lo)) return null;
+        var margin = Math.max(0.08 * (hi - lo), 0.05);
+        return [Math.max(full[0], lo - margin), Math.min(full[1], hi + margin)];
+    }
+    function zoomRange(gd, window_) {
+        var range = contentRange(gd);
+        if (window_ && window_.length === 2) {
+            range = range ? [Math.min(range[0], window_[0]), Math.max(range[1], window_[1])] : window_;
+        }
+        return range;
+    }
     function zoomTo(range) {
-        var gd = (window.geckoActivePlot && window.geckoActivePlot()) || document.querySelector('#main-plot .js-plotly-plot');
-        if (!gd || !gd.data || !window.Plotly) return;
+        var gd = plotDiv();
+        if (!gd || !traces(gd).length || !window.Plotly || !range) return;
         var a = range[0], b = range[1], update = {}, ys = {};
         Object.keys(gd._fullLayout || {}).forEach(function (key) {
             if (/^xaxis\d*$/.test(key)) update[key + '.range'] = [a, b];
         });
-        gd.data.forEach(function (trace) {
-            if (trace.visible === false || trace.visible === 'legendonly' || !trace.x || !trace.y) return;
+        traces(gd).forEach(function (trace) {
+            if (trace.visible !== true || !trace.x || !trace.y) return;
             var axis = 'yaxis' + String(trace.yaxis || 'y').slice(1), xs = trace.x, values = trace.y;
             for (var i = 0; i < xs.length; i++) {
                 var x = Number(xs[i]), y = Number(values[i]);
@@ -213,14 +255,19 @@
 
     // The redraw that follows the agent's step replaces the figure: zoom again after each redraw for a few seconds,
     // until the plot shows the range (then the stored zoom carries it).
-    function keepZoom(range) {
-        var until = Date.now() + 5000;
+    function keepZoom(window_) {
+        // After opening, the app redraws a few times (new tab, settings): zoom again whenever a redraw undid it, until
+        // 3 s pass without that (at most 20 s).
+        var start = Date.now(), steady = null;
         (function check() {
-            var gd = (window.geckoActivePlot && window.geckoActivePlot()) || document.querySelector('#main-plot .js-plotly-plot');
-            var shown = gd && gd.layout && gd.layout.xaxis && gd.layout.xaxis.range;
-            var there = shown && Math.abs(shown[0] - range[0]) < 1e-3 && Math.abs(shown[1] - range[1]) < 1e-3;
-            if (!there) zoomTo(range);
-            if (Date.now() < until) window.setTimeout(check, 400);
+            var gd = plotDiv(), now = Date.now();
+            var range = gd && traces(gd).length ? zoomRange(gd, Array.isArray(window_) ? window_ : null) : null;
+            if (range) {
+                var shown = gd.layout && gd.layout.xaxis && gd.layout.xaxis.range;
+                var there = shown && Math.abs(shown[0] - range[0]) < 1e-3 && Math.abs(shown[1] - range[1]) < 1e-3;
+                if (there) steady = steady || now; else { steady = null; zoomTo(range); }
+            }
+            if (now - start < 20000 && !(steady && now - steady > 3000)) window.setTimeout(check, 300);
         })();
     }
 
@@ -284,6 +331,8 @@
     }
     window.dash_clientside = window.dash_clientside || {};
     window.dash_clientside.geckoLive = { applyView: applyView };
+    window.GeckoLiveZoom = { plot: plotDiv, range: function () { var gd = plotDiv(); return gd && zoomRange(gd, null); },
+                             zoom: function () { keepZoom('peaks'); } };       // for checks in tests
 
     // Once a second while an agent is connected; every 4 s otherwise (a page without agents still learns of one).
     var lastAsk = 0;
