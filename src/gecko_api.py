@@ -187,6 +187,7 @@ class Workspace:
             failed += result.failed
             if name:
                 self._name_run(result.bundles, name)
+            self._name_apart(result.bundles)
             added += [b.name for b in result.bundles]
             bundles += result.bundles
         if len(runs) > 1:
@@ -197,6 +198,18 @@ class Workspace:
         if projects:
             report['note'] = 'Project files were left out of the data import; open_data(<project path>) opens one instead.'
         return report
+
+    def _name_apart(self, new_bundles) -> None:
+        """A file opened on its own whose run is already loaded (the -TIC file after the +TIC one) becomes a second
+        sample of that name, which the tools could not tell apart: it is named after its channels, 'run (-TIC)'.
+        Opening a run's files together (its folder, or match=) gives one sample with all of them."""
+        new = {b.bundle_id for b in new_bundles}
+        taken = {b.name for b in self._bundles() if b.bundle_id not in new}
+        for bundle in new_bundles:
+            if bundle.name in taken:
+                channels = ', '.join(bundle.component_display_name(c) for c in bundle.component_list)
+                self.store.rename_dataset(bundle.bundle_id, f'{bundle.name} ({channels})')
+            taken.add(bundle.name)
 
     def _group_folder(self, bundles, folder: str) -> None:
         """Runs opened together from one folder are one group in the file tree and one plot tab named after the

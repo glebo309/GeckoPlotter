@@ -426,3 +426,17 @@ def test_after_the_agent_only_its_eic_is_shown(sequence):
              if channel_identity(c) and str(channel_identity(c)[0]).startswith('eic:')
              and ws.store.visibility_state.get(ws.store.peak_owner_id(c.component_id), True)}
     assert len(shown) == 1 and '633.8' in next(iter(shown))
+
+
+def test_a_run_file_opened_on_its_own_later_is_a_sample_of_its_own_name(sequence, tmp_path):
+    import shutil
+    run = next(p for p in sequence.iterdir() if p.is_dir() and 'CONTROL' not in p.name)
+    spectra = next(run.glob('*_spectra.cdf'))
+    copy = tmp_path / 'again'
+    copy.mkdir()
+    shutil.copy(spectra, copy / spectra.name)
+    ws = Workspace()
+    ws.open(str(spectra))
+    ws.open(str(copy / spectra.name))
+    names = [s['name'] for s in ws.samples()]
+    assert len(names) == 2 and len(set(names)) == 2 and names[1].endswith('(+TIC)')

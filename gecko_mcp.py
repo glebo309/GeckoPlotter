@@ -150,7 +150,8 @@ def open_data(path: str, everything: bool = False, match: str | None = None, ctx
     only the full-scan spectra (*_spectra.cdf) and UV channels (*.dx_VWD*.CSV) are read; everything=True reads the
     small duplicate .cdf/.CSV exports too. Project files (.gecko / .zip) found inside a data folder are not read
     as data: their paths are returned under projects, separately from not_readable. Use open_data(<project path>)
-    to open one instead. match: open only the files whose name matches a shell pattern ('*14-07-48*'; several
+    to open one instead. Open a run's files together (its folder, or match=) so it is one sample with every
+    channel; a file opened later on its own is a second sample named after its channels. match: open only the files whose name matches a shell pattern ('*14-07-48*'; several
     separated by ';') when the folder holds other data too: list the folder first rather than opening everything."""
     return _run('open', path, everything, match, ctx=ctx)
 
