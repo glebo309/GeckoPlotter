@@ -25,13 +25,17 @@ def register_live_callbacks(app, data_manager):
          Output('render-trigger', 'data', allow_duplicate=True),
          Output('peak-change-trigger', 'data', allow_duplicate=True),
          Output('hidden-files', 'data', allow_duplicate=True),
-         Output('agent-live-view', 'data')],
+         Output('agent-live-view', 'data'),
+         Output('zoom-state', 'data', allow_duplicate=True),
+         Output('tab-zoom-memory', 'data', allow_duplicate=True)],
         Input('agent-live-version', 'data'),
         [State('active-file', 'data'), State('active-plot-tab', 'data'), State('file-order', 'data'),
-         State('render-trigger', 'data'), State('peak-change-trigger', 'data')],
+         State('render-trigger', 'data'), State('peak-change-trigger', 'data'),
+         State('current-plot-settings', 'data'), State('tab-zoom-memory', 'data')],
         prevent_initial_call=True,
     )
-    def redraw_after_agent(version, active, plot_tab, file_order, render_counter, peak_counter):
+    def redraw_after_agent(version, active, plot_tab, file_order, render_counter, peak_counter, settings=None,
+                           zoom_memory=None):
         if not version:
             raise dash.exceptions.PreventUpdate
         from callbacks.upload_callbacks import build_active_file_views, render_file_tree_with_bundles_selected
@@ -61,5 +65,16 @@ def register_live_callbacks(app, data_manager):
         tree = render_file_tree_with_bundles_selected(files, data_manager, active, active_plot_tab=plot_tab,
                                                       file_order=file_order or {})
         hidden = [fid for fid, visible in data_manager.visibility_state.items() if not visible]
+        # The zoom is the app's own stored zoom (as if the user had zoomed), for the tab the agent worked on: the
+        # render applies it and keeps it, also when the tab is switched to (services/live_focus.peaks_range).
+        zoom = memory = dash.no_update
+        if view and view.get('zoom'):
+            from services.live_focus import peaks_range
+            found = peaks_range(data_manager, active, view['zoom'] if isinstance(view['zoom'], list) else None)
+            if found:
+                tab, ranges = found
+                zoom = dict(ranges, _axis_range_revision=(settings or {}).get('_axis_range_revision', 0))
+                memory = {**(zoom_memory or {}), tab: zoom}
         return (files, tree, active, table, editor, pub_data, (render_counter or 0) + 1, (peak_counter or 0) + 1,
-                hidden, view if view and (view.get('side') or view.get('results') or view.get('pda_follow') or view.get('zoom')) else dash.no_update)
+                hidden, view if view and (view.get('side') or view.get('results') or view.get('pda_follow')) else dash.no_update,
+                zoom, memory)

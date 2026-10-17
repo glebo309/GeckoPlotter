@@ -377,3 +377,14 @@ def test_a_project_saved_by_name_goes_to_the_projects_folder(sequence, tmp_path,
     saved = ws.save('PEA calibration')
     assert saved == str(tmp_path / 'settings' / 'Projects' / 'PEA calibration.gecko') and os.path.exists(saved)
 
+
+
+def test_the_agent_zoom_covers_every_peak_of_the_tab_with_little_baseline(sequence):
+    from services.channel_visibility import visible_component_id
+    from services.live_focus import peaks_range
+    ws = Workspace()
+    ws.open(str(sequence))
+    bundle = next(b for b in ws.store.iter_bundles() if b.name == '4')
+    tab, zoom = peaks_range(ws.store, visible_component_id(ws.store, bundle))
+    a, b = zoom['xaxis.range']
+    assert tab.startswith('tab-') and a < 8.4 < b and b - a < 2      # the shown TIC: its peak at 8.4 of 0-14 min

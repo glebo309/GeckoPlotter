@@ -214,3 +214,59 @@ def _calibration_view(store, params, result) -> dict:
     if chosen is not None:
         view['calibration'] = chosen.model_id
     return view
+
+
+def peaks_range(store, active_id, window=None):
+    """The time range the plot zooms to after an agent step: from the first to the last place where a shown trace of
+    the active sample's tab rises clearly above its baseline (3 % of the tallest rise on the tab), a small margin
+    around it, always including the agent's window; and the y range of those traces inside it. Returns
+    (tab_id, {'xaxis.range': [a, b], 'yaxis.range': [lo, hi]}) or None."""
+    import numpy as np
+    from callbacks.viz_callbacks import _get_active_file_group, _tab_id_from_group
+    from callbacks.baseline_callbacks import get_xy_arrays
+    from services.channel_visibility import group_bundle_ids
+    group = _get_active_file_group(store, active_id) if active_id else None
+    if not group:
+        return None
+    tab = _tab_id_from_group(group)
+    rows = []
+    for bundle_id in group_bundle_ids(store, tab, span=False):
+        bundle = store.get_bundle(bundle_id)
+        if bundle is None or store.visibility_state.get(bundle_id, True) is False:
+            continue
+        for component in bundle.component_list:
+            if not store.visibility_state.get(store.peak_owner_id(component.component_id), True):
+                continue
+            x, y = get_xy_arrays(store, component.component_id)
+            if x is None or y is None or len(x) < 10:
+                continue
+            x, y = np.asarray(x, float), np.asarray(y, float)
+            keep = np.isfinite(x) & np.isfinite(y)
+            if keep.sum() >= 10:
+                rows.append((x[keep], y[keep], float(np.median(y[keep]))))
+    if not rows:
+        return None
+    tallest = max(float(y.max()) - base for _x, y, base in rows)
+    if tallest <= 0:
+        return None
+    lo, hi = np.inf, -np.inf
+    for x, y, base in rows:
+        hit = x[y > base + .03 * tallest]
+        if hit.size:
+            lo, hi = min(lo, hit.min()), max(hi, hit.max())
+    if window:
+        lo, hi = min(lo, window[0]), max(hi, window[1])
+    if not np.isfinite(lo) or hi <= lo:
+        return None
+    first = min(float(x.min()) for x, _y, _b in rows)
+    last = max(float(x.max()) for x, _y, _b in rows)
+    margin = max(.08 * (hi - lo), .05)
+    a, b = max(first, lo - margin), min(last, hi + margin)
+    inside = [y[(x >= a) & (x <= b)] for x, y, _b in rows]
+    inside = [v for v in inside if v.size]
+    zoom = {'xaxis.range': [round(float(a), 4), round(float(b), 4)]}
+    if inside:
+        ylo, yhi = min(float(v.min()) for v in inside), max(float(v.max()) for v in inside)
+        pad = (yhi - ylo) * .08 or 1.0
+        zoom['yaxis.range'] = [round(ylo - pad, 3), round(yhi + pad, 3)]
+    return tab, zoom
