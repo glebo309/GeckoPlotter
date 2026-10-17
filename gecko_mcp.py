@@ -35,7 +35,7 @@ server = MCPServer(
         'folder of run folders or a .gecko project first, then list the samples to learn their names and channels. '
         'Peaks you integrate are kept in the workspace; save a project so the user can open it in GeckoPlotter and '
         'check or correct every peak by hand. Show a figure when a result depends on where a peak was cut. '
-        'Single-quadrupole m/z values are read about 0.4-0.5 below the exact mass. Samples with PDA data hold the '
+        'Single-quadrupole m/z values can read up to about 0.5 below the exact mass; check with a known ion first. Samples with PDA data hold the '
         'whole UV range: list_samples shows pda=true; add_uv_channel reads any wavelength, uv_spectrum a spectrum. '
         'When GeckoPlotter is open, the tools work in it and the user sees every step; otherwise in a workspace of '
         'its own. Do the analysis with these tools, not with scripts or by reading the data files yourself: what '
@@ -144,14 +144,22 @@ def analysis_guide(topic: str) -> dict:
 
 
 @server.tool()
-def open_data(path: str, everything: bool = False, ctx: Context = None) -> dict:
+def open_data(path: str, everything: bool = False, match: str | None = None, ctx: Context = None) -> dict:
     """Open a data file, a run folder, a folder of run folders (one sample per run, named after its folder) or a
     GeckoPlotter project (.gecko, or a FAIR package .zip; this replaces the workspace). From Agilent export folders
     only the full-scan spectra (*_spectra.cdf) and UV channels (*.dx_VWD*.CSV) are read; everything=True reads the
     small duplicate .cdf/.CSV exports too. Project files (.gecko / .zip) found inside a data folder are not read
     as data: their paths are returned under projects, separately from not_readable. Use open_data(<project path>)
-    to open one instead."""
-    return _run('open', path, everything, ctx=ctx)
+    to open one instead. match: open only the files whose name matches a shell pattern ('*14-07-48*'; several
+    separated by ';') when the folder holds other data too: list the folder first rather than opening everything."""
+    return _run('open', path, everything, match, ctx=ctx)
+
+
+@server.tool()
+def remove_samples(samples: list[str], ctx: Context = None) -> list:
+    """Take samples out of the workspace (as deleting them in the file tree, one undo step): e.g. data opened by
+    mistake. Returns the remaining samples."""
+    return _run('remove_samples', samples, ctx=ctx)
 
 
 @server.tool()

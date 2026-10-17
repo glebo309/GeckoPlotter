@@ -82,7 +82,8 @@ GUIDES = {
    in negative mode (formate vs H), are usually the same compound.
 2. Isotopes: one Cl gives M+2 at about 32 % of M, one Br about 97 % (1:1), two Cl about 64 % plus M+4. Many carbons
    raise M+1 (about 1.1 % per carbon).
-3. This instrument reads about 0.4-0.5 below the exact mass: compare with the expected m/z minus about 0.45.
+3. The single quad can read up to about 0.5 below the exact mass, but not in every run: check the offset with an ion
+   you know (a common contaminant such as oleamide [M+H]+ 282.28, or the standard) before correcting for it.
 4. Confirm with more than the mass: the EIC of the ion peaks at the same time as the UV peak, the ion is absent or
    much smaller in the blank or control, and its PDA spectrum matches a standard when there is one.
 5. Background ions (plasticisers, PEG ladders 44 Da apart, solvent clusters) are flat across the run in their EIC.""",

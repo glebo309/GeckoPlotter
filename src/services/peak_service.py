@@ -68,6 +68,23 @@ class Peak:
     label_leader: bool = False
     label_in_data: bool = False
 
+    def __setattr__(self, key, value):
+        # A name is text wherever it comes from: an Integration.txt peak named by its time ('6.79') came back from the
+        # peak table as the number 6.79, and an empty cell as NaN, which broke every later naming step.
+        if key in ('name', 'label') and value is not None and not isinstance(value, str):
+            value = _name_text(value)
+        object.__setattr__(self, key, value)
+
+
+def _name_text(value) -> str:
+    try:
+        number = float(value)
+    except (TypeError, ValueError):
+        return str(value)
+    if number != number:                                 # NaN: an empty cell
+        return ''
+    return f'{number:g}'
+
 
 class PeakService:
     """Domain service for peak detection, storage, and cross-sample analysis."""

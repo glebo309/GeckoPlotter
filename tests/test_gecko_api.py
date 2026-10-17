@@ -388,3 +388,41 @@ def test_the_agent_zoom_covers_every_peak_of_the_tab_with_little_baseline(sequen
     tab, zoom = peaks_range(ws.store, visible_component_id(ws.store, bundle))
     a, b = zoom['xaxis.range']
     assert tab.startswith('tab-') and a < 8.4 < b and b - a < 2      # the shown TIC: its peak at 8.4 of 0-14 min
+
+
+def test_a_peak_name_is_always_text():
+    """An imported peak named by its time came back from the peak table as a number (and an empty cell as NaN): every
+    later naming step then failed with a TypeError, also for the agent."""
+    from services.peak_service import Peak, PeakService
+    peak = Peak('p', 'f', 6.79, 6.79, 6.7, 6.9, 1.0, 1.0, 0.2)
+    assert peak.name == '6.79'
+    peak.label = float('nan')
+    assert peak.label == ''
+    assert PeakService.has_custom_name(peak)
+
+
+def test_open_reads_only_the_matching_files_and_samples_can_be_removed(sequence):
+    run = next(p for p in sequence.iterdir() if p.is_dir() and 'CONTROL' not in p.name)
+    ws = Workspace()
+    result = ws.open(str(run), match='*15-53-54*')
+    assert result['added'] and len(ws.samples()) == 1
+    other = Workspace()
+    other.open(str(sequence))
+    names = [s['name'] for s in other.samples()]
+    remaining = other.remove_samples([names[0]])
+    assert [s['name'] for s in remaining] == names[1:]
+
+
+def test_after_the_agent_only_its_eic_is_shown(sequence):
+    from services.channel_visibility import channel_identity
+    from services.live_focus import focus
+    ws = Workspace()
+    ws.open(str(sequence))
+    ws.add_eic_channel(ION, 0.5)
+    ws.add_eic_channel(BACKGROUND, 0.5)
+    rows = ws.eic(ION, 0.5)
+    focus(ws, 'eic', [ION, 0.5], {}, rows)
+    shown = {channel_identity(c)[0] for b in ws.store.iter_bundles() for c in b.component_list
+             if channel_identity(c) and str(channel_identity(c)[0]).startswith('eic:')
+             and ws.store.visibility_state.get(ws.store.peak_owner_id(c.component_id), True)}
+    assert len(shown) == 1 and '633.8' in next(iter(shown))

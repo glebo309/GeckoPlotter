@@ -141,11 +141,14 @@ class Workspace:
 
     # -- opening and saving ---------------------------------------------------------------------------------------
 
-    def open(self, path: str, everything: bool = False) -> dict:
+    def open(self, path: str, everything: bool = False, match: Optional[str] = None) -> dict:
         """Open a file, a run folder, a folder of run folders (one sample per run, named by the folder) or a project
         (.gecko / FAIR package .zip, which replaces the workspace). From Agilent export folders only the full-scan
         spectra and the UV channels are read, unless ``everything``. Projects inside a data folder are listed
-        separately under ``projects``; open the project file itself to restore it."""
+        separately under ``projects``; open the project file itself to restore it. ``match``: only the files whose
+        name matches (a shell pattern such as '*14-07-48*', or several separated by ';'), for a folder that holds
+        other data too."""
+        import fnmatch
         from services.workspace_loader import load_files
         path = Path(path).expanduser()
         if not path.exists():
@@ -158,8 +161,12 @@ class Workspace:
                     'missing_files': list(report.missing_files)}
         projects = []
 
+        patterns = [m.strip() for m in (match or '').split(';') if m.strip()]
+
         def data_files(folder):
             files = _files_in(folder)
+            if patterns:
+                files = [f for f in files if any(fnmatch.fnmatch(f.name, m) for m in patterns)]
             projects.extend(str(f) for f in files if f.suffix.lower() in ('.gecko', '.zip'))
             return [f for f in files if f.suffix.lower() not in ('.gecko', '.zip')]
 
@@ -577,6 +584,16 @@ class Workspace:
         self.store.peak_service.rename_peak(component.component_id, found.peak_id, new_name)
         self._record(f'Renamed peak {found.name} to {new_name}')
         return self.peaks()
+
+    def remove_samples(self, samples) -> List[dict]:
+        """Take samples out of the workspace as the file tree's delete does (one undo step). Returns the samples
+        that remain."""
+        targets = self._samples(samples if samples is not None else [])
+        if not targets:
+            raise GeckoError('Name the samples to remove.')
+        self.store.file_removal_service.remove_many([b.bundle_id for b in targets])
+        self._record('Removed ' + _names(targets))
+        return self.samples()
 
     def remove_peak(self, sample, peak: str) -> List[dict]:
         """Delete a peak by name or id, as in the app; sample=None removes it from every sample that has it.
