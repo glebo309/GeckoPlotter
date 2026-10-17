@@ -307,3 +307,37 @@ def test_the_pda_view_follows_a_deconvolution_to_its_first_component(workspace):
     view = focus(workspace, 'deconvolve', [1.62, 1.92], {'channel': '263'}, rows)
     first = next(r for r in rows if not r.get('error'))['components'][0]
     assert view['pda_follow']['time'] == (first.get('apex_rt') or first.get('rt'))
+
+
+def _shown_uv(store):
+    from services.channel_visibility import channel_identity
+    return {(b.bundle_id, channel_identity(c)[0]) for b in store.iter_bundles() for c in b.component_list
+            if channel_identity(c) and str(channel_identity(c)[0]).startswith('uv:')
+            and store.visibility_state.get(store.peak_owner_id(c.component_id), True)
+            and store.visibility_state.get(b.bundle_id, True)}
+
+
+def test_saving_in_the_open_app_leaves_the_screen_as_it_is(workspace, tmp_path):
+    """The agent saved after fitting peaks at several wavelengths: every channel holding peaks came on the user's
+    screen. In the open app (live) saving changes nothing; on its own one channel per sample is shown."""
+    from services.live_focus import focus
+    workspace.add_uv_channel(239)
+    workspace.add_uv_channel(263)
+    for nm in ('239', '263'):
+        workspace.integrate(1.62, 1.92, channel=nm, name='PEA ' + nm, snap_to_valleys=False)
+    rows = workspace.integrate(1.62, 1.92, channel='263', name='PEA 263', snap_to_valleys=False)
+    focus(workspace, 'integrate', [1.62, 1.92], {'channel': '263'}, rows)
+    before = _shown_uv(workspace.store)
+    workspace.live = True
+    workspace.save(str(tmp_path / 'live.gecko'))
+    assert _shown_uv(workspace.store) == before
+    workspace.live = False
+    store = workspace.store
+    for bundle in store.iter_bundles():                 # nothing shown yet, as in a workspace of its own
+        store.visibility_state[bundle.bundle_id] = True
+        for component in bundle.component_list:
+            store.visibility_state[store.peak_owner_id(component.component_id)] = False
+    workspace.save(str(tmp_path / 'alone.gecko'))
+    for bundle in store.iter_bundles():                 # one channel with peaks drawn per sample, not all of them
+        shown = [c for c in bundle.component_list if store.visibility_state.get(store.peak_owner_id(c.component_id))]
+        assert len(shown) == 1 and store.peak_service.get_peaks(shown[0].component_id)

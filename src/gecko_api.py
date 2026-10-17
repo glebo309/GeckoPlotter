@@ -132,6 +132,7 @@ class Workspace:
         from services.data_store import DataStore
         self.store = store or DataStore()
         self.agent = None           # {'client', 'version', 'model'} of the MCP agent at work (gecko_mcp sets it)
+        self.live = False           # the open app's workspace (services/live_agent): the user's screen is not changed
 
     def _record(self, action: str) -> None:
         """Note a change in the analysis history (what the FAIR package and its report list), with the agent."""
@@ -228,8 +229,12 @@ class Workspace:
 
     def _present_results(self) -> Optional[dict]:
         """Open the project on what was done: the runs holding peaks shown (the others of their folder hidden) and the
-        first of them selected, so its peak table and Peak mass match the plot. Returns the app's client state."""
+        first of them selected, so its peak table and Peak mass match the plot. Returns the app's client state.
+        In the open app (live) nothing is changed: the project is saved as the user sees it. Each sample shows one
+        channel with peaks (one already shown stays), not every channel that holds peaks."""
         from services.channel_visibility import set_sample_visibility, show_channel
+        if self.live:
+            return None
         with_peaks = []
         for bundle in self._bundles():
             owners = [c.component_id for c in bundle.component_list
@@ -243,9 +248,13 @@ class Workspace:
             if bundle.bundle_id in grouped:
                 set_sample_visibility(self.store, bundle.bundle_id, False)
         for bundle, owners in with_peaks:
-            set_sample_visibility(self.store, bundle.bundle_id, True)
-            for owner in owners:                          # the channel the peaks are on is drawn
-                show_channel(self.store, owner)
+            if self.store.visibility_state.get(bundle.bundle_id, True) is False:
+                set_sample_visibility(self.store, bundle.bundle_id, True)    # (restores all its channels: then pick)
+                for component in bundle.component_list:
+                    self.store.visibility_state[self.store.peak_owner_id(component.component_id)] = False
+            shown = [o for o in owners if self.store.visibility_state.get(self.store.peak_owner_id(o), True)]
+            if not shown:                                 # one channel the peaks are on is drawn
+                show_channel(self.store, owners[0])
         return {'active-file': with_peaks[0][1][0]}
 
     # -- what is loaded -------------------------------------------------------------------------------------------

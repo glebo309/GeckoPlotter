@@ -169,6 +169,7 @@ class LiveAgent:
         workspace = self._workspaces.get(sid)
         if workspace is None or workspace.store is not store:
             workspace = self._workspaces[sid] = Workspace(store)
+            workspace.live = True                          # saving leaves the user's screen as it is
         return workspace
 
     def call(self, method: str, args=None, kwargs=None, agent: Optional[dict] = None) -> Any:
