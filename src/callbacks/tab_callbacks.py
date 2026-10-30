@@ -34,13 +34,15 @@ def _result_columns(frame, hidden):
     readonly = {'Signal', *(name for name, _ in CALIBRATION_COLUMNS)}
     numeric = {'No.', 'RT (min)', 'Area', 'Height', 'Width (min)', 'Concentration',
                'Relative Area (%)', 'Relative Height (%)', 'Within Sample (%)', 'Cross-Sample (%)'}
-    hidden = set(hidden) | {'Calibration status', 'Calibration'}
+    hidden = set(hidden) | {'Calibration status', 'Calibration', '_area_display_unit'}
     units = {str(v).strip() for v in frame.get('Concentration units', []) if pd.notna(v) and str(v).strip()}
     if len(units) <= 1:
         hidden.add('Concentration units')
     labels = {'Peak Name': 'Peak name', 'Concentration units': 'Units',
               'Within Sample (%)': 'Within sample (%)', 'Cross-Sample (%)': 'Across samples (%)',
               'Relative Area (%)': 'Area (%)', 'Relative Height (%)': 'Height (%)'}
+    from services.area_display_units import area_label
+    labels['Area'] = area_label(frame)
     if len(units) == 1:
         labels['Concentration'] = f'Concentration ({next(iter(units))})'
     result = []
@@ -51,6 +53,10 @@ def _result_columns(frame, hidden):
                       deletable=name not in readonly, renamable=name not in readonly)
         if name in numeric:
             specifier = 'd' if name == 'No.' else '.4~f' if name in ('RT (min)', 'Width (min)') else '.2f' if '(%)' in name else '.5~g'
+            if name == 'Area' and labels['Area'] == 'Area (µAU·s)':
+                specifier = ',.0f'
+            elif name == 'Area' and labels['Area'] == 'Area (mAU·s)':
+                specifier = ',.3~f'
             column.update(type='numeric', format={'specifier': specifier})
         result.append(column)
     return result
@@ -119,11 +125,13 @@ def register_tab_callbacks(app: dash.Dash, data_manager) -> None:
          Input('peak-name-persist-trigger', 'data'),
          Input('cross-sample-name-trigger', 'data'),
          Input('active-tab', 'data'),
-         Input('cal-revision', 'data')],
+         Input('cal-revision', 'data'),
+         Input('area-display-unit', 'data')],
         [State('loaded-files', 'data')],
         prevent_initial_call=True
     )
-    def update_peak_analysis_tab(active_file_id, peak_change, _name_trigger, _xname_trigger, active_tab, cal_revision=0, loaded_files=None):
+    def update_peak_analysis_tab(active_file_id, peak_change, _name_trigger, _xname_trigger, active_tab,
+                                 cal_revision=0, area_display_unit='mAU·min', loaded_files=None):
         """Update peak-table data in-place (preserves selections)."""
 
         HIDE = {'display': 'none'}
@@ -185,8 +193,12 @@ def register_tab_callbacks(app: dash.Dash, data_manager) -> None:
             if '_row_id' not in df.columns:
                 df.insert(0, '_row_id', range(len(df)))
             df = _promote_concentrations(df)
+            from services.area_display_units import display_peak_areas
+            owners = {peak.peak_id: peak.file_id for fid, _ in peak_sources(active_file_id)
+                      for peak in data_manager.peak_service.get_peaks(fid)}
+            df = display_peak_areas(df, data_manager, owners, area_display_unit)
             columns = _result_columns(df, {'_row_id', 'peak_id'})
-            return df.to_dict('records'), columns, SHOW, df.to_json(orient='split')
+            return df.to_dict('records'), columns, SHOW, df.to_json(orient='split', double_precision=15)
 
         except Exception as e:
             log.exception(f"Error updating peak analysis tab: {e}")

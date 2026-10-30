@@ -1,0 +1,27 @@
+#peak-table th[data-dash-column="Area"]:has(.area-units-button) {
+    position: relative;
+    padding-right: 25px !important;
+}
+#peak-table .area-units-button {
+    position: absolute;
+    right: 2px;
+    top: 50%;
+    transform: translateY(-50%);
+    border: 0;
+    background: transparent;
+    color: inherit;
+    cursor: pointer;
+    font-size: 17px;
+    line-height: 1;
+    padding: 3px 5px;
+    margin-left: 3px;
+    border-radius: 4px;
+}
+#peak-table .area-units-button:hover,
+#peak-table .area-units-button:focus-visible {
+    background: #e3e8e4;
+    outline: 2px solid #537361;
+    outline-offset: 1px;
+}
+.area-units-menu { min-width: 250px; }
+.area-units-menu [aria-checked="true"] { background: #e3e8e4; font-weight: 600; }

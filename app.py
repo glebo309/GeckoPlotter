@@ -192,6 +192,7 @@ _layout_body = html.Div(
         dcc.Store(id='peak-shared-selections', data={}),  # Shared selections for peak-analysis tab
         dcc.Store(id='cross-shared-selections', data={}),  # Shared selections for across-samples tab
         dcc.Store(id='peak-table-store', data=None),  # Mirror of peak-table data (JSON split) — always in layout
+        dcc.Store(id='area-display-unit', data='mAU·min', storage_type='local'),
         dcc.Store(id='cross-sample-table-store', data=None),  # Mirror of cross-sample-table data (JSON split) — always in layout
         # Baseline integration stores (p-line drawing)
         dcc.Store(id='baseline-mode', data='navigate'),  # 'draw' | 'edit' | 'navigate' | 'deconvolve'
