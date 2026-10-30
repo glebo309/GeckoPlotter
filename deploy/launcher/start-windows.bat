@@ -23,7 +23,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -Command "$ProgressPreference='Sil
 where uv >nul 2>&1
 if errorlevel 1 goto failed
 if not exist "%HOME_DIR%\launcher.py" goto failed
-uv run --python 3.12 --no-project "%HOME_DIR%\launcher.py"
+uv run --python cpython-3.12-windows-x86_64 --no-project "%HOME_DIR%\launcher.py"
 echo.
 pause
 exit /b 0
