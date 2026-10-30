@@ -86,7 +86,7 @@ def test_save_downloads_a_gecko_named_from_the_project_with_the_client_state(mon
     trigger(monkeypatch, 'session-save-btn.n_clicks')
     state = client_values(**SAVED_CLIENT_STATE, **{'active-file': a.bundle_id})
     out = save(1, None, 'Run: 12/3', None, *state)
-    download, modal, name, dirty, stamp, hidden, title, body = out
+    download, modal, name, dirty, stamp, hidden, title, body, dialog_error = out
     assert download['filename'] == 'Run_ 12_3.gecko'
     assert (modal, name, dirty) == (False, 'Run: 12/3', False)
     assert stamp['kind'] == 'saved' and ':' in stamp['at']
@@ -573,3 +573,40 @@ def test_save_as_always_asks_for_a_name_then_downloads_under_it(monkeypatch):
     result = fns['save_project'](None, 1, 'Existing project', 'New name', *client_values())
     assert result[0]['filename'] == 'New name.gecko'
     assert result[1:4] == (False, 'New name', False)
+
+
+@pytest.mark.parametrize('stage', ['build_session', 'inspect_session'])
+def test_save_failure_is_visible_inside_name_dialog_and_keeps_project_dirty(monkeypatch, stage):
+    store, *_ = stored_workspace()
+    save = callbacks(store)['save_project']
+    trigger(monkeypatch, 'session-name-confirm.n_clicks')
+    def fail(*args, **kwargs):
+        raise OSError('Cannot prepare project archive')
+    monkeypatch.setattr(ss, stage, fail)
+    out = save(None, 1, '', 'My project', *client_values())
+    assert out[0] is dash.no_update
+    assert out[3] is dash.no_update
+    assert out[4]['kind'] == 'failed'
+    assert 'Cannot prepare project archive' in out[8]
+    assert 'project_name' not in store.session_meta
+
+
+def test_confirming_empty_name_explains_what_is_missing(monkeypatch):
+    store, *_ = stored_workspace()
+    trigger(monkeypatch, 'session-name-confirm.n_clicks')
+    out = callbacks(store)['save_project'](None, 1, '', '  ', *client_values())
+    assert out[1] is True
+    assert out[8] == 'Enter a project name.'
+
+
+def test_save_dialog_contains_error_and_save_button_shows_progress():
+    from components.session_controls import create_session_support
+    from components.workspace_layout import walk
+    nodes = list(walk(create_session_support()))
+    dialog = next(n for n in nodes if getattr(n, 'id', None) == 'session-name-modal')
+    assert any(getattr(n, 'id', None) == 'session-save-error' for n in walk(dialog))
+    app = dash.Dash(__name__)
+    sc.register_session_callbacks(app, DataStore())
+    callback = next(c for c in app._callback_list if 'session-download.data' in c['output'])
+    assert callback['running']['running']['session-name-confirm.loading'] is True
+    assert callback['running']['runningOff']['session-name-confirm.loading'] is False

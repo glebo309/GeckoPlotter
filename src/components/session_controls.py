@@ -113,6 +113,8 @@ def create_session_support():
                 children=[
                     dmc.TextInput(id='session-name-input', placeholder='e.g. Alanine calibration 2026-03',
                                   label='Project name', size='sm'),
+                    html.Div('', id='session-save-error', role='alert',
+                             style={'color': '#b42318', 'fontSize': '13px', 'marginTop': '8px'}),
                     dmc.Group([
                         dmc.Button('Cancel', id='session-name-cancel', size='xs', variant='default'),
                         dmc.Button('Save', id='session-name-confirm', size='xs', color='dark'),

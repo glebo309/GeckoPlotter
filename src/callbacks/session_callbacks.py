@@ -149,12 +149,14 @@ def register_session_callbacks(app, data_manager) -> None:
          Output('session-stamp', 'data'),
          Output('session-message', 'hidden'),
          Output('session-message-title', 'children'),
-         Output('session-message-body', 'children')],
+         Output('session-message-body', 'children'),
+         Output('session-save-error', 'children')],
         [Input('session-save-btn', 'n_clicks'),
          Input('session-name-confirm', 'n_clicks')],
         [State('session-name', 'data'),
          State('session-name-input', 'value')] + _state_inputs(),
         prevent_initial_call=True,
+        running=[(Output('session-name-confirm', 'loading'), True, False)],
     )
     def save_project(save_clicks, confirm_clicks, name, name_input, *client_values):
         """Download the project as ``<name>.gecko`` (self-contained: originals embedded)."""
@@ -162,25 +164,27 @@ def register_session_callbacks(app, data_manager) -> None:
         if triggered not in ('session-save-btn', 'session-name-confirm'):
             raise PreventUpdate
         def only(**changes):
-            order = ('download', 'modal', 'name', 'dirty', 'stamp', 'hidden', 'title', 'body')
+            order = ('download', 'modal', 'name', 'dirty', 'stamp', 'hidden', 'title', 'body', 'error')
             return tuple(changes.get(key, no_update) for key in order)
 
         if not _has_data(data_manager):
             return only(stamp=_stamp('failed', message='Nothing to save yet'), hidden=False,
-                        title='Nothing to save yet', body='Load some data first, then save the project.')
+                        title='Nothing to save yet', body='Load some data first, then save the project.',
+                        error='Load some data first, then save the project.')
         chosen = ((name_input if triggered == 'session-name-confirm' else name) or '').strip()
         if not chosen:
-            return only(modal=True)   # first save of an untitled project: ask for a name (its Save comes back here)
+            return only(modal=True, error='Enter a project name.' if triggered == 'session-name-confirm' else '')
         try:
             data = ss.build_session(data_manager, gather_client_state(client_values), project_name=chosen)
+            info = ss.inspect_session(data)
+            download = dcc.send_bytes(data, sf.safe_project_filename(chosen))
         except Exception as exc:
             log.exception('Save failed')
             return only(stamp=_stamp('failed', message='Save failed'), hidden=False,
-                        title='Could not save the project', body=f'{exc}')
-        info = ss.inspect_session(data)
+                        title='Could not save the project', body=f'{exc}', error=f'Could not save: {exc}')
         data_manager.session_meta.update(project_name=chosen, created_at=info.created_at, saved_at=info.saved_at)
-        result = dict(download=dcc.send_bytes(data, sf.safe_project_filename(chosen)), modal=False, name=chosen,
-                      dirty=False, stamp=_stamp('saved'))
+        result = dict(download=download, modal=False, name=chosen,
+                      dirty=False, stamp=_stamp('saved'), error='')
         if info.notes:   # e.g. originals too large to embed: the user must know reopening needs them
             result.update(hidden=False, title='Saved with notes', body=_notes(info.notes))
         return only(**result)
