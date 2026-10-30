@@ -52,7 +52,7 @@ def register_history_capture(app, store):
             history.lock.acquire()
         try:
             values = {d['id']: d.get('value') for d in body.get('state', []) + body.get('inputs', [])
-                      if isinstance(d.get('id'), str)}
+                      if isinstance(d, dict) and isinstance(d.get('id'), str)}
             for key in NAVIGATION:
                 if values.get(key) is not None:
                     history.navigation[key] = values[key]
@@ -78,7 +78,7 @@ def register_history_capture(app, store):
         try:
             outputs = body.get('outputs', [])
             outputs = outputs if isinstance(outputs, list) else [outputs]
-            if response.status_code == 200 and any(isinstance(o.get('id'), str) and (o['id'] in CLIENT_FIELDS or o['id'] in NAVIGATION)
+            if response.status_code == 200 and any(isinstance(o, dict) and isinstance(o.get('id'), str) and (o['id'] in CLIENT_FIELDS or o['id'] in NAVIGATION)
                                                    for o in outputs):
                 result = (response.get_json(silent=True) or {}).get('response', {})
                 for key, prop in CLIENT_FIELDS.items():
