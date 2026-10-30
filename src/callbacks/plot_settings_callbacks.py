@@ -294,6 +294,8 @@ def register_plot_settings_callbacks(app, data_manager):
         from callbacks.publication_callbacks import build_y1_series_controls
 
         s = settings_for_context(data_manager, context_key, active_file, (custom_figures or {}).get(plot_tab, {}))
+        # Establish the visible baseline before the first edit, so Undo restores these exact defaults.
+        _save_settings(data_manager, context_key, s)
         _log.debug(f"HYDRATE [{context_key}] y1_stats={s.get('y1_stats')} categorical_x={s.get('categorical_x')}")
 
         series_count = max(1, s.get('y1_series_count', 1))

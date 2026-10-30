@@ -244,6 +244,7 @@ _layout_body = html.Div(
         dcc.Store(id='file-reorder-event', data=None),  # JS drag-and-drop event {group_id, order: [id, ...]}
         dcc.Store(id='keyboard-delete-trigger', data=0),  # Counter bumped by JS on Backspace/Delete keypress
         dcc.Store(id='undo-trigger', data=0),
+        dcc.Store(id='history-client-sink'),
         dcc.Store(id='redo-trigger', data=0),
         dcc.Store(id='keyboard-action-trigger', data=None),  # {action: 'escape'|'prev_peak'|'next_peak'|'toggle_layout', ts}
         dcc.Store(id='undo-state', data={'can_undo': False, 'can_redo': False}),
@@ -2269,6 +2270,10 @@ clientside_callback(
     Output('pt-pub-dimensions-wrapper', 'style'),
     Input('active-plot-tab', 'data'),
 )
+
+from callbacks.history_callbacks import register_history_callbacks, register_history_capture
+register_history_callbacks(app, data_manager)
+register_history_capture(app, data_manager)
 
 if __name__ == '__main__':
     log.info("Starting GeckoPlotter V2...")

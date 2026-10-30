@@ -1019,34 +1019,6 @@ def register_baseline_callbacks(app: dash.Dash, data_manager) -> None:
 
         raise PreventUpdate
 
-    # ── Undo / Redo ───────────────────────────────────────────────────
-
-    @app.callback(
-        [Output('peak-change-trigger', 'data', allow_duplicate=True),
-         Output('render-trigger', 'data', allow_duplicate=True),
-         Output('selected-peak-idx', 'data', allow_duplicate=True)],
-        [Input('undo-trigger', 'data'),
-         Input('redo-trigger', 'data')],
-        [State('peak-change-trigger', 'data'),
-         State('render-trigger', 'data')],
-        prevent_initial_call=True,
-    )
-    def handle_undo_redo(undo_ts, redo_ts, peak_counter, render_counter):
-        trigger_id = callback_context.triggered[0]['prop_id'].rsplit('.', 1)[0] if callback_context.triggered else ''
-        if trigger_id == 'undo-trigger' and undo_ts:
-            changed = data_manager.peak_service.undo()
-        elif trigger_id == 'redo-trigger' and redo_ts:
-            changed = data_manager.peak_service.redo()
-        else:
-            raise PreventUpdate
-        if not changed:
-            raise PreventUpdate
-        data_manager.peak_service.group_peaks_across_samples(
-            file_overlay_map=data_manager.build_file_overlay_map())
-        return (peak_counter or 0) + 1, (render_counter or 0) + 1, None
-
-
-
 # ---------------------------------------------------------------------------
 # Edit-mode helpers
 # ---------------------------------------------------------------------------

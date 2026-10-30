@@ -21,7 +21,8 @@
     function isTypingTarget(el) {
         if (!el) return false;
         var tag = el.tagName;
-        if (tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return true;
+        if (tag === 'INPUT' && ['checkbox', 'radio', 'range', 'button', 'submit'].indexOf(el.type) < 0) return true;
+        if (tag === 'TEXTAREA' || tag === 'SELECT') return true;
         if (el.isContentEditable) return true;
         if (el.closest && el.closest('.dash-cell')) return true;
         return false;
