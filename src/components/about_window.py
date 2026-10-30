@@ -41,6 +41,18 @@ def create_about_window():
                                 title='Add GeckoPlotter to the AI apps on this computer (Claude Desktop, Claude Code, '
                                       'Codex), so an agent can open your data, integrate and export results'),
                 ]),
+                html.Div(className='about-claude', style={'display': 'block'}, children=[
+                    html.Div('Diagnostic reports', className='about-claude-title'),
+                    html.P('Reports include actions, errors, app version and filenames. File contents, measurements '
+                           'and screen recordings are excluded.', className='about-claude-status'),
+                    dmc.Switch(id='diagnostics-share', label='Share reports with the developer through PostHog',
+                               checked=False, size='sm'),
+                    html.Div(id='diagnostics-status', className='about-claude-status', role='status',
+                             style={'marginTop': '8px'}),
+                    html.Button('Download diagnostic report', id='diagnostics-download-btn',
+                                className='about-btn', n_clicks=0, style={'marginTop': '8px'}),
+                    dcc.Download(id='diagnostics-download'),
+                ]),
                 html.Div(className='about-foot', children=[
                     html.A('GitHub ↗', id='about-repo', href='', target='_blank'),
                     html.Div(style={'flex': 1}),
