@@ -38,10 +38,11 @@ from pathlib import Path
 REPO = os.environ.get('GECKO_REPO', 'glebo309/GeckoPlotter')
 BRANCH = os.environ.get('GECKO_BRANCH', 'main')
 SOURCE_ZIP = os.environ.get('GECKO_SOURCE_ZIP')
-PYTHON_VERSION = '3.12'
 FIRST_PORT = 8052
 USER_AGENT = {'User-Agent': 'GeckoPlotter-launcher'}
 IS_WINDOWS = platform.system() == 'Windows'
+# Native Windows ARM wheels are missing for some dependencies. Windows runs x64 Python through emulation.
+PYTHON_VERSION = 'cpython-3.12-windows-x86_64' if IS_WINDOWS else '3.12'
 BACKGROUND = '--background' in sys.argv          # started from the icon: no window, stops itself when idle
 
 
@@ -302,6 +303,20 @@ def requirements_hash() -> str:
     return hashlib.sha256(text + PYTHON_VERSION.encode()).hexdigest()[:16]
 
 
+def compatible_venv() -> bool:
+    """An older launcher may have created native ARM Python, even when its packages failed to install."""
+    if not VENV_PYTHON.exists():
+        return False
+    if not IS_WINDOWS:
+        return True
+    try:
+        result = subprocess.run([str(VENV_PYTHON), '-c', 'import platform; print(platform.machine())'],
+                                capture_output=True, text=True, timeout=15, **NO_WINDOW)
+        return result.returncode == 0 and result.stdout.strip().lower() in ('amd64', 'x86_64')
+    except (OSError, subprocess.TimeoutExpired):
+        return False
+
+
 def free_port(first: int) -> int:
     for port in range(first, first + 40):
         with socket.socket() as probe:
@@ -341,13 +356,20 @@ def prepare() -> subprocess.Popen:
 
     STATUS.version = (state.get('sha') or '')[:7]
     wanted = requirements_hash()
-    if os.environ.get('GECKO_SKIP_INSTALL') or (VENV_PYTHON.exists() and state.get('requirements') == wanted):
+    skip_install = os.environ.get('GECKO_SKIP_INSTALL')
+    compatible = False if skip_install else compatible_venv()
+    if skip_install or (compatible and state.get('requirements') == wanted):
         STATUS.set('install', 'skip', 'Everything is already installed')
     else:
         STATUS.set('install', 'active', 'First start: installing packages. This takes a few minutes, once.')
         uv = find_uv()
-        if not VENV_PYTHON.exists():
-            run_logged([uv, 'venv', '--python', PYTHON_VERSION, str(VENV)])
+        state.pop('requirements', None)
+        write_state(state)  # a failed repair must retry package installation on the next start
+        if not compatible:
+            repair = ['--clear'] if VENV.exists() else []
+            if repair:
+                STATUS.note('Repairing the Python environment for this computer')
+            run_logged([uv, 'venv', *repair, '--python', PYTHON_VERSION, str(VENV)])
         run_logged([uv, 'pip', 'install', '--python', str(VENV_PYTHON), '-r', str(APP / 'requirements.txt')])
         state['requirements'] = wanted
         write_state(state)
@@ -386,7 +408,7 @@ def prepare() -> subprocess.Popen:
     return process
 
 
-SHORTCUTS_VERSION = 5                                  # raise to rebuild everyone's shortcut once (5: .gecko files)
+SHORTCUTS_VERSION = 6                                  # 6: Windows shortcuts request compatible x64 Python
 ICONS_VERSION = 2                                      # raise when the icon changes, so everyone fetches it again
 ICONS = ('icon.png', 'icon.ico', 'icon.icns')
 
