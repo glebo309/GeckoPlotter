@@ -49,7 +49,8 @@ def test_prepare_selects_and_repairs_windows_python(launcher, monkeypatch, archi
         assert command[0] == str(launcher.VENV_PYTHON)
         if architecture == 'broken':
             raise OSError('invalid executable')
-        return SimpleNamespace(returncode=0, stdout=architecture + '\n')
+        build_platform = {'ARM64': 'win-arm64', 'AMD64': 'win-amd64'}[architecture]
+        return SimpleNamespace(returncode=0, stdout=build_platform + '\n')
 
     monkeypatch.setattr(launcher.subprocess, 'run', probe)
 
@@ -85,3 +86,16 @@ def test_windows_bootstrap_and_shortcuts_request_x64(launcher, monkeypatch):
     launcher.create_shortcuts()
     assert commands and REQUEST in commands[0][-1]
     assert registered and REQUEST in registered[0]
+
+
+def test_emulated_x64_python_is_compatible_on_an_arm_computer(launcher, monkeypatch):
+    launcher.VENV_PYTHON.parent.mkdir(parents=True)
+    launcher.VENV_PYTHON.touch()
+
+    def probe(command, **kwargs):
+        # platform.machine() describes the physical CPU; sysconfig describes Python's build.
+        output = 'ARM64' if 'platform.machine()' in command[2] else 'win-amd64'
+        return SimpleNamespace(returncode=0, stdout=output + '\n')
+
+    monkeypatch.setattr(launcher.subprocess, 'run', probe)
+    assert launcher.compatible_venv()

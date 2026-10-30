@@ -310,9 +310,9 @@ def compatible_venv() -> bool:
     if not IS_WINDOWS:
         return True
     try:
-        result = subprocess.run([str(VENV_PYTHON), '-c', 'import platform; print(platform.machine())'],
+        result = subprocess.run([str(VENV_PYTHON), '-c', 'import sysconfig; print(sysconfig.get_platform())'],
                                 capture_output=True, text=True, timeout=15, **NO_WINDOW)
-        return result.returncode == 0 and result.stdout.strip().lower() in ('amd64', 'x86_64')
+        return result.returncode == 0 and result.stdout.strip().lower() == 'win-amd64'
     except (OSError, subprocess.TimeoutExpired):
         return False
 

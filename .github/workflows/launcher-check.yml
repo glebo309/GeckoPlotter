@@ -59,7 +59,7 @@ jobs:
               echo "GeckoPlotter answered after ~$((i*5)) s"
               curl -fsS http://127.0.0.1:8052/ | grep -q "_dash-" && echo "and it is the Dash app"
               if [[ "$RUNNER_OS" == "Windows" ]]; then
-                "$GECKO_HOME/venv/Scripts/python.exe" -c "import sysconfig, cryptography; assert sysconfig.get_platform() == 'win-amd64', sysconfig.get_platform()"
+                "$GECKO_HOME/venv/Scripts/python.exe" -c "import sysconfig, cryptography, runpy; assert sysconfig.get_platform() == 'win-amd64', sysconfig.get_platform(); assert runpy.run_path('deploy/launcher/launcher.py')['compatible_venv']()"
               fi
               kill $LAUNCHER 2>/dev/null || true
               exit 0
