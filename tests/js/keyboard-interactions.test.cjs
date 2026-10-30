@@ -59,3 +59,19 @@ test('Enter accepts and X cancels only the active deconvolution preview', () => 
     assert.deepEqual(clicked,['accept','cancel','cancel']);
     assert.equal(props.length,0);
 });
+
+test('undo and redo work while a legend checkbox or slider has focus', () => {
+    for (const type of ['checkbox', 'radio', 'range']) {
+        const {events, props} = keyboard();
+        const target = {tagName: 'INPUT', type};
+        events.keydown({key: 'z', metaKey: true, target, preventDefault() {}});
+        events.keydown({key: 'Z', metaKey: true, shiftKey: true, target, preventDefault() {}});
+        assert.deepEqual(props.map(p => p[0]), ['undo-trigger', 'redo-trigger']);
+    }
+});
+
+test('text inputs retain native text undo', () => {
+    const {events, props} = keyboard();
+    events.keydown({key: 'z', metaKey: true, target: {tagName: 'INPUT', type: 'text'}, preventDefault() {}});
+    assert.equal(props.length, 0);
+});
