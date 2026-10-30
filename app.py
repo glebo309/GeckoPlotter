@@ -2275,6 +2275,10 @@ from callbacks.history_callbacks import register_history_callbacks, register_his
 register_history_callbacks(app, data_manager)
 register_history_capture(app, data_manager)
 
+from callbacks.diagnostics_callbacks import register_diagnostics_callbacks, install_diagnostics
+register_diagnostics_callbacks(app)
+install_diagnostics(app, data_manager)
+
 if __name__ == '__main__':
     log.info("Starting GeckoPlotter V2...")
     log.info("Upload TXT chromatograms or CSV UV-Vis files to get started!")
