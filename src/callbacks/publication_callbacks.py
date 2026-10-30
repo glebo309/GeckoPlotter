@@ -1160,7 +1160,16 @@ def register_publication_callbacks(app: dash.Dash, data_manager) -> None:
                 'categorical_x': s.get('categorical_x', True),
             }
 
-            fig, export_data = create_publication_plot(df, None, selections, plot_config)
+            from services.area_display_units import area_label, publication_area_units
+            displayed_area = area_label(df)
+            plot_frame, plot_selections = publication_area_units(df, selections)
+            if displayed_area != 'Area':
+                for axis in ('y1', 'y2'):
+                    if any(series.get('column_id') == 'Area' for series in selections.get(axis, {}).get('series', [])):
+                        if plot_config.get(f'{axis}_label') in ('', 'Area', axis.upper(), None):
+                            plot_config[f'{axis}_label'] = displayed_area
+                            s[f'{axis}_label'] = displayed_area
+            fig, export_data = create_publication_plot(plot_frame, None, plot_selections, plot_config)
 
             # Apply visual styling via PlotSettingsService
             # Store keys now match dataclass fields; only y_label needs mapping
