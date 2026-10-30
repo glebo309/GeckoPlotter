@@ -482,3 +482,10 @@ def test_a_renamed_channel_carries_its_name_in_every_run():
     assert labels['uv:250'] == 'Fmoc channel'
     assert all(store.get_bundle(n).component_display_name(store.get_bundle(n).component_list[0]) == 'Fmoc channel'
                for n in ('a', 'b'))
+
+
+def test_channel_click_refresh_and_undo_through_real_app_http():
+    import subprocess
+    import sys
+    result = subprocess.run([sys.executable, 'tests/channel_http_flow.py'], capture_output=True, text=True)
+    assert result.returncode == 0, result.stdout + result.stderr
