@@ -175,7 +175,8 @@ def _add_moved_label(fig, peak, text, top, add_kw):
         fig.add_annotation(**common, showarrow=False, xshift=dx, yshift=dy, **add_kw)
 
 
-def add_peak_traces(fig, all_peaks, time_arr, signal_arr, selected_peak_id=None, row=None, labelled=None):
+def add_peak_traces(fig, all_peaks, time_arr, signal_arr, selected_peak_id=None, row=None, labelled=None,
+                    refresh=True, geometry=None):
     """Add peak overlay traces to the figure.
 
     Peak colors come from ``peak.color`` which is set by
@@ -194,7 +195,7 @@ def add_peak_traces(fig, all_peaks, time_arr, signal_arr, selected_peak_id=None,
 
     for i, peak in enumerate(all_peaks):
         annotation_start = len(fig.layout.annotations)
-        register_peak_geometry(fig, peak)
+        register_peak_geometry(fig, peak, geometry=geometry)
         trace_start = len(fig.data)
         shape_start = len(fig.layout.shapes)
         is_selected = peak.peak_id == selected_peak_id
@@ -276,7 +277,8 @@ def add_peak_traces(fig, all_peaks, time_arr, signal_arr, selected_peak_id=None,
                     annotation.xref = source.xaxis or 'x'
                     annotation.yref = source.yaxis or 'y'
 
-    refresh_peak_display(fig)
+    if refresh:
+        refresh_peak_display(fig)
 
 
 # Distinct colors for deconvolution preview components (matches the sandbox).

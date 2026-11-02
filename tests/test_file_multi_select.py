@@ -47,7 +47,7 @@ def test_eye_on_a_selected_row_hides_every_selected_row(monkeypatch):
     trigger(monkeypatch, 'visibility-btn', 'one')
     ids = [{'type': 'visibility-btn', 'index': k} for k in ('one', 'two', 'three')]
     counter, hidden = toggle([1, 0, 0], ids, 4, ['one', 'three'])
-    assert counter == 5
+    assert counter is dash.no_update  # hidden-files now drives the plot without unrelated renders
     assert {'one', 'one-data', 'three', 'three-data'} <= set(hidden)
     assert not {'two', 'two-data'} & set(hidden)
     # Clicking again shows them all again, using the clicked row's state.

@@ -6,8 +6,8 @@ points, the lowest and the highest one (in time order), so peak tops, baseline n
 where they were; only points in between disappear. It is for DRAWING only: integration, tables and exports of data use
 the full arrays.
 
-Settings: GECKO_DECIMATE=0 turns it off; GECKO_DECIMATE_ABOVE (default 6000 points) and GECKO_DECIMATE_TO (default
-3000 points kept) change the thresholds. 3000 points is still ~5 per pixel across a 624 px wide journal figure.
+Settings: GECKO_DECIMATE=0 turns it off; GECKO_DECIMATE_ABOVE (default 1600 points) and GECKO_DECIMATE_TO (default
+1000 points kept) change the thresholds. The overview keeps extrema in roughly 500 bins; measurements use the full signal.
 """
 from __future__ import annotations
 
@@ -16,8 +16,8 @@ import os
 import numpy as np
 
 ENABLED = os.environ.get('GECKO_DECIMATE', '1') != '0'
-ABOVE = int(os.environ.get('GECKO_DECIMATE_ABOVE', '6000'))
-TARGET = int(os.environ.get('GECKO_DECIMATE_TO', '3000'))
+ABOVE = int(os.environ.get('GECKO_DECIMATE_ABOVE', '1600'))
+TARGET = int(os.environ.get('GECKO_DECIMATE_TO', '1000'))
 
 
 def decimate_minmax(x, y, target: int = TARGET):
@@ -49,7 +49,10 @@ def _minmax_keep(yf, target):
     body = yf[:used].reshape(bins, width)
     low = np.where(np.isnan(body), np.inf, body).argmin(axis=1) + np.arange(bins) * width
     high = np.where(np.isnan(body), -np.inf, body).argmax(axis=1) + np.arange(bins) * width
-    return np.unique(np.concatenate([low, high, [0, n - 1], np.arange(used, n, max(1, (n - used) // 4 or 1))]))
+    tail = yf[used:]
+    tail_keep = ([used + np.where(np.isnan(tail), np.inf, tail).argmin(),
+                  used + np.where(np.isnan(tail), -np.inf, tail).argmax()] if len(tail) else [])
+    return np.unique(np.concatenate([low, high, [0, n - 1], tail_keep])).astype(int)
 
 
 def for_display(x, y):

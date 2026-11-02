@@ -271,13 +271,13 @@ def register_publication_preview_callbacks(app, data_manager):
          State('plot-tabs', 'data'),
          State('file-order', 'data'),
          State('int-display-opts', 'value'),
-         State('custom-plot-figures', 'data')],
+         State('custom-plot-figures', 'data'), Input('hidden-files', 'data')],
         prevent_initial_call=True,
     )
     def render_pub_figure(active_tab_id, plot_settings, preset, render_trigger,
                           active_file, sub_rows, sub_cols, zoom_sync, peak_trigger,
                           loaded_files, plot_tabs, file_order, display_opts,
-                          custom_figures):
+                          custom_figures, hidden_files=None):
         pub_tab = _active_publication_tab(active_tab_id, plot_tabs)
         if not pub_tab:
             raise dash.exceptions.PreventUpdate

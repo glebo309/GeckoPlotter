@@ -163,6 +163,13 @@
                 if (same) { entry.signature = signature; entry.figure = JSON.parse(signature); }
             }
             if (entry.signature !== signature) {
+                var beforeMeta = (entry.figure && entry.figure.layout && entry.figure.layout.meta) || {};
+                var afterMeta = (figure.layout && figure.layout.meta) || {};
+                var visibilityOnly = beforeMeta.gecko_visibility_base &&
+                    beforeMeta.gecko_visibility_base === afterMeta.gecko_visibility_base &&
+                    afterMeta.gecko_visibility_revision &&
+                    beforeMeta.gecko_visibility_revision !== afterMeta.gecko_visibility_revision &&
+                    (entry.figure.data || []).length === (figure.data || []).length;
                 entry.signature = signature;
                 entry.figure = JSON.parse(signature);
                 var layout = JSON.parse(JSON.stringify(entry.figure.layout || {}));
@@ -172,7 +179,15 @@
                     if (axis.autorange==='max') axis.range[1]=null;
                     if (axis.autorange==='min') axis.range[0]=null;
                 });
-                await window.Plotly.react(entry.gd, entry.figure.data || [], layout, config);
+                if (visibilityOnly) {
+                    // Coordinates already live in this graph. Keep its zoom and
+                    // update only visibility; no trace reconstruction or re-upload.
+                    await window.Plotly.update(entry.gd,
+                        {visible: entry.figure.data.map(function (trace) {return trace.visible !== false;})},
+                        {meta: layout.meta});
+                } else {
+                    await window.Plotly.react(entry.gd, entry.figure.data || [], layout, config);
+                }
                 if (!plots.has(figureId)) return '';
                 bridge(entry);
                 // Plotly.react already laid this canvas out at its current size.
@@ -260,6 +275,39 @@
     // can be revealed immediately; Python still owns data/settings selection.
     document.addEventListener('click', function (event) {
         if (!event.target || !event.target.closest) return;
+        var eye = event.target.closest('[id*="visibility-btn"]');
+        if (eye) {
+            // Hide immediately, including integrated peaks. The server owns the
+            // channel mask, undo and the final layout; showing uses its reply.
+            var graph = window.geckoActivePlot(), clicked;
+            try {clicked = JSON.parse(eye.id).index;} catch (_) {return;}
+            if (!graph || !graph.data || eye.getAttribute('aria-pressed') !== 'true') return;
+            var selected = window._geckoGetFileSelection ? window._geckoGetFileSelection() : [];
+            var targets = new Set(selected.length > 1 && selected.indexOf(clicked) >= 0 ? selected : [clicked]);
+            var sources = new Set();
+            graph.data.forEach(function (trace) {
+                var m = trace.meta || {};
+                if (targets.has(m.file_id) || targets.has(m.rename_file_id)) sources.add(m.file_id);
+            });
+            if (!sources.size) return;
+            var geometry = ((graph.layout || {}).meta || {}).gecko_peak_geometry || {};
+            var peaks = new Set(Object.keys(geometry).filter(function (id) {return sources.has(geometry[id].file_id);}));
+            var visible = graph.data.map(function (trace) {
+                var pid = trace.meta === 'peak_overlay' && trace.customdata && trace.customdata[0];
+                if (Array.isArray(pid)) pid = pid[0];
+                return !sources.has((trace.meta || {}).file_id) && !peaks.has(pid) && trace.visible !== false;
+            });
+            var layout = {};
+            ['shapes', 'annotations'].forEach(function (kind) {
+                ((graph.layout || {})[kind] || []).forEach(function (item, i) {
+                    var pid = (item.name || '').replace(/^(baseline:|peak-label:)/, '');
+                    if (peaks.has(pid)) layout[kind + '[' + i + '].visible'] = false;
+                });
+            });
+            Promise.resolve(window.Plotly.update(graph, {visible: visible}, layout)).catch(function () {});
+            return;
+        }
+        if (event.target.closest('[id*="delete-btn"]')) return;
         var button = event.target.closest('.plot-tab-btn');
         var id;
         if (button) {
