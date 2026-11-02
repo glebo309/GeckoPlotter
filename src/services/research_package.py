@@ -43,6 +43,10 @@ def csv_bytes(frame):
 def _history_metadata(metadata):
     # method_details is a display copy; the full method is in analysis/instrument_methods.json.
     result = {k:v for k,v in metadata.items() if k not in ('mass_spectral_data', 'method_details')}
+    if result.get('instrument_status'):
+        from .instrument_status import summary
+        result['instrument_status'] = {name: summary(trace)
+                                      for name, trace in result['instrument_status'].items()}
     pda = result.get('pda')
     if pda:
         keys = ('time_min', 'wavelength_nm', 'absorbance_mau')

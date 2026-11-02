@@ -15,22 +15,33 @@ FIELDS = ('_bundles', '_component_index', '_file_index', '_persistent_state', '_
 SERVICES = ('peak_service', 'calibration_service', 'integration_service')
 
 
-def clone(value):
+def clone(value, memo=None):
+    if type(value) in (str, int, float, bool, bytes, type(None)):
+        return value
+    if memo is None:
+        memo = {}
+    if id(value) in memo:
+        return memo[id(value)]
     if isinstance(value, dict):
-        return {k: clone(v) for k, v in value.items()}
-    if isinstance(value, list):
-        return [clone(v) for v in value]
-    if isinstance(value, tuple):
-        return tuple(clone(v) for v in value)
-    if isinstance(value, set):
-        return set(value)
-    if is_dataclass(value) and not isinstance(value, type):
+        result = memo[id(value)] = {}
+        result.update((k, clone(v, memo)) for k, v in value.items())
+    elif isinstance(value, list):
+        result = memo[id(value)] = []
+        result.extend(clone(v, memo) for v in value)
+    elif isinstance(value, tuple):
+        result = tuple(clone(v, memo) for v in value)
+    elif isinstance(value, set):
+        result = set(value)
+    elif is_dataclass(value) and not isinstance(value, type):
         result = copy(value)
+        memo[id(value)] = result
         for field in fields(value):
-            object.__setattr__(result, field.name, clone(getattr(value, field.name)))
-        return result
-    # Frames and instrument arrays are replaced on edits; originals and parsed source arrays are immutable.
-    return value
+            object.__setattr__(result, field.name, clone(getattr(value, field.name), memo))
+    else:
+        # Frames and instrument arrays are replaced on edits; original measurements are immutable.
+        result = value
+    memo[id(value)] = result
+    return result
 
 
 def signature(value):
