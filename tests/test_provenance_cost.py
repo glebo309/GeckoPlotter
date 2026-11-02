@@ -36,3 +36,21 @@ def test_replaced_table_is_detected_even_with_equal_shape():
     one = rp._dataframe_sha256(store, _component(pd.DataFrame({'x': [0., 1.]})))
     two = rp._dataframe_sha256(store, _component(pd.DataFrame({'x': [5., 6.]})))
     assert one != two
+
+
+def test_direct_and_browser_access_share_one_workspace_digest_cache(monkeypatch):
+    from services.data_store import DataStore
+    from services.workspaces import WorkspaceRegistry
+    registry = WorkspaceRegistry(DataStore, session_id=lambda: 'one')
+    store = registry.for_session('one')
+    component = _component(pd.DataFrame({'x': [0., 1.], 'y': [1., 2.]}))
+    calls = []
+    real = rp.csv_bytes
+    monkeypatch.setattr(rp, 'csv_bytes', lambda frame: calls.append(1) or real(frame))
+    assert rp._dataframe_sha256(store, component) == rp._dataframe_sha256(registry.proxy, component)
+    assert len(calls) == 1
+    # Reset must release the old cache; a proxy must never keep workspace data on itself.
+    store.reset_workspace()
+    rp._dataframe_sha256(registry.proxy, component)
+    assert len(calls) == 2
+    assert '_dataframe_digests' not in vars(registry.proxy)

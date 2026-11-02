@@ -71,7 +71,12 @@ def _dataframe_sha256(store, component):
     frame = component.dataframe
     if frame is None:
         return None
-    cache = store.__dict__.setdefault('_dataframe_digests', {})
+    # Attribute access follows WorkspaceProxy to the selected browser's store.
+    # Using __dict__ here kept a second, process-wide cache on the proxy itself.
+    cache = getattr(store, '_dataframe_digests', None)
+    if cache is None:
+        cache = {}
+        store._dataframe_digests = cache
     try:
         fingerprint = (id(frame), frame.shape, tuple(map(str, frame.columns)),
                        int(pd.util.hash_pandas_object(frame, index=True).sum()))
