@@ -23,7 +23,7 @@ function setup() {
     elements.set('plot-workspace', element());
     const window = {dash_clientside: {no_update: {}, set_props(id, value) {props.push([id, value]);}},
         Plotly: {async react(gd, data, layout) {renders++; gd.data=data; gd.layout=layout; gd._fullLayout=layout;},
-            async update(gd, update, layout) {visibilityUpdates++; gd.data.forEach((t,i)=>{t.visible=update.visible[i];}); Object.assign(gd.layout,layout);},
+            async update(gd, update, layout) {visibilityUpdates++; gd.data.forEach((t,i)=>{t.visible=update.visible[i];}); Object.keys(layout).forEach(key=>{const m=key.match(/^(shapes|annotations)\[(\d+)\]\.visible$/);if(m)gd.layout[m[1]][Number(m[2])].visible=layout[key];else gd.layout[key]=layout[key];});},
             purge() {}, Plots: {resize() {resizes++;}}}, addEventListener() {}};
     const document = {getElementById: id => elements.get(id), createElement: element,
         dispatchEvent() {}, addEventListener(name, handler) {listeners[name] = handler;}};
@@ -290,4 +290,40 @@ test('the eye hides source and peak immediately before the server responds', asy
     assert.equal(s.window.geckoActivePlot().data[1].visible,false);
     assert.equal(s.window.geckoActivePlot().data[2].visible,true);
     assert.equal(s.renders(),1);
+});
+
+test('visibility-only responses do not serialize coordinates or repaint an optimistic hide', async()=>{
+ const s=setup(),f=figure('lcms');
+ f.data[0].meta={file_id:'source'};
+ f.layout.meta.gecko_visibility_base='base';f.layout.meta.gecko_render_revision='base';
+ await s.window.dash_clientside.plotWorkspace.update(f,'lcms',tabs);
+ const hidden=structuredClone(f);hidden.data[0].visible=false;
+ hidden.layout.meta.gecko_visibility_revision='hidden';hidden.layout.meta.gecko_render_revision='hidden';
+ // The direct eye click already hid this trace in Plotly.
+ s.window.geckoActivePlot().data[0].visible=false;
+ const before=s.serializations();
+ await s.window.dash_clientside.plotWorkspace.update(hidden,'lcms',tabs);
+ assert.equal(s.serializations(),before);
+ assert.equal(s.visibilityUpdates(),0);
+ assert.equal(s.window.geckoActivePlot().layout.meta.gecko_render_revision,'hidden');
+ const shown=structuredClone(hidden);shown.data[0].visible=true;
+ shown.layout.meta.gecko_visibility_revision='shown';shown.layout.meta.gecko_render_revision='shown';
+ await s.window.dash_clientside.plotWorkspace.update(shown,'lcms',tabs);
+ assert.equal(s.serializations(),before);
+ assert.equal(s.visibilityUpdates(),1);
+ assert.equal(s.window.geckoActivePlot().data[0].visible,true);
+});
+
+test('visibility updates include moved peak labels and baseline handles', async()=>{
+ const s=setup(),f=figure('lcms');
+ f.layout.meta.gecko_visibility_base='base';f.layout.meta.gecko_render_revision='base';
+ f.layout.shapes=[{name:'baseline:p',visible:true}];
+ f.layout.annotations=[{name:'peak-label:p',visible:true}];
+ await s.window.dash_clientside.plotWorkspace.update(f,'lcms',tabs);
+ const hidden=structuredClone(f);hidden.data[0].visible=false;
+ hidden.layout.shapes[0].visible=false;hidden.layout.annotations[0].visible=false;
+ hidden.layout.meta.gecko_visibility_revision='hidden';hidden.layout.meta.gecko_render_revision='hidden';
+ await s.window.dash_clientside.plotWorkspace.update(hidden,'lcms',tabs);
+ assert.equal(s.window.geckoActivePlot().layout.shapes[0].visible,false);
+ assert.equal(s.window.geckoActivePlot().layout.annotations[0].visible,false);
 });

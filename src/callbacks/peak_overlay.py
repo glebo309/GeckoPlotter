@@ -176,7 +176,7 @@ def _add_moved_label(fig, peak, text, top, add_kw):
 
 
 def add_peak_traces(fig, all_peaks, time_arr, signal_arr, selected_peak_id=None, row=None, labelled=None,
-                    refresh=True, geometry=None):
+                    refresh=True, geometry=None, retain_labels=False):
     """Add peak overlay traces to the figure.
 
     Peak colors come from ``peak.color`` which is set by
@@ -203,7 +203,8 @@ def add_peak_traces(fig, all_peaks, time_arr, signal_arr, selected_peak_id=None,
         fill_color = rgba(base_color, 0.58 if is_selected else 0.30) if base_color else FILL_COLORS[i % len(FILL_COLORS)]
         line_color = (base_color or '#447da5') if is_selected or peak.source == 'deconvolved' else 'rgba(0,0,0,0)'
 
-        has_custom_label = labelled is None or peak.peak_id in labelled
+        label_shown = labelled is None or peak.peak_id in labelled
+        has_custom_label = retain_labels or label_shown
         peak_text = (getattr(peak, 'label', '') or peak.name or '')
 
         if peak.poly_x and peak.poly_y:
@@ -259,6 +260,15 @@ def add_peak_traces(fig, all_peaks, time_arr, signal_arr, selected_peak_id=None,
                 showlegend=False,
                 meta='peak_overlay',
             ), **add_kw)
+
+        for trace in fig.data[trace_start:]:
+            if trace.meta == 'peak_overlay' and trace.customdata is None:
+                trace.customdata = [peak.peak_id] * len(trace.x)
+            if retain_labels and not label_shown and (trace.mode == 'text' or trace.name == 'label-room'):
+                trace.visible = False
+        if retain_labels and not label_shown:
+            for annotation in fig.layout.annotations[annotation_start:]:
+                annotation.visible = False
 
         # Overlay traces can have their own Y scales. Peak fills and handles
         # must follow the axis of the data file rather than the first axis.

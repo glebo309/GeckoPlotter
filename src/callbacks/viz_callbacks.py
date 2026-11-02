@@ -710,7 +710,8 @@ def compose_raw_figure(data_manager, plot_manager, active_tab_id, group_key, s, 
                 continue
             row = row_idx if layout_mode == 'stacked' else None
             add_peak_traces(fig_obj_for_peaks, peaks, time_arr, signal_arr, selected_peak_id, row=row,
-                            labelled=labelled, refresh=False, geometry=geometry)
+                            labelled=labelled, refresh=False, geometry=geometry,
+                            retain_labels=layout_mode == 'overlay' and 'hide-labels' not in (display_opts or []))
             if deconvolving:
                 from callbacks.peak_overlay import add_deconv_overlays
                 add_deconv_overlays(fig_obj_for_peaks, deconv_markers, deconv_result,

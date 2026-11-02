@@ -46,3 +46,20 @@ def test_display_metadata_does_not_embed_full_peak_measurement_arrays():
         if source=='detected':assert len(spec['baseline_points'][0])<=410
         else:assert len(spec['fitted_polygon'][0])<=810
         assert (peak.poly_x,peak.poly_y)==original
+
+
+def test_overlay_retains_hidden_labels_for_other_samples(monkeypatch):
+    monkeypatch.setitem(sys.modules,'ingestion.types',types)
+    store=samples()
+    for fid,top in [('a250',3),('b250',2)]:
+        peak=Peak(fid+'p',fid,'P',1,0,2,3,top,2)
+        peak.group_id='shared-compound'
+        peak.poly_x=[0,1,2,2,1,0];peak.poly_y=[0,top,0,0,0,0]
+        store.peak_service._peaks[fid]=[peak]
+    fig=compose_raw_figure(store,PlotManager(),'tab',_get_active_file_group(store,'a250'),
+                           DEFAULT_PLOT_SETTINGS,'a250',store.get_loaded_files_list())
+    labels=[t for t in fig.data if t.mode=='text' and t.meta=='peak_overlay']
+    assert len(labels)==2
+    assert sum(t.visible is not False for t in labels)==1
+    assert all(t.customdata is not None for t in fig.data if t.meta=='peak_overlay')
+    assert all('label_group' in spec for spec in fig.layout.meta['gecko_peak_geometry'].values())

@@ -25,7 +25,9 @@ def register_peak_geometry(fig, peak, geometry=None):
     deferred = geometry is not None
     if not deferred:
         geometry = dict((fig.layout.meta or {}).get('gecko_peak_geometry', {}))
-    geometry[peak.peak_id] = {'file_id': peak.file_id, 'bounds':[min(peak.poly_x), max(peak.poly_x)], 'baseline':baseline}
+    geometry[peak.peak_id] = {'file_id': peak.file_id, 'bounds':[min(peak.poly_x), max(peak.poly_x)], 'baseline':baseline,
+                              'label_group':getattr(peak, 'group_id', None) or peak.peak_id,
+                              'label_top':max((v for v in peak.poly_y if v is not None), default=getattr(peak, 'height', 0) or 0)}
     if peak.source == 'deconvolved':
         from services.decimation import polygon_for_display
         px, py = polygon_for_display(peak.poly_x, peak.poly_y)

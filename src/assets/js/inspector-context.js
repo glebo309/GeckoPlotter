@@ -24,7 +24,12 @@
         });
         var layout = {}, source = figure.layout || {};
         Object.keys(source).forEach(function (key) {
-            if (/^[xy]axis\d*$/.test(key) || key === 'meta' || key === 'title') layout[key] = source[key];
+            if (key === 'meta') {
+                layout.meta = {};
+                Object.keys(source.meta || {}).forEach(function (name) {
+                    if (name !== 'gecko_peak_geometry') layout.meta[name] = source.meta[name];
+                });
+            } else if (/^[xy]axis\d*$/.test(key) || key === 'title') layout[key] = source[key];
         });
         var result = {data: data, layout: layout};
         return JSON.stringify(result) === JSON.stringify(previous) ? window.dash_clientside.no_update : result;
