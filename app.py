@@ -56,10 +56,12 @@ from components.paper_mock import create_paper_mock
 from callbacks.publication_preview_callbacks import register_publication_preview_callbacks
 from components.about_window import create_about_window
 from components.session_controls import create_session_header_controls, create_session_banner, create_session_status, create_session_support
+from components.plot_bridge import PlotBridge, install as _install_plot_bridge
 
 # App setup
 app = dash.Dash(__name__, suppress_callback_exceptions=True, assets_folder='src/assets', update_title=None,
                  compress=True)
+_install_plot_bridge(app)
 from services.output_dedupe import install as _install_output_dedupe
 _install_output_dedupe(app)
 from services.upload_stage import install as _install_upload_stage
@@ -949,7 +951,7 @@ _layout_body = html.Div(
                                             className='panel-content viz-container',
                                             style={'position': 'relative'},
                                             children=[
-                                                dcc.Graph(
+                                                PlotBridge(
                                                     id='main-plot',
                                                     figure=go.Figure(
                                                         layout=go.Layout(
