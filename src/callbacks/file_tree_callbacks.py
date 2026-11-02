@@ -437,7 +437,7 @@ def register_file_tree_callbacks(app: dash.Dash, data_manager: DataManager) -> N
         prevent_initial_call=True
     )
     def handle_visibility_toggles(n_clicks_list, button_ids, render_counter, multi_selection=None):
-        """Toggle visibility state, bump render-trigger, publish hidden IDs.
+        """Toggle visibility state and publish hidden IDs.
         The clientside callback updates the eye state without rebuilding the tree.
         Clicking the eye of a multi-selected row applies the clicked row's new state to every selected row."""
         if not any(n_clicks_list):
@@ -468,7 +468,7 @@ def register_file_tree_callbacks(app: dash.Dash, data_manager: DataManager) -> N
 
         hidden_ids = [fid for fid, vis in data_manager.visibility_state.items() if not vis]
 
-        return (render_counter or 0) + 1, hidden_ids
+        return dash.no_update, hidden_ids
 
     @app.callback(
         Output('hidden-files', 'data', allow_duplicate=True),

@@ -102,3 +102,13 @@ def test_every_allowlisted_name_exists_in_its_module():
         tree = ast.parse((root / (module.split('.')[-1] + '.py')).read_text())
         defined = {n.name for n in ast.walk(tree) if isinstance(n, ast.FunctionDef)}
         assert names <= defined, (module, names - defined)
+
+
+@pytest.mark.parametrize('name', ['handle_file_selection', 'sync_table_to_active_file'])
+def test_selecting_a_file_does_not_rescan_analysis_history(monkeypatch, name):
+    server, record, capture = capture_app(monkeypatch, name, 'callbacks.viz_callbacks')
+    with server.test_request_context('/_dash-update-component', method='POST', json={
+            'output': 'target', 'outputs': {'id': 'table-editor-container', 'property': 'children'},
+            'changedPropIds': ['active-file.data']}):
+        capture(Response('{}', mimetype='application/json'))
+    record.assert_not_called()

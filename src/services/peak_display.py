@@ -10,7 +10,7 @@ def peak_id_for_trace(trace):
     return item[0] if isinstance(item, (list, tuple, np.ndarray)) else item
 
 
-def register_peak_geometry(fig, peak):
+def register_peak_geometry(fig, peak, geometry=None):
     """Carry integration bounds and source ownership through publication snapshots."""
     if not peak.poly_x or not peak.poly_y:
         return
@@ -22,15 +22,23 @@ def register_peak_geometry(fig, peak):
     if baseline is None:
         n = len(peak.poly_x) // 2
         baseline = [[peak.poly_x[-1], peak.poly_y[-1]], [peak.poly_x[n], peak.poly_y[n]]]
-    meta = dict(fig.layout.meta or {})
-    geometry = dict(meta.get('gecko_peak_geometry', {}))
-    geometry[peak.peak_id] = {'file_id': peak.file_id, 'bounds':[min(peak.poly_x), max(peak.poly_x)], 'baseline':baseline}
+    deferred = geometry is not None
+    if not deferred:
+        geometry = dict((fig.layout.meta or {}).get('gecko_peak_geometry', {}))
+    geometry[peak.peak_id] = {'file_id': peak.file_id, 'bounds':[min(peak.poly_x), max(peak.poly_x)], 'baseline':baseline,
+                              'label_group':getattr(peak, 'group_id', None) or peak.peak_id,
+                              'label_top':max((v for v in peak.poly_y if v is not None), default=getattr(peak, 'height', 0) or 0)}
     if peak.source == 'deconvolved':
-        geometry[peak.peak_id]['fitted_polygon'] = [list(peak.poly_x), list(peak.poly_y)]
+        from services.decimation import polygon_for_display
+        px, py = polygon_for_display(peak.poly_x, peak.poly_y)
+        geometry[peak.peak_id]['fitted_polygon'] = [list(px), list(py)]
     if peak.source == 'detected':
+        from services.decimation import decimate_minmax
         n = len(peak.poly_x) // 2
-        geometry[peak.peak_id]['baseline_points'] = [peak.poly_x[n:][::-1], peak.poly_y[n:][::-1]]
-    fig.layout.meta = {**meta, 'gecko_peak_geometry':geometry}
+        x, y = decimate_minmax(peak.poly_x[n:][::-1], peak.poly_y[n:][::-1], target=400)
+        geometry[peak.peak_id]['baseline_points'] = [x.tolist(), y.tolist()]
+    if not deferred:
+        fig.layout.meta = {**(fig.layout.meta or {}), 'gecko_peak_geometry':geometry}
 
 
 def refresh_peak_display(fig):

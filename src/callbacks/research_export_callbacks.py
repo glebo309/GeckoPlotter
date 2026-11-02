@@ -39,7 +39,10 @@ def register_research_export_callbacks(app, store):
 # peaks, calibrations and integration settings; a callback may be listed here only when it touches none of those
 # (callbacks that output ``current-plot-settings``, edit peaks/calibration/integration/data stay recorded).
 _READ_ONLY_CALLBACKS = {
-    'callbacks.viz_callbacks': {'master_render'},
+    'callbacks.viz_callbacks': {
+        'master_render', 'handle_file_selection', 'sync_table_to_active_file',
+        # File selection only prepares display tables and initial column selections.
+    },
     'callbacks.recipe_callbacks': {'save_recipe'},   # downloads a file; touches no workspace state
     'callbacks.pda_callbacks': {'show_pda_tab', 'update_pda_views', 'sync_pda_main_view', 'preview_integration_controls'},
     'callbacks.workspace_callbacks': {'describe_figure', 'analysis_capabilities', 'show_export', 'report_file_action'},

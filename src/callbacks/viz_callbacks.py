@@ -677,6 +677,9 @@ def compose_raw_figure(data_manager, plot_manager, active_tab_id, group_key, s, 
     if show_peaks or deconv_result:
         fig_obj_for_peaks = go.Figure(figure) if isinstance(figure, dict) else figure
         cleanup_peak_traces(fig_obj_for_peaks)
+        # Accumulate metadata and refresh once, after every sample has been added.
+        # Reassigning all prior polygons for each peak made crowded plots quadratic.
+        geometry = dict((fig_obj_for_peaks.layout.meta or {}).get('gecko_peak_geometry', {}))
         flat_files = [entry for files in visible_files.values() for entry in files]
         labelled = None
         if 'hide-labels' in (display_opts or []):
@@ -706,11 +709,17 @@ def compose_raw_figure(data_manager, plot_manager, active_tab_id, group_key, s, 
             if time_arr is None:
                 continue
             row = row_idx if layout_mode == 'stacked' else None
-            add_peak_traces(fig_obj_for_peaks, peaks, time_arr, signal_arr, selected_peak_id, row=row, labelled=labelled)
+            add_peak_traces(fig_obj_for_peaks, peaks, time_arr, signal_arr, selected_peak_id, row=row,
+                            labelled=labelled, refresh=False, geometry=geometry,
+                            retain_labels=layout_mode == 'overlay' and 'hide-labels' not in (display_opts or []))
             if deconvolving:
                 from callbacks.peak_overlay import add_deconv_overlays
                 add_deconv_overlays(fig_obj_for_peaks, deconv_markers, deconv_result,
                                     time_arr, signal_arr, row=row)
+        if geometry:
+            from services.peak_display import refresh_peak_display
+            fig_obj_for_peaks.layout.meta = {**(fig_obj_for_peaks.layout.meta or {}), 'gecko_peak_geometry':geometry}
+            refresh_peak_display(fig_obj_for_peaks)
         figure = fig_obj_for_peaks
 
     # LC-MS scan cursor is rendered as a DOM overlay in app.py /
@@ -1495,7 +1504,8 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
          State('int-display-opts', 'value'),
          State('rendered-plot-tabs', 'data'),
          State('main-inspector-context', 'data'),
-         Input('pda-preview', 'data'), State('pda-main-cursor', 'data')],
+         Input('pda-preview', 'data'), State('pda-main-cursor', 'data'),
+         Input('hidden-files', 'data')],
         prevent_initial_call=True
     )
     def master_render(active_tab_id, plot_trigger, active_file, plot_settings, render_trigger,
@@ -1503,7 +1513,7 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
                       link_x, y_scope,
                       loaded_files, plot_tabs, pub_plot_figure, selected_peak_id,
                       zoom_state, zoom_memory, custom_figures,
-                      baseline_mode, deconv_markers, deconv_result, display_opts, rendered_tabs=None, current_figure=None, pda_preview=None, pda_cursor=None):
+                      baseline_mode, deconv_markers, deconv_result, display_opts, rendered_tabs=None, current_figure=None, pda_preview=None, pda_cursor=None, hidden_files=None):
         """Single owner of main-plot. Renders the active plot tab's figure."""
         import plotly.graph_objects as go
         from services.plot_settings_service import PlotSettingsService, DEFAULT_PLOT_SETTINGS
@@ -1632,6 +1642,11 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
             # the cached figure until the browser's figure acknowledges it.
             return render_cache.get(active_tab_id, render_inputs), set_zoom
 
+        if trigger_id == 'hidden-files' and layout_mode == 'overlay':
+            changed = render_cache.visibility_update(active_tab_id, render_inputs, render_revision, current_figure)
+            if changed is not None:
+                return changed, set_zoom
+
         if is_tab_switch:
             effective_zoom = restored_zoom
         else:
@@ -1647,7 +1662,8 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
             figure.update_layout(meta={'gecko_tab_id': active_tab_id, 'gecko_render_revision': render_revision})
             render_cache.put(active_tab_id, render_inputs, figure)
             return figure, set_zoom
-        figure.update_layout(meta={**(figure.layout.meta or {}), 'gecko_render_revision': render_revision})
+        figure.update_layout(meta={**(figure.layout.meta or {}), 'gecko_render_revision': render_revision,
+                                   'gecko_visibility_base': render_revision})
         render_cache.put(active_tab_id, render_inputs, figure)
         return figure, set_zoom
 

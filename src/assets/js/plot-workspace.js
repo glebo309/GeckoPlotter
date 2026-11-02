@@ -149,7 +149,16 @@
             // Dash tab/settings callbacks reuse the figure object. Explicit
             // figure events still inspect it so in-place Patch updates are safe.
             var isMirror = entry.mirroredFigure === figure;
-            var signature = isMirror || (entry.source === figure && !figureTriggered) ? entry.signature : JSON.stringify(figure);
+            var beforeMeta = (entry.figure && entry.figure.layout && entry.figure.layout.meta) || {};
+            var afterMeta = (figure.layout && figure.layout.meta) || {};
+            var visibilityOnly = beforeMeta.gecko_visibility_base &&
+                beforeMeta.gecko_visibility_base === afterMeta.gecko_visibility_base &&
+                afterMeta.gecko_visibility_revision &&
+                afterMeta.gecko_visibility_revision === afterMeta.gecko_render_revision &&
+                beforeMeta.gecko_visibility_revision !== afterMeta.gecko_visibility_revision &&
+                (entry.figure.data || []).length === (figure.data || []).length;
+            var signature = visibilityOnly ? 'visibility:' + afterMeta.gecko_visibility_revision :
+                (isMirror || (entry.source === figure && !figureTriggered) ? entry.signature : JSON.stringify(figure));
             if (isMirror) entry.mirroredFigure = null;
             entry.source = figure;
             if (entry.previewSignature && !(figure.data || []).length) {
@@ -164,15 +173,50 @@
             }
             if (entry.signature !== signature) {
                 entry.signature = signature;
-                entry.figure = JSON.parse(signature);
-                var layout = JSON.parse(JSON.stringify(entry.figure.layout || {}));
-                Object.keys(layout).forEach(function(key){
-                    if (!/^[xy]axis\d*$/.test(key) || !layout[key].range) return;
-                    var axis=layout[key];
-                    if (axis.autorange==='max') axis.range[1]=null;
-                    if (axis.autorange==='min') axis.range[0]=null;
-                });
-                await window.Plotly.react(entry.gd, entry.figure.data || [], layout, config);
+                if (visibilityOnly) {
+                    // Reuse coordinates and geometry. Only the changed flags and
+                    // revision stamps need to cross from Dash into the live plot.
+                    var visible = figure.data.map(function (trace) {return trace.visible !== false;});
+                    var changedVisibility = entry.gd.data.some(function (trace, i) {
+                        return (trace.visible !== false) !== visible[i];
+                    });
+                    var layoutUpdate = {}, nextLayout = Object.assign({}, entry.figure.layout);
+                    ['shapes', 'annotations'].forEach(function (kind) {
+                        var items = figure.layout[kind] || [];
+                        if (!items.length) return;
+                        nextLayout[kind] = items.map(function (item, i) {
+                            var old = (entry.gd.layout[kind] || [])[i] || {};
+                            if ((old.visible !== false) !== (item.visible !== false)) {
+                                layoutUpdate[kind + '[' + i + '].visible'] = item.visible !== false;
+                            }
+                            return Object.assign({}, item);
+                        });
+                    });
+                    nextLayout.meta = Object.assign({}, beforeMeta, {
+                        gecko_render_revision: afterMeta.gecko_render_revision,
+                        gecko_visibility_revision: afterMeta.gecko_visibility_revision
+                    });
+                    entry.figure = {data: entry.figure.data.map(function (trace, i) {
+                        return Object.assign({}, trace, {visible: visible[i]});
+                    }), layout: nextLayout};
+                    // A direct eye click may already have painted the requested
+                    // state. Its server acknowledgement must not paint it twice.
+                    if (changedVisibility || Object.keys(layoutUpdate).length) {
+                        await window.Plotly.update(entry.gd, {visible: visible}, layoutUpdate);
+                    }
+                    entry.gd.layout.meta = nextLayout.meta;
+                    if (entry.gd._fullLayout) entry.gd._fullLayout.meta = nextLayout.meta;
+                } else {
+                    entry.figure = JSON.parse(signature);
+                    var layout = JSON.parse(JSON.stringify(entry.figure.layout || {}));
+                    Object.keys(layout).forEach(function(key){
+                        if (!/^[xy]axis\d*$/.test(key) || !layout[key].range) return;
+                        var axis=layout[key];
+                        if (axis.autorange==='max') axis.range[1]=null;
+                        if (axis.autorange==='min') axis.range[0]=null;
+                    });
+                    await window.Plotly.react(entry.gd, entry.figure.data || [], layout, config);
+                }
                 if (!plots.has(figureId)) return '';
                 bridge(entry);
                 // Plotly.react already laid this canvas out at its current size.
@@ -260,6 +304,39 @@
     // can be revealed immediately; Python still owns data/settings selection.
     document.addEventListener('click', function (event) {
         if (!event.target || !event.target.closest) return;
+        var eye = event.target.closest('[id*="visibility-btn"]');
+        if (eye) {
+            // Hide immediately, including integrated peaks. The server owns the
+            // channel mask, undo and the final layout; showing uses its reply.
+            var graph = window.geckoActivePlot(), clicked;
+            try {clicked = JSON.parse(eye.id).index;} catch (_) {return;}
+            if (!graph || !graph.data || eye.getAttribute('aria-pressed') !== 'true') return;
+            var selected = window._geckoGetFileSelection ? window._geckoGetFileSelection() : [];
+            var targets = new Set(selected.length > 1 && selected.indexOf(clicked) >= 0 ? selected : [clicked]);
+            var sources = new Set();
+            graph.data.forEach(function (trace) {
+                var m = trace.meta || {};
+                if (targets.has(m.file_id) || targets.has(m.rename_file_id)) sources.add(m.file_id);
+            });
+            if (!sources.size) return;
+            var geometry = ((graph.layout || {}).meta || {}).gecko_peak_geometry || {};
+            var peaks = new Set(Object.keys(geometry).filter(function (id) {return sources.has(geometry[id].file_id);}));
+            var visible = graph.data.map(function (trace) {
+                var pid = trace.meta === 'peak_overlay' && trace.customdata && trace.customdata[0];
+                if (Array.isArray(pid)) pid = pid[0];
+                return !sources.has((trace.meta || {}).file_id) && !peaks.has(pid) && trace.visible !== false;
+            });
+            var layout = {};
+            ['shapes', 'annotations'].forEach(function (kind) {
+                ((graph.layout || {})[kind] || []).forEach(function (item, i) {
+                    var pid = (item.name || '').replace(/^(baseline:|peak-label:)/, '');
+                    if (peaks.has(pid)) layout[kind + '[' + i + '].visible'] = false;
+                });
+            });
+            Promise.resolve(window.Plotly.update(graph, {visible: visible}, layout)).catch(function () {});
+            return;
+        }
+        if (event.target.closest('[id*="delete-btn"]')) return;
         var button = event.target.closest('.plot-tab-btn');
         var id;
         if (button) {

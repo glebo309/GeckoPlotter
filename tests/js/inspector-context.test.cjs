@@ -28,3 +28,16 @@ test('inspector context preserves scientific labels and styles without measureme
  figure.data[0].name='Renamed · 250 nm';
  assert.equal(summarize(figure,result).data[0].name,'Renamed · 250 nm');
 });
+test('peak geometry never travels back through the inspector callbacks',()=>{
+ const noUpdate={},context={window:{dash_clientside:{no_update:noUpdate}}};
+ vm.runInNewContext(fs.readFileSync('src/assets/js/inspector-context.js','utf8'),context);
+ const summarize=context.window.dash_clientside.inspectorContext.summarize;
+ const figure={data:[],layout:{meta:{gecko_tab_id:'raw',gecko_render_revision:'v1',
+ gecko_axis_units:{xaxis:'min'},gecko_peak_geometry:{p:{baseline_points:[Array(10000).fill(1),Array(10000).fill(2)]}}}}};
+ const result=summarize(figure,null);
+ assert.ok(JSON.stringify(result).length<500);
+ assert.equal(result.layout.meta.gecko_peak_geometry,undefined);
+ assert.equal(result.layout.meta.gecko_render_revision,'v1');
+ figure.layout.meta.gecko_peak_geometry.p.baseline_points[0][0]=999;
+ assert.equal(summarize(figure,result),noUpdate);
+});

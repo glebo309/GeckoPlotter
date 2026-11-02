@@ -183,6 +183,10 @@ def _bundle_identity(filename: str, standardized: StandardizedResult) -> Tuple[B
 
 
 def _create_component(filename: str, raw_bytes: bytes, standardized: StandardizedResult) -> Component:
+    if standardized.metadata.get('instrument_status'):
+        from .instrument_status import freeze
+        standardized = replace(standardized, metadata={**standardized.metadata,
+            'instrument_status': freeze(standardized.metadata['instrument_status'])})
     return Component(
         component_id=str(uuid.uuid4()),
         role=_component_role(filename, standardized),

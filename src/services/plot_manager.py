@@ -306,8 +306,9 @@ class PlotManager:
                 ))
             else:
                 y_vals = pd.to_numeric(df[y_col], errors="coerce")
-                # Draw at most ~3000 points per trace (every peak top kept); the data itself stays complete.
+                # Reduce only the drawing; retain bin extrema and all measurement data.
                 x_draw, y_draw = for_display(x_vals.to_numpy(), y_vals.to_numpy())
+                trace_cls = go.Scattergl if len(x_draw) > 5000 else go.Scatter
                 fig.add_trace(trace_cls(
                     x=x_draw,
                     y=y_draw,

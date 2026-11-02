@@ -857,7 +857,9 @@ def _restore_method_files(store, archive) -> None:
 
 
 def _write_archive(fileobj, parts: _Parts) -> None:
-    with zipfile.ZipFile(fileobj, 'w', compression=zipfile.ZIP_DEFLATED, compresslevel=6,
+    # Local autosaves favour responsiveness; explicit project exports stay compact.
+    autosave = bool(parts.manifest.get('raw_cache'))
+    with zipfile.ZipFile(fileobj, 'w', compression=zipfile.ZIP_DEFLATED, compresslevel=1 if autosave else 6,
                          allowZip64=True) as archive:
         archive.writestr(MANIFEST_NAME, _dumps(parts.manifest, indent=2))
         archive.writestr(STATE_NAME, _dumps(parts.state))
@@ -866,7 +868,7 @@ def _write_archive(fileobj, parts: _Parts) -> None:
             archive.writestr(path, data)
         for path, data in parts.raw.items():
             # Instrument exports are text: a lighter level keeps saving fast.
-            archive.writestr(path, data, compress_type=zipfile.ZIP_DEFLATED, compresslevel=4)
+            archive.writestr(path, data, compress_type=zipfile.ZIP_DEFLATED, compresslevel=1 if autosave else 4)
 
 
 def build_session(store, client_state: Optional[dict] = None, *, project_name: Optional[str] = None,

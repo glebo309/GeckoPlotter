@@ -6,6 +6,7 @@ const path = require('node:path');
 
 function setup() {
     let renders = 0;
+    let visibilityUpdates = 0;
     let resizes = 0;
     let serializations = 0;
     let resizeObserver;
@@ -22,6 +23,7 @@ function setup() {
     elements.set('plot-workspace', element());
     const window = {dash_clientside: {no_update: {}, set_props(id, value) {props.push([id, value]);}},
         Plotly: {async react(gd, data, layout) {renders++; gd.data=data; gd.layout=layout; gd._fullLayout=layout;},
+            async update(gd, update, layout) {visibilityUpdates++; gd.data.forEach((t,i)=>{t.visible=update.visible[i];}); Object.keys(layout).forEach(key=>{const m=key.match(/^(shapes|annotations)\[(\d+)\]\.visible$/);if(m)gd.layout[m[1]][Number(m[2])].visible=layout[key];else gd.layout[key]=layout[key];});},
             purge() {}, Plots: {resize() {resizes++;}}}, addEventListener() {}};
     const document = {getElementById: id => elements.get(id), createElement: element,
         dispatchEvent() {}, addEventListener(name, handler) {listeners[name] = handler;}};
@@ -31,7 +33,7 @@ function setup() {
             requestAnimationFrame: fn => fn(), console, setTimeout, structuredClone,
             JSON: {parse: JSON.parse, stringify(...args) {serializations++; return JSON.stringify(...args);}}});
     return {window, document, props, listeners, host: elements.get('plot-workspace'), renders: () => renders,
-        resizes: () => resizes, serializations: () => serializations, panelResize: () => resizeObserver()};
+        visibilityUpdates: () => visibilityUpdates, resizes: () => resizes, serializations: () => serializations, panelResize: () => resizeObserver()};
 }
 
 const figure = id => ({data: [{x:[0,1], y:[1,2]}], layout: {meta: {gecko_tab_id: id}}});
@@ -241,4 +243,87 @@ test('a tab drawn from the upload stays on screen until the full render replaces
     await ws.update(changed, 'new', [tabs[0], {id: 'new', type: 'raw'}]);
     assert.equal(s.renders(), renders + 1);
     assert.deepEqual(early.data[0].y, [5, 6]);
+});
+
+
+test('visibility patches keep the live plot and use a visibility update instead of react', async () => {
+    const s=setup();
+    const first=figure('lcms');
+    first.layout.meta.gecko_visibility_base='base';
+    first.layout.meta.gecko_render_revision='base';
+    await s.window.dash_clientside.plotWorkspace.update(first,'lcms',tabs);
+    const hidden=structuredClone(first);
+    hidden.data[0].visible=false;
+    hidden.layout.meta.gecko_visibility_revision='hidden';
+    hidden.layout.meta.gecko_render_revision='hidden';
+    await s.window.dash_clientside.plotWorkspace.update(hidden,'lcms',tabs);
+    assert.equal(s.renders(),1);
+    assert.equal(s.visibilityUpdates(),1);
+    assert.equal(s.window.geckoActivePlot().data[0].visible,false);
+    const shown=structuredClone(hidden);
+    shown.data[0].visible=true;
+    shown.layout.meta.gecko_visibility_revision='shown';
+    shown.layout.meta.gecko_render_revision='shown';
+    await s.window.dash_clientside.plotWorkspace.update(shown,'lcms',tabs);
+    assert.equal(s.renders(),1);
+    assert.equal(s.visibilityUpdates(),2);
+    assert.equal(s.window.geckoActivePlot().data[0].visible,true);
+    // A new source or edit must still draw the new coordinates.
+    const edited=structuredClone(shown);
+    edited.layout.meta.gecko_visibility_base='edited';
+    edited.data[0].y=[9,10];
+    await s.window.dash_clientside.plotWorkspace.update(edited,'lcms',tabs);
+    assert.equal(s.renders(),2);
+});
+
+test('the eye hides source and peak immediately before the server responds', async () => {
+    const s=setup(), f=figure('lcms');
+    f.data=[{x:[0,1],y:[1,2],meta:{file_id:'uv',rename_file_id:'sample'}},
+        {x:[0,1],y:[1,2],meta:'peak_overlay',customdata:['p','p']},
+        {x:[0,1],y:[3,4],meta:{file_id:'other'}}];
+    f.layout.meta.gecko_peak_geometry={p:{file_id:'uv'}};
+    await s.window.dash_clientside.plotWorkspace.update(f,'lcms',tabs);
+    const button={id:JSON.stringify({type:'visibility-btn',index:'sample'}),getAttribute:()=> 'true'};
+    s.listeners.click({target:{closest:selector=>selector==='[id*="visibility-btn"]'?button:null}});
+    assert.equal(s.visibilityUpdates(),1);
+    assert.equal(s.window.geckoActivePlot().data[0].visible,false);
+    assert.equal(s.window.geckoActivePlot().data[1].visible,false);
+    assert.equal(s.window.geckoActivePlot().data[2].visible,true);
+    assert.equal(s.renders(),1);
+});
+
+test('visibility-only responses do not serialize coordinates or repaint an optimistic hide', async()=>{
+ const s=setup(),f=figure('lcms');
+ f.data[0].meta={file_id:'source'};
+ f.layout.meta.gecko_visibility_base='base';f.layout.meta.gecko_render_revision='base';
+ await s.window.dash_clientside.plotWorkspace.update(f,'lcms',tabs);
+ const hidden=structuredClone(f);hidden.data[0].visible=false;
+ hidden.layout.meta.gecko_visibility_revision='hidden';hidden.layout.meta.gecko_render_revision='hidden';
+ // The direct eye click already hid this trace in Plotly.
+ s.window.geckoActivePlot().data[0].visible=false;
+ const before=s.serializations();
+ await s.window.dash_clientside.plotWorkspace.update(hidden,'lcms',tabs);
+ assert.equal(s.serializations(),before);
+ assert.equal(s.visibilityUpdates(),0);
+ assert.equal(s.window.geckoActivePlot().layout.meta.gecko_render_revision,'hidden');
+ const shown=structuredClone(hidden);shown.data[0].visible=true;
+ shown.layout.meta.gecko_visibility_revision='shown';shown.layout.meta.gecko_render_revision='shown';
+ await s.window.dash_clientside.plotWorkspace.update(shown,'lcms',tabs);
+ assert.equal(s.serializations(),before);
+ assert.equal(s.visibilityUpdates(),1);
+ assert.equal(s.window.geckoActivePlot().data[0].visible,true);
+});
+
+test('visibility updates include moved peak labels and baseline handles', async()=>{
+ const s=setup(),f=figure('lcms');
+ f.layout.meta.gecko_visibility_base='base';f.layout.meta.gecko_render_revision='base';
+ f.layout.shapes=[{name:'baseline:p',visible:true}];
+ f.layout.annotations=[{name:'peak-label:p',visible:true}];
+ await s.window.dash_clientside.plotWorkspace.update(f,'lcms',tabs);
+ const hidden=structuredClone(f);hidden.data[0].visible=false;
+ hidden.layout.shapes[0].visible=false;hidden.layout.annotations[0].visible=false;
+ hidden.layout.meta.gecko_visibility_revision='hidden';hidden.layout.meta.gecko_render_revision='hidden';
+ await s.window.dash_clientside.plotWorkspace.update(hidden,'lcms',tabs);
+ assert.equal(s.window.geckoActivePlot().layout.shapes[0].visible,false);
+ assert.equal(s.window.geckoActivePlot().layout.annotations[0].visible,false);
 });
