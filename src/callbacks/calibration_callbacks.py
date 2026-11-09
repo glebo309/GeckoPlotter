@@ -201,6 +201,9 @@ def register_calibration_callbacks(app: dash.Dash, data_manager) -> None:
                 included.append(len(rows)-1)
                 feedback = 'Enter concentration and response for the new standard.'
             elif trigger == 'cal-fit-btn':
+                missing = [i for i in included if i < len(rows) and rows[i].get('concentration') in (None, '')]
+                if missing:
+                    raise ValueError(f'Enter a concentration for every checked standard ({len(missing)} missing, marked red).')
                 model = fit_calibration_form(service, model_id, rows, included, **values)
                 drafts.pop(model.model_id, None)
                 hydrate = changed = True
@@ -286,6 +289,20 @@ def register_calibration_callbacks(app: dash.Dash, data_manager) -> None:
         except (ValueError,TypeError,KeyError,IndexError,UnicodeError) as exc:
             result[-4] = str(exc)
             return result
+
+    _base_style = [{'if':{'state':'selected'},'backgroundColor':'#eef3ee','border':'1px solid #789077'}]
+
+    @app.callback(Output('cal-standards-table','style_data_conditional'),
+                  Input('cal-fit-btn','n_clicks'),Input('cal-standards-table','data'),
+                  Input('cal-standards-table','selected_rows'))
+    def mark_missing_concentrations(fit_clicks, rows, included):
+        # Red only after a fit attempt; clears cell by cell as values are typed.
+        if not fit_clicks:
+            return _base_style
+        marks = [{'if':{'row_index':i,'column_id':'concentration'},
+                  'backgroundColor':'#fde2e2','border':'1px solid #d64545'}
+                 for i in (included or []) if i < len(rows or []) and (rows[i].get('concentration') in (None, ''))]
+        return _base_style + marks
 
     @app.callback(Output('cal-download','data'),Input('cal-save-btn','n_clicks'),
                   State('cal-active-model','value'),prevent_initial_call=True)
