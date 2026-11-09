@@ -35,7 +35,8 @@ def register_peak_geometry(fig, peak, geometry=None):
     if peak.source == 'detected':
         from services.decimation import decimate_minmax
         n = len(peak.poly_x) // 2
-        x, y = decimate_minmax(peak.poly_x[n:][::-1], peak.poly_y[n:][::-1], target=400)
+        from services.decimation import ABOVE
+        x, y = decimate_minmax(peak.poly_x[n:][::-1], peak.poly_y[n:][::-1], target=max(400, ABOVE))
         geometry[peak.peak_id]['baseline_points'] = [x.tolist(), y.tolist()]
     if not deferred:
         fig.layout.meta = {**(fig.layout.meta or {}), 'gecko_peak_geometry':geometry}
