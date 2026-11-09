@@ -153,6 +153,17 @@ def register_workspace_callbacks(app, data_manager):
     def report_file_action(message):
         return message or no_update
 
+    # Smoothing is on or off; on uses an 11-point Savitzky-Golay window (about 0.3 s at 40 Hz).
+    app.clientside_callback("""
+    function(checked,win){
+      var dc=window.dash_clientside, n=dc.no_update, t=dc.callback_context.triggered;
+      var id=t.length?t[0].prop_id.split('.')[0]:'';
+      if(id==='smooth-toggle'){var w=checked?11:0; return [w===win?n:w,n];}
+      var on=(win||0)>=3; return [n,on===checked?n:on];
+    }
+    """,[Output('pt-smooth-window','value',allow_duplicate=True),Output('smooth-toggle','checked')],
+         [Input('smooth-toggle','checked'),Input('pt-smooth-window','value')],prevent_initial_call=True)
+
     # Single circular clientside callback: sliders and exact fields share one value.
     app.clientside_callback("""
     function(smooth,spacing,opacity,smoothExact,spacingExact,opacityExact){

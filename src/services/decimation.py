@@ -6,7 +6,7 @@ points, the lowest and the highest one (in time order), so peak tops, baseline n
 where they were; only points in between disappear. It is for DRAWING only: integration, tables and exports of data use
 the full arrays.
 
-Settings: GECKO_DECIMATE=0 turns it off; GECKO_DECIMATE_ABOVE (default 1600 points) and GECKO_DECIMATE_TO (default
+Settings: GECKO_DECIMATE=0 turns it off; GECKO_DECIMATE_ABOVE (default 30000 points) and GECKO_DECIMATE_TO (default
 1000 points kept) change the thresholds. The overview keeps extrema in roughly 500 bins; measurements use the full signal.
 """
 from __future__ import annotations
@@ -16,8 +16,8 @@ import os
 import numpy as np
 
 ENABLED = os.environ.get('GECKO_DECIMATE', '1') != '0'
-ABOVE = int(os.environ.get('GECKO_DECIMATE_ABOVE', '1600'))
-TARGET = int(os.environ.get('GECKO_DECIMATE_TO', '1000'))
+ABOVE = int(os.environ.get('GECKO_DECIMATE_ABOVE', '30000'))
+TARGET = int(os.environ.get('GECKO_DECIMATE_TO', '6000'))
 
 
 def decimate_minmax(x, y, target: int = TARGET):
@@ -70,7 +70,8 @@ def polygon_for_display(px, py, target: int = 400):
     same. The peak's area is never computed from this. Other outlines are returned unchanged.
     """
     n = len(px) if px is not None else 0
-    if not ENABLED or n <= 2 * target or n % 2 or len(py) != n:
+    # Only thin outlines as long as a thinned trace; otherwise the fill would not sit on the drawn line.
+    if not ENABLED or n <= 2 * max(target, ABOVE) or n % 2 or len(py) != n:
         return px, py
     try:
         x = np.asarray(px, dtype=np.float64)

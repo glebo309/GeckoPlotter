@@ -45,18 +45,19 @@ def arrange_workspace(root):
                                     key=lambda tab: inspector_order.index(tab.value))
     # Data tools and figure appearance have separate homes. Smoothing remains
     # a reversible display transform; moving its control must not alter areas.
-    smoothing = dmc.Slider(id='pt-smooth-window', min=0, max=151, step=1, value=0,
+    smoothing = dmc.Slider(id='pt-smooth-window', min=0, max=151, step=1, value=11,
         updatemode='mouseup', size='sm', thumbSize=16, thumbLabel='Smoothing window in points',
         marks=[{'value':0, 'label':'Off'}, {'value':151, 'label':'151'}])
     nodes['pt-smooth-window'] = smoothing
     smoothing_controls = html.Div([
+        dmc.Switch(id='smooth-toggle', label='Smooth signal', checked=True, size='sm'),
         html.Div([
             html.Label('Window (points)', className='form-label', htmlFor='smooth-value'),
             dmc.NumberInput(id='smooth-value',value=0,min=0,max=151,step=1,
                 debounce=True,clampBehavior='blur',size='xs',allowDecimal=False,
                 **{'aria-label':'Smoothing window in points'},style={'width':'88px'}),
-        ], className='smoothing-value-row'),
-        smoothing,
+        ], className='smoothing-value-row', style={'display':'none'}),
+        html.Div(smoothing, style={'display':'none'}),
     ], className='smoothing-controls')
     mapper = nodes['pub-plotter-container'].children
     m = list(mapper.children)
@@ -78,7 +79,7 @@ def arrange_workspace(root):
     mapper.children = [
         section('Smoothing', [
             smoothing_controls,
-            html.Div('Display only · peak areas unchanged', className='inspector-note',
+            html.Div('Peak areas always use the raw signal.', className='inspector-note',
                      title='Savitzky–Golay smoothing of plotted signals in the current figure. Imported values and peak calculations use the original signal.')], True),
         section('Table editing', [m[0]], True),
         section('Plot mapping', [*m[1:10], section('Statistics', [m[10]]), m[11],
