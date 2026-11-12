@@ -13,6 +13,7 @@ from dash import html, callback, Input, Output, State, dcc
 from typing import Dict, Any, List
 import pandas as pd
 import re
+from services.peak_service import DEFAULT_GROUP_WINDOW
 from components.data_table_editor import create_data_table_editor
 
 log = logging.getLogger('geckoplotter.tabs')
@@ -513,7 +514,7 @@ def register_tab_callbacks(app: dash.Dash, data_manager) -> None:
             return dash.no_update, dash.no_update, dash.no_update
 
         if time_window is None:
-            time_window = 0.2
+            time_window = DEFAULT_GROUP_WINDOW
 
         bundles_with_peaks = _collect_bundles_with_peaks(data_manager, loaded_files)
 
@@ -637,7 +638,7 @@ def register_tab_callbacks(app: dash.Dash, data_manager) -> None:
             raise dash.exceptions.PreventUpdate
 
         if time_window is None:
-            time_window = 0.2
+            time_window = DEFAULT_GROUP_WINDOW
 
         bundles_with_peaks = _collect_bundles_with_peaks(data_manager, loaded_files)
         if len(bundles_with_peaks) < 2:
@@ -810,7 +811,7 @@ def parse_integration_results(content: str) -> List[Dict[str, Any]]:
         return []
 
 
-def group_peaks_by_retention_time(all_peaks, time_window=0.2):
+def group_peaks_by_retention_time(all_peaks, time_window=DEFAULT_GROUP_WINDOW):
     """Group peaks from different samples by retention time proximity.
     Peaks from the same sample are never placed in the same group."""
     sorted_peaks = sorted(all_peaks, key=lambda p: p['retention_time'])
@@ -819,9 +820,14 @@ def group_peaks_by_retention_time(all_peaks, time_window=0.2):
     for peak in sorted_peaks:
         placed = False
         for group in peak_groups:
-            avg_rt = sum(p['retention_time'] for p in group) / len(group)
+            anchor_rt = group[0]['retention_time']
+            name = str(peak.get('peak_name') or '').strip().casefold()
+            names = {str(p.get('peak_name') or '').strip().casefold() for p in group}
+            custom = lambda value: value and re.fullmatch(r'peak \d+', value) is None
+            if custom(name) and any(custom(other) and other != name for other in names):
+                continue
             samples_in_group = {p.get('sample_id', p['sample_name']) for p in group}
-            if (abs(peak['retention_time'] - avg_rt) <= time_window
+            if (abs(peak['retention_time'] - anchor_rt) <= time_window
                     and peak.get('sample_id', peak['sample_name']) not in samples_in_group):
                 group.append(peak)
                 placed = True
@@ -841,7 +847,7 @@ def create_across_samples_comparison_with_slider(bundles_with_peaks: List[Dict[s
     """
     all_peaks = _collect_all_peaks(bundles_with_peaks)
 
-    default_time_window = 0.2
+    default_time_window = DEFAULT_GROUP_WINDOW
     peak_groups = group_peaks_by_retention_time(all_peaks, default_time_window)
     comparison_groups = [group for group in peak_groups if len(group) > 1]
 

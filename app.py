@@ -29,6 +29,7 @@ logging.getLogger('werkzeug').setLevel(logging.ERROR)
 
 # Import our modular components
 from services.data_store import DataStore
+from services.peak_service import DEFAULT_GROUP_WINDOW
 from callbacks.upload_callbacks import register_upload_callbacks, register_clear_callbacks
 from callbacks.viz_callbacks import register_viz_callbacks
 from callbacks.file_tree_callbacks import register_file_tree_callbacks
@@ -569,7 +570,7 @@ _layout_body = html.Div(
                                                         html.Div(id='pt-line-controls-wrapper', children=[
                                                             html.Div([
                                                                 html.Div([html.Label('Line width', className='form-label'),
-                                                                          dmc.NumberInput(id='pt-line-width', value=1.5, min=0.5, max=5, step=0.5,
+                                                                          dmc.NumberInput(id='pt-line-width', value=1.0, min=0.5, max=5, step=0.25,
                                                                                           decimalScale=2, size='xs', style={'width': '100%'})],
                                                                          style={'flex': '1'}),
                                                                 html.Div(id='pt-line-style-cell', children=[
@@ -1168,9 +1169,9 @@ _layout_body = html.Div(
                                                             html.Label("Match peaks within (± min)",
                                                                        style={'fontWeight': 'bold', 'marginBottom': '5px',
                                                                               'display': 'block', 'fontSize': '14px'}),
-                                                            dcc.Slider(id='retention-time-slider', min=0.05, max=1.0,
-                                                                       step=0.05, value=0.2,
-                                                                       marks={0.05: '0.05', 0.2: '0.2', 0.5: '0.5', 1.0: '1.0'},
+                                                            dcc.Slider(id='retention-time-slider', min=0.001, max=1.0,
+                                                                       step=0.001, value=DEFAULT_GROUP_WINDOW,
+                                                                       marks={0.01: '0.01', 0.05: '0.05', 0.2: '0.2', 0.5: '0.5', 1.0: '1.0'},
                                                                        tooltip={"placement": "bottom", "always_visible": True}),
                                                         ]),
                                                         html.Div(id='across-samples-container', children=[
@@ -1493,6 +1494,16 @@ _layout_body = html.Div(
             children=popup_menu('context-menu', [
                 menu_item('Delete Peak', id='ctx-delete-item'),
                 menu_item('Rename Peak', id='ctx-rename-item'),
+                html.Div([
+                    html.Span('Colour', style={'fontSize': '12px', 'color': '#60666d'}),
+                    dmc.ColorInput(id='ctx-peak-colour', value='#4878D0', format='hex', size='xs',
+                                   w=116, withEyeDropper=False, withPicker=True,
+                                   swatchesPerRow=5, closeOnColorSwatchClick=True,
+                                   popoverProps={'withinPortal': False, 'position': 'right-start',
+                                                 'offset': 8, 'width': 200, 'zIndex': 4100},
+                                   **{'aria-label': 'Peak colour'}),
+                ], style={'display': 'flex', 'alignItems': 'center', 'justifyContent': 'space-between',
+                          'gap': '12px', 'padding': '6px 12px'}),
                 menu_item('Baseline y = 0', id='ctx-zero-baseline-item'),
                 menu_item('Auto-deconvolve', id='ctx-deconvolve-item'),
                 menu_item('Show Mass', id='ctx-show-mass-item'),

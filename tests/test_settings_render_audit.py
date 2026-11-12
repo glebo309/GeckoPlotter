@@ -68,6 +68,6 @@ def test_duplicate_trace_names_have_independent_stable_overrides():
   go.Scatter(x=[1,2],y=[3,4],name='+TIC',meta={'file_id':'b'}),
   go.Scatter(x=[1,2],y=[4,5],name='Unnamed')])
  styled=render({'trace_overrides':{'id:b:+TIC':{'line_width':5},'trace:2':{'opacity':.4}}},fig)
- assert styled.data[0].line.width==1.5
+ assert styled.data[0].line.width==1.0
  assert styled.data[1].line.width==5
  assert styled.data[2].opacity==.4

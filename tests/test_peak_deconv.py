@@ -139,7 +139,7 @@ class TestClearRegion:
 
 
 class TestGroupByDeconvTag:
-    def test_components_match_across_samples_by_tag(self):
+    def test_components_match_across_samples_within_explicit_window(self):
         svc = PeakService()
         # Same region deconvolved in two files: c0 and c1 in each.
         _add_deconv(svc, "f1", 5.1, "deconv_5.2_c0")
@@ -147,7 +147,7 @@ class TestGroupByDeconvTag:
         _add_deconv(svc, "f2", 5.15, "deconv_5.2_c0")
         _add_deconv(svc, "f2", 5.32, "deconv_5.2_c1")
 
-        groups = svc.group_peaks_across_samples()
+        groups = svc.group_peaks_across_samples(rt_window=0.1)
 
         # Two groups (c0, c1), each holding one peak from each file.
         c0 = [p for p in svc.get_peaks("f1") + svc.get_peaks("f2")

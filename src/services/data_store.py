@@ -216,6 +216,7 @@ class DataStore:
         # UI state
         self.file_ui_state: Dict[str, Dict[str, Any]] = {}
         self.visibility_state: Dict[str, bool] = {}
+        self.trace_color_slots: Dict[str, int] = {}
         self.collapse_state: Dict[str, str] = {}
         self.instrument_methods: Dict[str, dict] = {}    # parsed LabSolutions methods by key (see shimadzu_method)
         self.instrument_method_files: Dict[str, bytes] = {}   # the original .lcm/.lcd bytes, for the FAIR package
@@ -437,7 +438,7 @@ class DataStore:
             if value == bundle_id:
                 self._file_index[name] = new_bundle_id
 
-        for attr in ('visibility_state', 'collapse_state', 'lcms_eic_overlays',
+        for attr in ('visibility_state', 'trace_color_slots', 'collapse_state', 'lcms_eic_overlays',
                      'group_overrides', '_dataframe_digests'):
             current = self.__dict__.get(attr)
             if current:
@@ -502,6 +503,7 @@ class DataStore:
         self._file_index.clear()
         self.file_ui_state.clear()
         self.visibility_state.clear()
+        self.trace_color_slots.clear()
         self.collapse_state.clear()
         self.__dict__.pop("_channel_combine_modes", None)
         self.__dict__.pop("_hidden_sample_channels", None)
