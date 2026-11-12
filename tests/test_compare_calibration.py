@@ -102,7 +102,7 @@ def test_comparison_calculates_prominent_concentration_and_preserves_numeric_pre
     from test_calibration_workflow import model
     dm, functions, rows, first, second = fixture()
     dm.get_bundle('second').name = 'Second standard'
-    first.area = 12.34567890123; first.rt = 1.0123456789
+    first.area = 12.34567890123; first.rt = 1.0023456789  # within the narrow default grouping window
     model(dm, peak_candidates(dm)[0])
     initial = functions['update_across_samples_tab']([{'id':'bundle'},{'id':'second'}], 1)
     row = next(row for row in initial[2] if row['peak_id'] == first.peak_id)

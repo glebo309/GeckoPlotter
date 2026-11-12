@@ -119,10 +119,10 @@ class TestCompoundGrouping:
         p1 = _add_peak(ps, 'file_a', 2.0)
         p2 = _add_peak(ps, 'file_a', 5.0)
         p3 = _add_peak(ps, 'file_b', 5.1)
-        ps.group_peaks_across_samples()
+        ps.group_peaks_across_samples(rt_window=0.2)  # explicit broad window for this removal regression
         assert p2.group_id == p3.group_id
         ps.remove_peak('file_a', p1.peak_id)
-        ps.group_peaks_across_samples()
+        ps.group_peaks_across_samples(rt_window=0.2)
         assert p2.group_id == p3.group_id
         assert p2.color == p3.color
 

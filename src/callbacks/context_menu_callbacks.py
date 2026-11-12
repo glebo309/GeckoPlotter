@@ -14,6 +14,7 @@ handle peak actions:
 """
 
 import logging
+import re
 import sys
 
 import dash
@@ -110,6 +111,37 @@ def register_context_menu_callbacks(app: dash.Dash, data_manager) -> None:
         if not close_event:
             raise PreventUpdate
         return True
+
+    @app.callback(
+        [Output('ctx-peak-colour', 'value'), Output('ctx-peak-colour', 'swatches')],
+        Input('context-menu-store', 'data'),
+        State('current-plot-settings', 'data'),
+        prevent_initial_call=True,
+    )
+    def hydrate_peak_colour(store, settings):
+        _fid, peak = _find_peak((store or {}).get('peak_id'))
+        if peak is None:
+            raise PreventUpdate
+        from services.plot_settings_service import PlotSettingsService
+        return peak.color, PlotSettingsService.get_color_palette('pastel')
+
+    @app.callback(
+        [Output('peak-change-trigger', 'data', allow_duplicate=True),
+         Output('render-trigger', 'data', allow_duplicate=True)],
+        Input('ctx-peak-colour', 'value'),
+        [State('context-menu-store', 'data'), State('peak-change-trigger', 'data'),
+         State('render-trigger', 'data')],
+        prevent_initial_call=True,
+    )
+    def save_peak_colour(colour, store, peak_counter, render_counter):
+        fid, peak = _find_peak((store or {}).get('peak_id'))
+        if (peak is None or not isinstance(colour, str)
+                or re.fullmatch(r'#[0-9a-fA-F]{6}', colour) is None
+                or colour.casefold() == (peak.color or '').casefold()):
+            raise PreventUpdate
+        ps.save_undo()
+        ps.set_peak_color(fid, peak.peak_id, colour)
+        return (peak_counter or 0) + 1, (render_counter or 0) + 1
 
     # ── Delete Peak ───────────────────────────────────────────────────
     @app.callback(

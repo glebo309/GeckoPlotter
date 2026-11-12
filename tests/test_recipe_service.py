@@ -19,7 +19,7 @@ def integrate(store, bundle, sensitivity_threshold=0.05):
 def reference():
     store = DataStore()
     a, b = load_files(store, [('ref_a.csv', chromatogram_csv([3.0, 6.0])),
-                              ('ref_b.csv', chromatogram_csv([3.05, 6.1], amplitude=70.0))])
+                              ('ref_b.csv', chromatogram_csv([3.005, 6.005], amplitude=70.0))])
     for bundle in (a, b):
         integrate(store, bundle)
     store.peak_service.group_peaks_across_samples()

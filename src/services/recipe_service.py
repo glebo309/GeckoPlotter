@@ -257,7 +257,8 @@ def apply_recipe(store, recipe: Dict[str, Any], *, keep_unmatched: bool = False,
             'sample': metadata.get('parent_bundle_name') or metadata.get('sample_name')
                       or (entry.get('record') or {}).get('name') or file_id})
 
-    store.peak_service.group_peaks_across_samples(file_overlay_map=store.build_file_overlay_map())
+    store.peak_service.group_peaks_across_samples(rt_window=tolerance,
+                                                 file_overlay_map=store.build_file_overlay_map())
     if recipe.get('calibrations'):
         report['calibrations_added'] = _import_new_calibrations(store, recipe['calibrations'])
     from services.calibration_workflow import apply_calibrations

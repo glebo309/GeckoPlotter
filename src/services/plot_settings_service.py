@@ -30,11 +30,13 @@ COLOR_PALETTES: Dict[str, List[str]] = {
     **CATEGORICAL,
 }
 DEFAULT_PALETTE = "muted"
+COLOR_PALETTES['muted_black'] = list(COLOR_PALETTES['muted'])
 
 
 def palette_options():
     named = [('muted', 'Muted (Seaborn)'), ('pastel', 'Pastel (Seaborn)'), ('set2', 'Set2 (Matplotlib)'),
              ('tab10', 'Tab10 (Matplotlib)'), ('plotly', 'Plotly'), ('okabe_ito', 'Okabe-Ito')]
+    named.insert(1, ('muted_black', 'Black traces, coloured peaks (Muted)'))
     return [{'label': label, 'value': k} for k, label in named] + [
         {'label': 'Crameri ' + CATEGORICAL_LABELS[k], 'value': k} for k in CATEGORICAL]
 
@@ -80,7 +82,7 @@ DEFAULT_PLOT_SETTINGS: Dict[str, object] = {
     "bg_color": "#ffffff",
     "paper_color": "#ffffff",
     # Traces
-    "line_width": 1.5,
+    "line_width": 1.0,
     "line_style": "solid",
     "marker_size": 6,
     "marker_symbol": "circle",
@@ -154,7 +156,7 @@ class PlotSettings:
     paper_color: str = "#ffffff"         # surrounding paper
 
     # -- 4. Traces --
-    line_width: float = 1.5
+    line_width: float = 1.0
     line_style: str = "solid"            # solid, dash, dot, dashdot
     marker_size: float = 6
     marker_symbol: str = "circle"        # circle, square, diamond, cross, x
@@ -560,6 +562,8 @@ class PlotSettingsService:
             trace_meta = trace.meta if isinstance(trace.meta, dict) else {}
             slot = trace_meta.get('color_slot')
             color = palette[(slot if isinstance(slot, int) else data_trace_idx) % len(palette)]
+            if settings.palette == 'muted_black' and not is_bar:
+                color = '#000000'
 
             trace.update(opacity=settings.trace_opacity)
 

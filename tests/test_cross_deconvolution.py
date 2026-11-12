@@ -123,7 +123,7 @@ class TestIntegrateShoulder:
                 file_id=fid, area=10.0, height=1.0, apex_x=MAIN_RT + drift,
                 poly_x=[2.2, 2.4], poly_y=[0, 0], p_line=[(2.2, 0), (2.4, 0)],
                 q1=(2.2, 0), q2=(2.4, 0), source='manual')
-        groups = ps.group_peaks_across_samples()
+        groups = ps.group_peaks_across_samples(rt_window=0.02)  # covers the standards' 0.014 min separation
         plain = [ms for ms in groups.values() if all(p.source == 'manual' for p in ms)]
         assert len(plain) == 1 and {p.file_id for p in plain[0]} == {'f2', 'f3'}
 

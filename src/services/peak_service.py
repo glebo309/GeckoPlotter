@@ -19,6 +19,7 @@ from scipy.signal import find_peaks, peak_widths
 
 # NumPy 2 renamed trapz to trapezoid and later removed the old name; a clean install gets the new NumPy.
 _trapezoid = getattr(np, 'trapezoid', None) or np.trapz
+DEFAULT_GROUP_WINDOW = 0.01
 
 # Okabe-Ito colorblind-friendly palette
 OKABE_ITO_PALETTE = [
@@ -67,6 +68,7 @@ class Peak:
     label_offset: Optional[List[float]] = None
     label_leader: bool = False
     label_in_data: bool = False
+    color_override: Optional[str] = None
 
     def __setattr__(self, key, value):
         # A name is text wherever it comes from: an Integration.txt peak named by its time ('6.79') came back from the
@@ -147,9 +149,10 @@ class PeakService:
         Clears cached group colors so they are reassigned on the next
         ``group_peaks_across_samples`` call.
         """
+        if list(colors) != self._palette:
+            self._group_colors.clear()
         self._palette_name = name
         self._palette = list(colors)
-        self._group_colors.clear()
 
     # ------------------------------------------------------------------
     # Undo / redo
@@ -1000,24 +1003,29 @@ class PeakService:
         return False
 
     def rename_peak(self, file_id: str, peak_id: str, new_name: str) -> bool:
-        """Rename a peak and propagate to all peaks in the same group."""
+        """Rename a peak and compatible nearby members of its group."""
         file_id = self._resolve_file_id(file_id)
         fid = file_id
         target = None
         for p in self._peaks.get(fid, []):
             if p.peak_id == peak_id:
-                p.name = new_name
-                p.label = new_name                      # the plot shows the label; one name everywhere
                 target = p
                 break
         if target is None:
             return False
+        old_name = target.label or target.name
+        scope = self._color_scope_resolver
+        window = min(self._grouping_window or DEFAULT_GROUP_WINDOW, DEFAULT_GROUP_WINDOW)
         if target.group_id:
             for pks in self._peaks.values():
                 for p in pks:
-                    if p.group_id == target.group_id:
+                    if (p.group_id == target.group_id
+                            and abs(p.rt - target.rt) <= window
+                            and (not scope or scope(p.file_id) == scope(target.file_id))
+                            and (not self.has_custom_name(p) or (p.label or p.name) == old_name)):
                         p.name = new_name
                         p.label = new_name
+        target.name = target.label = new_name
         return True
 
     @staticmethod
@@ -1032,16 +1040,26 @@ class PeakService:
         color: str,
         opacity: Optional[float] = None,
     ) -> bool:
-        """Update the display color (and optionally opacity) of a peak."""
+        """Set a persistent colour for this named compound or unnamed peak group."""
         file_id = self._resolve_file_id(file_id)
-        fid = file_id
-        for p in self._peaks.get(fid, []):
-            if p.peak_id == peak_id:
-                p.color = color
-                if opacity is not None:
-                    p.opacity = opacity
-                return True
-        return False
+        target = next((p for p in self._peaks.get(file_id, []) if p.peak_id == peak_id), None)
+        if target is None:
+            return False
+        scope = self._color_scope_resolver
+        named = self.has_custom_name(target)
+        name = ' '.join((target.label or target.name).split()).casefold()
+        for fid, peaks in self.get_all_peaks().items():
+            if scope and scope(fid) != scope(file_id):
+                continue
+            for peak in peaks:
+                same_name = (named and self.has_custom_name(peak)
+                             and ' '.join((peak.label or peak.name).split()).casefold() == name)
+                same_group = not named and target.group_id and peak.group_id == target.group_id
+                if peak is target or same_name or same_group:
+                    peak.color = peak.color_override = color
+        if opacity is not None:
+            target.opacity = opacity
+        return True
 
     def has_peak_history(self, file_id: str) -> bool:
         """An empty edited peak list must not trigger another instrument import."""
@@ -1064,7 +1082,7 @@ class PeakService:
 
     def group_peaks_across_samples(
         self,
-        rt_window: float = 0.2,
+        rt_window: float = DEFAULT_GROUP_WINDOW,
         file_overlay_map: Optional[Dict[str, str]] = None,
     ) -> Dict[str, List[Peak]]:
         """
@@ -1115,11 +1133,25 @@ class PeakService:
         for scope, peaks in buckets.items():
             colors = self._group_colors.setdefault(scope, {})
             groups: Dict[str, List[Peak]] = {}
+
+            def compatible(peak, members):
+                if not members:
+                    return True
+                if any(p.file_id == peak.file_id for p in members):
+                    return False
+                if abs(peak.rt - members[0].rt) > rt_window:
+                    return False
+                label = (peak.label or '').strip().casefold() if self.has_custom_name(peak) else ''
+                names = {(p.label or '').strip().casefold() for p in members if self.has_custom_name(p) and p.label}
+                if any((p.source == 'deconvolved') != (peak.source == 'deconvolved') for p in members):
+                    if not label or names != {label}:
+                        return False
+                return not label or not names or names == {label}
+
             pending = []
             for peak in peaks:
-                if peak.source == 'deconvolved' and peak.deconv_group:
-                    groups.setdefault(peak.deconv_group, []).append(peak)
-                elif peak.group_id and not regroup:
+                if (peak.group_id and not regroup
+                        and compatible(peak, groups.get(peak.group_id, []))):
                     groups.setdefault(peak.group_id, []).append(peak)
                 else:
                     pending.append(peak)
@@ -1130,14 +1162,13 @@ class PeakService:
                 candidates = []
                 for i, peak in enumerate(pending):
                     for gid in dict.fromkeys([*groups, *([] if regroup else colors)]):
-                        rt = anchor(gid)
-                        if rt is None:
-                            continue  # deconvolution components retain their tags
                         members = groups.get(gid, [])
-                        if any(p.file_id == peak.file_id for p in members):
+                        rt = members[0].rt if members else anchor(gid)
+                        if rt is None:
                             continue
-                        distance = min((abs(peak.rt-p.rt) for p in members),
-                                       default=abs(peak.rt-rt))
+                        if not compatible(peak, members):
+                            continue
+                        distance = abs(peak.rt-rt)
                         if distance <= rt_window:
                             candidates.append((distance, i, gid))
                 if candidates:
@@ -1145,7 +1176,10 @@ class PeakService:
                     peak = pending.pop(index)
                 else:
                     peak = pending.pop(0)
-                    base = (peak.group_id if regroup and peak.group_id else f'compound_rt{peak.rt:.3f}')
+                    old_anchor = anchor(peak.group_id)
+                    keep_id = (regroup and peak.group_id
+                               and (old_anchor is None or abs(peak.rt-old_anchor) <= rt_window))
+                    base = peak.group_id if keep_id else f'compound_rt{peak.rt:.3f}'
                     gid = base
                     suffix = 2
                     while gid in groups or (gid in colors and not regroup):
@@ -1161,13 +1195,52 @@ class PeakService:
                     free = [c for c in pal if c not in colors.values()]
                     colors[gid] = (preferred if preferred in free and not members[0].group_id
                                    else free[0] if free else pal[len(colors) % len(pal)])
+                override = next((p.color_override for p in members if p.color_override), None)
                 for peak in members:
                     peak.group_id = gid
-                    peak.color = colors[gid]
+                    if override:
+                        peak.color_override = override
+                    peak.color = peak.color_override or colors[gid]
                 result.setdefault(gid, []).extend(members)
             self._name_groups(groups)
 
         return result
+
+    def sync_named_colors(self, file_overlay_map=None) -> None:
+        """One display colour per explicit compound name within comparable signals.
+
+        A deconvolution's component index is local to that fit. It cannot identify
+        a named compound across fits with different numbers of components.
+        Keep fitting/group identities intact and persist the named colours with
+        the existing colour bookkeeping.
+        """
+        prefix = 'name:'
+        overrides = {}
+        for fid, peaks in self.get_all_peaks().items():
+            scope = (self._color_scope_resolver(fid) if self._color_scope_resolver
+                     else (file_overlay_map or {}).get(fid, ''))
+            for peak in peaks:
+                if peak.color_override and self.has_custom_name(peak):
+                    name = ' '.join((peak.label or peak.name).split()).casefold()
+                    overrides[(scope, name)] = peak.color_override
+        for fid, peaks in self.get_all_peaks().items():
+            scope = (self._color_scope_resolver(fid) if self._color_scope_resolver
+                     else (file_overlay_map or {}).get(fid, ''))
+            colors = self._group_colors.setdefault(scope, {})
+            for peak in peaks:
+                if not self.has_custom_name(peak):
+                    continue
+                name = ' '.join((peak.label or peak.name).split()).casefold()
+                key = prefix + name
+                if key not in colors:
+                    used = {color for identity, color in colors.items() if identity.startswith(prefix)}
+                    free = [color for color in self._palette if color not in used]
+                    colors[key] = (peak.color if peak.color in free else free[0] if free
+                                   else self._palette[len(used) % len(self._palette)])
+                override = overrides.get((scope, name))
+                if override:
+                    peak.color_override = override
+                peak.color = peak.color_override or colors[key]
 
     def _name_groups(self, groups: Dict[str, List[Peak]]) -> None:
         """One name per group: the same compound has the same name in every sample.
@@ -1188,7 +1261,7 @@ class PeakService:
             named[gid] = f'Peak {number}'
         for gid, name in named.items():
             for peak in groups[gid]:
-                if peak.source == 'deconvolved':
+                if peak.source == 'deconvolved' or self.has_custom_name(peak):
                     continue
                 peak.name = name
                 peak.label = name

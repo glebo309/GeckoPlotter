@@ -787,6 +787,7 @@ def _build_parts(store, client_state, project_name, embed_raw, raw_limit_bytes,
                             for k, v in (getattr(store, 'group_overrides', None) or {}).items()},
         'group_labels': dict(getattr(store, 'group_labels', None) or {}),
         'visibility_state': dict(store.visibility_state),
+        'trace_color_slots': dict(getattr(store, 'trace_color_slots', {})),
         'collapse_state': dict(store.collapse_state),
         'file_ui_state': store.file_ui_state,
         'shared_plot_settings': store._shared_plot_settings,
@@ -1333,7 +1334,7 @@ def _prune_state(state: dict, missing: set) -> None:
     def gone(key) -> bool:
         return isinstance(key, str) and _key_head(key) in missing
 
-    for name in ('visibility_state', 'collapse_state', 'file_ui_state', 'lcms_eic_overlays',
+    for name in ('visibility_state', 'trace_color_slots', 'collapse_state', 'file_ui_state', 'lcms_eic_overlays',
                  'group_overrides', 'hidden_sample_channels'):
         mapping = state.get(name)
         if isinstance(mapping, dict):
@@ -1515,7 +1516,7 @@ def _install_ingested_bundle(store, saved: dict, archive: _Archive, resolver: _R
 #: would need to rebuild it); a failed Open then keeps whatever restored cleanly and reports the error.
 ROLLBACK_MAX_BYTES = 100_000_000
 
-_DICT_SECTIONS = ('visibility_state', 'collapse_state', 'file_ui_state', 'shared_plot_settings', 'group_overrides',
+_DICT_SECTIONS = ('visibility_state', 'trace_color_slots', 'collapse_state', 'file_ui_state', 'shared_plot_settings', 'group_overrides',
                   'hidden_sample_channels', 'channel_combine_modes', 'analysis_plot_settings',
                   'analysis_previous', 'peaks', 'calibrations', 'integration_settings', 'lcms_eic_overlays',
                   'instrument_methods')
@@ -1732,6 +1733,7 @@ def _apply_state(store, state: dict, report: SessionReport) -> None:
     """Install the saved user state on a store whose bundles are already in place."""
     store.visibility_state.clear()
     store.visibility_state.update(state.get('visibility_state') or {})
+    store.trace_color_slots.update(state.get('trace_color_slots') or {})
     store.collapse_state.update(state.get('collapse_state') or {})
     store.file_ui_state.update(state.get('file_ui_state') or {})
     store._shared_plot_settings.update(state.get('shared_plot_settings') or {})

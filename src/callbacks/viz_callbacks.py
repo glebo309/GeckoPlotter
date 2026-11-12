@@ -401,6 +401,10 @@ def _trace_color_slots(dm, group_key, loaded_files, file_order):
     except Exception:
         log.exception('colour slot calculation failed')
         return {}
+    saved = getattr(dm, 'trace_color_slots', None)
+    if saved is None:
+        saved = dm.trace_color_slots = {}
+    next_slot = max(saved.values(), default=-1) + 1
     slots = {}
     for files in everything.values():
         for _name, fdata in files:
@@ -410,7 +414,11 @@ def _trace_color_slots(dm, group_key, loaded_files, file_order):
                 continue
             columns = [c for c in sr.y_columns if c in fdata['data'].columns]
             for column in columns:
-                slots[f'{fid}|{column}'] = len(slots)
+                key = f'{fid}|{column}'
+                if key not in saved:
+                    saved[key] = next_slot
+                    next_slot += 1
+                slots[key] = saved[key]
     return slots
 
 
@@ -669,10 +677,16 @@ def compose_raw_figure(data_manager, plot_manager, active_tab_id, group_key, s, 
     from services.plot_settings_service import DEFAULT_PALETTE as _DEFAULT_PALETTE
     _pal_name = s.get('palette', _DEFAULT_PALETTE)
     _ps = data_manager.peak_service
-    if getattr(_ps, '_palette_name', None) != _pal_name:
+    from services.peak_service import DEFAULT_GROUP_WINDOW
+    palette_changed = getattr(_ps, '_palette_name', None) != _pal_name
+    if palette_changed:
         _ps.set_palette(_pal_name, _PSS.get_color_palette(_pal_name))
+    legacy_window = _ps._grouping_window in (None, 0.2)
+    if palette_changed or legacy_window:
         _ps.group_peaks_across_samples(
+            rt_window=DEFAULT_GROUP_WINDOW if legacy_window else _ps._grouping_window,
             file_overlay_map=data_manager.build_file_overlay_map())
+    _ps.sync_named_colors(file_overlay_map=data_manager.build_file_overlay_map())
 
     if show_peaks or deconv_result:
         fig_obj_for_peaks = go.Figure(figure) if isinstance(figure, dict) else figure
