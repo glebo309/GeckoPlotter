@@ -63,15 +63,12 @@ class PlotManager:
         if any(fd.get('metadata', {}).get('subplot_letter') for _, fd in all_files):
             panes = {}
             for group, files in groups.items():
-                letters = sorted({fd.get('metadata', {}).get('subplot_letter', '') for _, fd in files})
-                for letter in letters:
-                    members = [(name, fd) for name, fd in files
-                               if fd.get('metadata', {}).get('subplot_letter', '') == letter]
+                for index, member in enumerate(files):
+                    letter = member[1].get('metadata', {}).get('subplot_letter', '')
                     if not letter and layout_mode == 'stacked':
-                        for index, member in enumerate(members):
-                            panes[(group, '', index)] = [member]
+                        panes[(group, '', index)] = [member]
                     else:
-                        panes[(group, letter)] = members
+                        panes.setdefault((group, letter), []).append(member)
             return self._create_grouped_plot(panes, 'overlay', subplot_spacing, assigned=True)
 
         # Single group → simple overlay/stacked

@@ -34,8 +34,8 @@ def test_letters_overlay_and_clear_with_linked_x_and_independent_y(ws, tmp_path)
     f = figure(ws)
     traces = signals(f)
     assert traces['main'].yaxis == 'y'
-    assert traces['standard'].yaxis == traces['reference'].yaxis == 'y2'
-    assert traces['other'].yaxis == 'y3'
+    assert traces['standard'].yaxis == traces['reference'].yaxis == 'y3'
+    assert traces['other'].yaxis == 'y2'  # File-list order: main, other, reference, standard.
     assert f.layout.xaxis2.matches == f.layout.xaxis3.matches == 'x'
     assert f.layout.yaxis2.matches is None and f.layout.yaxis3.matches is None
     assert {a.text for a in f.layout.annotations} >= {'A', 'B'}
@@ -133,3 +133,23 @@ def test_layout_switch_only_splits_samples_without_letters(ws, mode, expected):
     for key in f.layout:
         if key.startswith('xaxis') and key != 'xaxis':
             assert f.layout[key].matches == 'x'
+
+
+@pytest.mark.parametrize('mode,expected_axes', [('overlay', ['y', 'y', 'y2', 'y2']),
+                                               ('stacked', ['y', 'y', 'y2', 'y3'])])
+def test_subplot_order_follows_first_sample_in_file_list(ws, mode, expected_axes):
+    ws.set_subplot(['standard', 'reference'], 'K')
+    files = [(name, ws.store.get_data_by_id(name)) for name in ['standard', 'reference', 'main', 'other']]
+    fig = PlotManager().create_multi_file_plot({'chromatogram': files}, mode)
+    tr = signals(fig)
+    assert [tr[name].yaxis for name, _ in files] == expected_axes
+    assert fig.layout.annotations[0].text == 'K'
+    assert fig.layout.annotations[0].yref == 'y domain'
+
+
+def test_separate_unassigned_samples_keep_their_positions_between_groups(ws):
+    ws.set_subplot(['standard', 'reference'], 'K')
+    order = ['main', 'standard', 'other', 'reference']
+    files = [(name, ws.store.get_data_by_id(name)) for name in order]
+    tr = signals(PlotManager().create_multi_file_plot({'chromatogram': files}, 'stacked'))
+    assert [tr[name].yaxis for name in order] == ['y', 'y2', 'y3', 'y2']

@@ -29,6 +29,8 @@ import os
 import platform
 import re
 import tempfile
+import threading
+import weakref
 import zipfile
 import zlib
 from dataclasses import dataclass, field
@@ -42,6 +44,9 @@ import numpy as np
 import pandas as pd
 
 log = logging.getLogger(__name__)
+
+_RESTORE_LOCKS = weakref.WeakKeyDictionary()
+_RESTORE_LOCKS_GUARD = threading.Lock()
 
 SCHEMA_VERSION = 1
 FORMAT_NAME = 'geckoplotter-session'
@@ -1461,7 +1466,7 @@ def _install_ingested_bundle(store, saved: dict, archive: _Archive, resolver: _R
         store.rekey_bundle(bundle.bundle_id, saved['bundle_id'], bundle_map)
         idmap[saved['bundle_id']] = saved['bundle_id']
     except (KeyError, ValueError) as exc:
-        report.warnings.append(f"{saved['name']}: kept new internal ids ({exc}).")
+        log.info("%s: remapping internal IDs after restore conflict: %s", saved['name'], exc)
         idmap[saved['bundle_id']] = bundle.bundle_id
         for fresh, saved_component in pairs:
             idmap[saved_component['component_id']] = fresh.component_id
@@ -1498,7 +1503,7 @@ def _install_ingested_bundle(store, saved: dict, archive: _Archive, resolver: _R
             try:
                 store.rekey_bundle(bundle.bundle_id, None, {new_id: wanted})
             except (KeyError, ValueError) as exc:
-                report.warnings.append(f'{label}: kept new internal id ({exc}).')
+                log.info("%s: remapping internal ID after restore conflict: %s", label, exc)
                 idmap[wanted] = new_id
         component = next(c for c in store.get_bundle(bundle.bundle_id).component_list
                          if c.component_id == idmap[wanted])
@@ -1609,7 +1614,13 @@ def restore_session(store, data_or_path, *, search_dirs: Iterable = (),
     are *not* re-imported: the saved peaks are authoritative. The GUI-layer
     ``client_state`` comes back in ``report.client_state``.
     """
-    return _restore_session(store, data_or_path, search_dirs=search_dirs, relocate=relocate, allow_rollback=True)
+    # Resolve the browser proxy once. GUI and agent opens must lock the same
+    # store, even when reset_workspace replaces all of its instance state.
+    store = getattr(store.reset_workspace, '__self__', store)
+    with _RESTORE_LOCKS_GUARD:
+        lock = _RESTORE_LOCKS.setdefault(store, threading.RLock())
+    with lock:
+        return _restore_session(store, data_or_path, search_dirs=search_dirs, relocate=relocate, allow_rollback=True)
 
 
 def _restore_session(store, data_or_path, *, search_dirs, relocate, allow_rollback: bool) -> SessionReport:

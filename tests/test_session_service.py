@@ -267,7 +267,7 @@ def test_client_state_is_remapped_when_an_id_could_not_be_kept(monkeypatch):
     new_id = report.id_map[a.bundle_id]
     assert new_id != a.bundle_id and fresh.get_bundle(new_id) is not None
     assert report.client_state == {'active-file': new_id, 'zoom': {new_id: [0, 5]}}
-    assert any('kept new internal ids' in w for w in report.warnings)
+    assert report.warnings == []  # Successful internal remapping needs no user action.
     assert new_id in fresh.peak_service._peaks and a.bundle_id not in fresh.peak_service._peaks
 
 
