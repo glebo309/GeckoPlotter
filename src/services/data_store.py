@@ -608,6 +608,7 @@ class DataStore:
             'file_name': component.original_filename,
             'parent_bundle_id': bundle.bundle_id,
             'parent_bundle_name': bundle.name,
+            'subplot_letter': bundle.primary.metadata.get('subplot_letter', '') if bundle.primary else '',
             'component_role': component.role.value,
         }
 

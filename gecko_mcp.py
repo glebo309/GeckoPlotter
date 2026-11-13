@@ -157,6 +157,21 @@ def open_data(path: str, everything: bool = False, match: str | None = None, ctx
 
 
 @server.tool()
+def set_subplot(samples: list[str], letter: str = '', ctx: Context = None) -> list:
+    """Assign samples to subplot A-Z. Matching letters overlay; empty returns to the main plot.
+    Subplots share the time axis and have independent Y scales by default.
+    """
+    return _run('set_subplot', samples, letter, ctx=ctx)
+
+
+@server.tool()
+def rename_sample(sample: str, new_name: str, ctx: Context = None) -> list:
+    """Rename a displayed sample and its plot labels, preserving original disk filenames and integrations.
+    sample: its current name from list_samples; new_name: the desired name. Returns the updated sample list."""
+    return _run('rename_sample', sample, new_name, ctx=ctx)
+
+
+@server.tool()
 def remove_samples(samples: list[str], ctx: Context = None) -> list:
     """Take samples out of the workspace (as deleting them in the file tree, one undo step): e.g. data opened by
     mistake. Returns the remaining samples."""

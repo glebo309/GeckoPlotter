@@ -658,6 +658,8 @@ def compose_raw_figure(data_manager, plot_manager, active_tab_id, group_key, s, 
 
     subplot_spacing = s.get('subplot_spacing', 0.08)
     figure = plot_manager.create_multi_file_plot(visible_files, layout_mode, subplot_spacing=subplot_spacing)
+    file_rows = (figure.layout.meta or {}).get('gecko_file_rows', {})
+    assigned_subplots = (figure.layout.meta or {}).get('gecko_assigned_subplots', False)
     if hasattr(figure, 'data'):
         _assign_color_slots(figure, _trace_color_slots(data_manager, group_key, loaded_files, file_order))
 
@@ -698,13 +700,13 @@ def compose_raw_figure(data_manager, plot_manager, active_tab_id, group_key, s, 
         labelled = None
         if 'hide-labels' in (display_opts or []):
             labelled = set()                                  # "Hide peak names" (Integration panel)
-        elif layout_mode != 'stacked':
+        elif layout_mode != 'stacked' or assigned_subplots:
             # Overlaid samples: the same compound (peak group) is named once, above its tallest peak.
             tallest = {}
             for _name, fdata in flat_files:
                 for p in data_manager.peak_service.get_peaks(_find_file_id(data_manager, fdata) or ''):
                     top = max((v for v in (p.poly_y or []) if v is not None), default=p.height or 0)
-                    key = p.group_id or p.peak_id
+                    key = (file_rows.get(_find_file_id(data_manager, fdata), 1), p.group_id or p.peak_id)
                     if key not in tallest or top > tallest[key][0]:
                         tallest[key] = (top, p.peak_id)
             labelled = {peak_id for _top, peak_id in tallest.values()}
@@ -722,10 +724,10 @@ def compose_raw_figure(data_manager, plot_manager, active_tab_id, group_key, s, 
             time_arr, signal_arr = get_xy_arrays(data_manager, fid)
             if time_arr is None:
                 continue
-            row = row_idx if layout_mode == 'stacked' else None
+            row = file_rows.get(fid) or (row_idx if layout_mode == 'stacked' else None)
             add_peak_traces(fig_obj_for_peaks, peaks, time_arr, signal_arr, selected_peak_id, row=row,
                             labelled=labelled, refresh=False, geometry=geometry,
-                            retain_labels=layout_mode == 'overlay' and 'hide-labels' not in (display_opts or []))
+                            retain_labels=layout_mode == 'overlay' and not assigned_subplots and 'hide-labels' not in (display_opts or []))
             if deconvolving:
                 from callbacks.peak_overlay import add_deconv_overlays
                 add_deconv_overlays(fig_obj_for_peaks, deconv_markers, deconv_result,
@@ -757,7 +759,7 @@ def compose_raw_figure(data_manager, plot_manager, active_tab_id, group_key, s, 
             except Exception:
                 pass
 
-    if s.get('layout_mode') == 'stacked' and s.get('subplot_rows', 1) * s.get('subplot_cols', 1) > 1:
+    if not assigned_subplots and s.get('layout_mode') == 'stacked' and s.get('subplot_rows', 1) * s.get('subplot_cols', 1) > 1:
         from services.publication_figure import editable_publication_figure
         source = figure.to_plotly_json() if hasattr(figure, 'to_plotly_json') else figure
         figure = editable_publication_figure(source, s, {**s, 'subplot_rows':1, 'subplot_cols':1}, clean_output=False)
@@ -771,7 +773,8 @@ def compose_raw_figure(data_manager, plot_manager, active_tab_id, group_key, s, 
         ps = PlotSettingsService.from_dict(settings_for_style)
         PlotSettingsService.apply_to_figure(fig_obj, ps)
         from services.axis_linking import apply_axis_linking
-        apply_axis_linking(fig_obj, bool(link_x), y_scope == 'global')
+        apply_axis_linking(fig_obj, s.get('link_x', True) if link_x is None else bool(link_x),
+                           (s.get('y_scope', 'independent') if y_scope is None else y_scope) == 'global')
         PlotSettingsService.share_stacked_y_label(fig_obj, ps)
         from services.signal_axis_range import apply_signal_x_bounds
         apply_signal_x_bounds(fig_obj)
@@ -1656,7 +1659,8 @@ def register_viz_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
             # the cached figure until the browser's figure acknowledges it.
             return render_cache.get(active_tab_id, render_inputs), set_zoom
 
-        if trigger_id == 'hidden-files' and layout_mode == 'overlay':
+        if trigger_id == 'hidden-files' and layout_mode == 'overlay' and not any(entry.get('metadata', {}).get('subplot_letter')
+                for entry in data_manager.loaded_data.values()):
             changed = render_cache.visibility_update(active_tab_id, render_inputs, render_revision, current_figure)
             if changed is not None:
                 return changed, set_zoom

@@ -322,7 +322,8 @@ class Workspace:
         for bundle in self._bundles():
             channels = [self._channel_info(bundle, c) for c in bundle.component_list]
             peaks = sum(len(self.store.peak_service.get_peaks(c.component_id) or []) for c in bundle.component_list)
-            out.append({'name': bundle.name, 'type': bundle.bundle_type.value, 'channels': channels, 'peaks': peaks})
+            from services.sample_subplots import subplot_letter
+            out.append({'name': bundle.name, 'subplot': subplot_letter(bundle), 'type': bundle.bundle_type.value, 'channels': channels, 'peaks': peaks})
         return out
 
     def _sample(self, name):
@@ -597,6 +598,42 @@ class Workspace:
         self.store.peak_service.rename_peak(component.component_id, found.peak_id, new_name)
         self._record(f'Renamed peak {found.name} to {new_name}')
         return self.peaks()
+
+    def set_subplot(self, samples, letter: str = '') -> List[dict]:
+        """Overlay samples in the lettered pane; an empty letter returns them to the main plot."""
+        from services.sample_subplots import normalize_letter, set_sample_subplot
+        try:
+            value = normalize_letter(letter)
+        except ValueError as exc:
+            raise GeckoError(str(exc)) from exc
+        targets = self._samples(samples if samples is not None else [])
+        if not targets:
+            raise GeckoError('Name the samples to assign to a subplot.')
+        changed = [set_sample_subplot(self.store, bundle, value) for bundle in targets]
+        if any(changed):
+            self._record(f'Moved {_names(targets)} to subplot {value or "main"}')
+        return self.samples()
+
+    def rename_sample(self, sample: str, new_name: str) -> List[dict]:
+        """Rename the displayed sample, preserving source files, IDs and integrations."""
+        from services.dataset_names import trace_display_name, rename_style_settings
+        if not isinstance(new_name, str) or not new_name.strip():
+            raise GeckoError('Give the sample a non-empty name.')
+        name = new_name.strip()
+        bundle = self._sample(sample)
+        if any(b.bundle_id != bundle.bundle_id and b.name.casefold() == name.casefold()
+               for b in self._bundles()):
+            raise GeckoError(f'A sample named "{name}" already exists.')
+        old = bundle.name
+        before = {fid: trace_display_name(entry) for fid, entry in self.store.loaded_data.items()}
+        if self.store.rename_dataset(bundle.bundle_id, name):
+            renames = {fid: (before[fid], trace_display_name(entry))
+                       for fid, entry in self.store.loaded_data.items()
+                       if fid in before and before[fid] != trace_display_name(entry)}
+            self.store._shared_plot_settings = rename_style_settings(self.store._shared_plot_settings, renames)
+            self.store.file_ui_state = rename_style_settings(self.store.file_ui_state, renames)
+            self._record(f'Renamed sample {old} to {name}')
+        return self.samples()
 
     def remove_samples(self, samples) -> List[dict]:
         """Take samples out of the workspace as the file tree's delete does (one undo step). Returns the samples

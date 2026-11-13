@@ -118,6 +118,26 @@ def same_tree(tree, shown) -> bool:
 def register_file_tree_callbacks(app: dash.Dash, data_manager: DataManager) -> None:
     """Register file tree interaction callbacks."""
     @app.callback(
+        Output({'type': 'sample-subplot', 'index': dash.dependencies.MATCH}, 'value'),
+        Input({'type': 'sample-subplot', 'index': dash.dependencies.MATCH}, 'value'),
+        State({'type': 'sample-subplot', 'index': dash.dependencies.MATCH}, 'id'),
+        State('render-trigger', 'data'), prevent_initial_call=True,
+    )
+    def assign_sample_subplot(value, identifier, render_counter):
+        from services.sample_subplots import normalize_letter, subplot_letter, set_sample_subplot
+        bundle = data_manager.get_bundle(identifier['index'])
+        if not bundle:
+            raise PreventUpdate
+        try:
+            letter = normalize_letter(value)
+        except ValueError:
+            return subplot_letter(bundle)
+        changed = set_sample_subplot(data_manager, bundle, letter)
+        if changed:
+            dash.set_props('render-trigger', {'data': (render_counter or 0) + 1})
+        return letter
+
+    @app.callback(
         Output('plot-channel-controls', 'children'),
         Input('file-tree', 'children'), Input('active-plot-tab', 'data'), Input('view-mode', 'data'),
         Input('hidden-files', 'data'), Input('pda-preview', 'data'), Input('loaded-files', 'data'),

@@ -75,6 +75,15 @@ def _visibility_button(file_id, data_manager=None):
 
 
 
+def _subplot_box(bundle):
+    from services.sample_subplots import subplot_letter
+    return html.Span(dcc.Input(
+        id={'type': 'sample-subplot', 'index': bundle.bundle_id},
+        type='text', value=subplot_letter(bundle), maxLength=1, debounce=True,
+        className='sample-subplot-box', persistence=False,
+    ), title='Subplot: enter A–Z. Matching letters overlap; clear for the main plot.')
+
+
 def build_active_file_views(data_manager, file_id):
     """Metadata table, table editor and publication data of one file, as shown right after an import or restore.
 
@@ -528,6 +537,7 @@ def _render_sample_item(bundle, data_manager, active_file_id=None, dimmed=False)
                  **{'data-file-key': bundle.bundle_id,
                     'data-sample-sources': __import__('json').dumps([c.component_id for c in bundle.component_list])}),
         html.Div([_visibility_button(bundle.bundle_id, data_manager),
+                  _subplot_box(bundle),
                   html.Button(_icon('tabler:trash', width=12, height=12),
                       id={'type': 'delete-btn', 'index': bundle.bundle_id}, n_clicks=0,
                       title='Remove sample from workspace', className='tree-action-btn',
