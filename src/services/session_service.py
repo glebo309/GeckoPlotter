@@ -582,7 +582,7 @@ def _metadata_overrides(component) -> Dict[str, Any]:
         if key in base and _safe_equal(base[key], value):
             continue
         overrides[key] = value
-    for key in ('display_name', 'sample_name'):
+    for key in ('display_name', 'sample_name', 'subplot_letter'):
         value = component.metadata.get(key)
         if isinstance(value, str):
             overrides[key] = value

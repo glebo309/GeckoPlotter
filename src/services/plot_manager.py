@@ -60,6 +60,20 @@ class PlotManager:
         if not all_files:
             return self.create_hidden_state_plot()
 
+        if any(fd.get('metadata', {}).get('subplot_letter') for _, fd in all_files):
+            panes = {}
+            for group, files in groups.items():
+                letters = sorted({fd.get('metadata', {}).get('subplot_letter', '') for _, fd in files})
+                for letter in letters:
+                    members = [(name, fd) for name, fd in files
+                               if fd.get('metadata', {}).get('subplot_letter', '') == letter]
+                    if not letter and layout_mode == 'stacked':
+                        for index, member in enumerate(members):
+                            panes[(group, '', index)] = [member]
+                    else:
+                        panes[(group, letter)] = members
+            return self._create_grouped_plot(panes, 'overlay', subplot_spacing, assigned=True)
+
         # Single group → simple overlay/stacked
         if len(groups) == 1:
             files = list(groups.values())[0]
@@ -130,7 +144,7 @@ class PlotManager:
         # the actual data panes when many channels are visible.
         return min(max(0.02, requested), 0.5 / max(1, rows - 1))
 
-    def _create_grouped_plot(self, groups: dict, layout_mode: str, subplot_spacing: float = 0.08) -> go.Figure:
+    def _create_grouped_plot(self, groups: dict, layout_mode: str, subplot_spacing: float = 0.08, assigned=False) -> go.Figure:
         """Each data-type group gets its own subplot row with its own legend."""
         from plotly.subplots import make_subplots
 
@@ -142,11 +156,13 @@ class PlotManager:
             vertical_spacing=self._vertical_spacing(n, subplot_spacing),
         )
 
+        file_rows, units = {}, {}
         for row_idx, key in enumerate(group_keys, start=1):
             files = groups[key]
             legend_group = f'group{row_idx}'
             trace_idx = 0
             for i, (name, fdata) in enumerate(files):
+                file_rows[fdata.get('record', {}).get('id')] = row_idx
                 sub = go.Figure()
                 trace_idx = self._add_traces(sub, name, fdata, color_offset=trace_idx)
                 for trace in sub.data:
@@ -156,6 +172,19 @@ class PlotManager:
                     if row_idx > 1:
                         trace.legend = f'legend{row_idx}'
                     fig.add_trace(trace, row=row_idx, col=1)
+
+            axis_key = 'yaxis' if row_idx == 1 else f'yaxis{row_idx}'
+            units[axis_key] = self._measurement_label(files[0][1])
+            fig.update_yaxes(title_text=units[axis_key], row=row_idx, col=1)
+            sr = files[0][1].get('standardized')
+            if sr and sr.x_columns:
+                fig.update_xaxes(title_text=sr.x_columns[0], row=row_idx, col=1)
+            if assigned and key[1]:
+                fig.add_annotation(text=key[1], x=0.01, y=0.98, xref='x domain' if row_idx == 1 else f'x{row_idx} domain',
+                    yref='y domain' if row_idx == 1 else f'y{row_idx} domain', showarrow=False,
+                    xanchor='left', yanchor='top', font=dict(size=12), name=f'subplot-letter:{key[1]}')
+        fig.update_layout(meta={'gecko_file_rows': file_rows, 'gecko_axis_units': units,
+                                'gecko_assigned_subplots': assigned})
 
         # Position per-subplot legends inside each subplot
         legend_kwargs = {}
